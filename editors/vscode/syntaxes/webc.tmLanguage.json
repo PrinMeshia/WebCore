@@ -1,0 +1,405 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "WebCore",
+  "scopeName": "source.webc",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#top-level-blocks" },
+    { "include": "#directives" },
+    { "include": "#html-tags" },
+    { "include": "#event-attrs" },
+    { "include": "#dynamic-attrs" },
+    { "include": "#static-attrs" },
+    { "include": "#interpolation" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#types" },
+    { "include": "#builtin-functions" },
+    { "include": "#keywords" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.webc",
+          "match": "//.*$"
+        }
+      ]
+    },
+
+    "top-level-blocks": {
+      "patterns": [
+        {
+          "name": "meta.block.app.webc",
+          "begin": "\\b(app)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.app.webc" },
+            "2": { "name": "entity.name.type.webc" }
+          },
+          "end": "\\}",
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#routes-block" },
+            { "include": "#strings" },
+            { "include": "#keywords" }
+          ]
+        },
+        {
+          "name": "meta.block.layout.webc",
+          "begin": "\\b(layout)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.layout.webc" },
+            "2": { "name": "entity.name.type.webc" }
+          },
+          "end": "\\}",
+          "patterns": [{ "include": "#view-content" }]
+        },
+        {
+          "name": "meta.block.page.webc",
+          "begin": "\\b(page)\\s+",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.page.webc" }
+          },
+          "end": "\\}",
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#view-content" }
+          ]
+        },
+        {
+          "name": "meta.block.component.webc",
+          "begin": "\\b(component)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.component.webc" },
+            "2": { "name": "entity.name.type.webc" }
+          },
+          "end": "\\}",
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#props-block" },
+            { "include": "#state-block" },
+            { "include": "#view-block" },
+            { "include": "#style-block" }
+          ]
+        }
+      ]
+    },
+
+    "routes-block": {
+      "begin": "\\b(routes)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.routes.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "(\"[^\"]*\")\\s*(:)\\s*([A-Z][a-zA-Z0-9]*)",
+          "captures": {
+            "1": { "name": "string.quoted.double.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "entity.name.type.webc" }
+          }
+        }
+      ]
+    },
+
+    "props-block": {
+      "begin": "\\b(props)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)",
+          "captures": {
+            "1": { "name": "variable.other.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "support.type.webc" }
+          }
+        }
+      ]
+    },
+
+    "state-block": {
+      "begin": "\\b(state)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)\\s*(=)?",
+          "captures": {
+            "1": { "name": "variable.other.readwrite.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "support.type.webc" },
+            "4": { "name": "keyword.operator.assignment.webc" }
+          }
+        },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#keywords" }
+      ]
+    },
+
+    "view-block": {
+      "begin": "\\b(view)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [{ "include": "#view-content" }]
+    },
+
+    "style-block": {
+      "name": "meta.block.style.webc",
+      "begin": "\\b(style)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "contentName": "meta.embedded.css",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "meta.rule.css",
+          "begin": "([a-zA-Z*.:# ][a-zA-Z0-9_.#: -]*)\\s*\\{",
+          "beginCaptures": {
+            "1": { "name": "entity.other.attribute-name.css" }
+          },
+          "end": "\\}",
+          "patterns": [
+            {
+              "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
+              "captures": {
+                "1": { "name": "support.type.property-name.css" },
+                "2": { "name": "punctuation.separator.key-value.css" },
+                "3": { "name": "meta.property-value.css" },
+                "4": { "name": "punctuation.terminator.rule.css" }
+              }
+            }
+          ]
+        }
+      ]
+    },
+
+    "view-content": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#directives" },
+        { "include": "#slot" },
+        { "include": "#link-tag" },
+        { "include": "#component-use" },
+        { "include": "#html-tags" },
+        { "include": "#event-attrs" },
+        { "include": "#dynamic-attrs" },
+        { "include": "#static-attrs" },
+        { "include": "#interpolation" },
+        { "include": "#strings" },
+        { "include": "#numbers" }
+      ]
+    },
+
+    "directives": {
+      "patterns": [
+        {
+          "name": "meta.directive.if.webc",
+          "begin": "(@if|@else)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.webc" }
+          },
+          "end": "(?<=\\})",
+          "patterns": [
+            { "include": "#expression" },
+            { "include": "#view-content" }
+          ]
+        },
+        {
+          "name": "meta.directive.for.webc",
+          "begin": "(@for)\\s+([a-z_][a-zA-Z0-9_]*)\\s+(in)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.webc" },
+            "2": { "name": "variable.other.webc" },
+            "3": { "name": "keyword.control.webc" },
+            "4": { "name": "variable.other.webc" }
+          },
+          "end": "(?<=\\})",
+          "patterns": [{ "include": "#view-content" }]
+        }
+      ]
+    },
+
+    "slot": {
+      "match": "\\b(slot)\\s+(content)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.slot.webc" },
+        "2": { "name": "variable.other.webc" }
+      }
+    },
+
+    "link-tag": {
+      "name": "meta.tag.link.webc",
+      "begin": "\\b(link)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.link.webc" }
+      },
+      "end": "(?<=\\}|>)",
+      "patterns": [
+        {
+          "match": "\\b(to|href)\\s*=\\s*(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.webc" },
+            "2": { "name": "string.quoted.double.webc" }
+          }
+        },
+        { "include": "#static-attrs" },
+        { "include": "#view-content" }
+      ]
+    },
+
+    "component-use": {
+      "name": "meta.tag.component.webc",
+      "begin": "\\b([A-Z][a-zA-Z0-9]*)\\s*(?=[{]|[a-z\"'])",
+      "beginCaptures": {
+        "1": { "name": "entity.name.type.webc" }
+      },
+      "end": "(?<=\\})",
+      "patterns": [
+        { "include": "#static-attrs" },
+        { "include": "#dynamic-attrs" },
+        { "include": "#view-content" }
+      ]
+    },
+
+    "html-tags": {
+      "patterns": [
+        {
+          "name": "meta.tag.html.webc",
+          "match": "\\b(div|span|p|h[1-6]|ul|ol|li|a|img|input|button|form|select|option|textarea|section|article|header|footer|nav|main|aside|figure|figcaption|label|table|thead|tbody|tr|th|td|pre|code|blockquote|hr|br|strong|em|small|sup|sub|mark|details|summary)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.html-tag.webc" }
+          }
+        }
+      ]
+    },
+
+    "event-attrs": {
+      "name": "meta.attribute.event.webc",
+      "match": "(on:[a-z]+)\\s*(=)\\s*(\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.event.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
+    "dynamic-attrs": {
+      "name": "meta.attribute.dynamic.webc",
+      "match": "([a-zA-Z-]+)\\s*(=)\\s*(\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
+    "static-attrs": {
+      "patterns": [
+        {
+          "name": "meta.attribute.static.webc",
+          "match": "([a-zA-Z-]+)\\s*(=)\\s*(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "string.quoted.double.webc" }
+          }
+        },
+        {
+          "name": "entity.other.attribute-name.boolean.webc",
+          "match": "\\b(disabled|required|checked|readonly|multiple|autofocus|autoplay|controls|loop|muted|hidden)\\b"
+        }
+      ]
+    },
+
+    "interpolation": {
+      "name": "meta.embedded.interpolation.webc",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [{ "include": "#expression" }]
+    },
+
+    "expression": {
+      "patterns": [
+        { "include": "#builtin-functions" },
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        {
+          "name": "keyword.operator.webc",
+          "match": "\\+\\=|\\-\\=|\\*\\=|\\/\\=|\\+|\\-|\\*|\\/|%|==|!=|>=|<=|>|<|&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.assignment.webc",
+          "match": "(?<![=!<>])=(?!=)"
+        },
+        {
+          "name": "variable.other.webc",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+
+    "strings": {
+      "name": "string.quoted.double.webc",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "meta.embedded.interpolation.webc",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [{ "include": "#expression" }]
+        },
+        {
+          "name": "constant.character.escape.webc",
+          "match": "\\\\."
+        }
+      ]
+    },
+
+    "numbers": {
+      "name": "constant.numeric.webc",
+      "match": "\\b\\d+(\\.\\d+)?\\b"
+    },
+
+    "types": {
+      "name": "support.type.webc",
+      "match": "\\b(String|Number|Boolean|List)\\b"
+    },
+
+    "builtin-functions": {
+      "name": "support.function.builtin.webc",
+      "match": "\\b(max|min|abs|webcore_navigate)(?=\\()"
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.webc",
+          "match": "\\b(app|layout|page|component|@if|@else|@for|in|slot)\\b"
+        },
+        {
+          "name": "keyword.other.section.webc",
+          "match": "\\b(props|state|view|style|routes|theme|layout)\\b"
+        },
+        {
+          "name": "constant.language.webc",
+          "match": "\\b(true|false|root)\\b"
+        }
+      ]
+    }
+  }
+}

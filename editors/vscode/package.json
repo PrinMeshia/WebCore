@@ -1,0 +1,30 @@
+{
+  "name": "webcore-language",
+  "displayName": "WebCore Language Support",
+  "description": "Syntax highlighting for .webc files (WebCore DSL)",
+  "version": "0.1.0",
+  "publisher": "webcore",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prinmeshia/webcore"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "webc",
+        "aliases": ["WebCore", "webc"],
+        "extensions": [".webc"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "webc",
+        "scopeName": "source.webc",
+        "path": "./syntaxes/webc.tmLanguage.json"
+      }
+    ]
+  }
+}

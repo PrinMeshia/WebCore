@@ -1,0 +1,13 @@
+layout MainLayout {
+    header {
+        nav {
+            link to="/" { "Accueil" }
+            link to="/about" { "À propos" }
+        }
+        h1 "Mon Blog WebCore"
+    }
+    main { slot content }
+    footer {
+        p "Fait avec WebCore"
+    }
+}

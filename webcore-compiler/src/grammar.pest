@@ -1,0 +1,108 @@
+// WebCore Grammar - Pest PEG Parser
+// ==================================
+
+// Whitespace and comments (silent rules)
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* ~ "\n"? | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+// Document structure
+document = { SOI ~ top_level_item* ~ EOI }
+top_level_item = _{ app_decl | store_decl | layout_decl | page_decl | component_decl }
+
+// ============ APP DECLARATION ============
+app_decl = { "app" ~ identifier ~ "{" ~ app_body ~ "}" }
+app_body = { app_field* }
+app_field = { app_theme | app_layout | app_routes }
+app_theme = { "theme" ~ ":" ~ string_literal }
+app_layout = { "layout" ~ ":" ~ identifier }
+app_routes = { "routes" ~ "{" ~ route_entry* ~ "}" }
+route_entry = { string_literal ~ ":" ~ identifier }
+
+// ============ STORE DECLARATION ============
+store_decl = { "store" ~ "{" ~ state_def* ~ "}" }
+
+// ============ LAYOUT DECLARATION ============
+layout_decl = { "layout" ~ identifier ~ "{" ~ element* ~ "}" }
+
+// ============ PAGE DECLARATION ============
+page_decl = { "page" ~ string_literal ~ "{" ~ element* ~ "}" }
+
+// ============ COMPONENT DECLARATION ============
+component_decl = { "component" ~ identifier ~ "{" ~ component_body ~ "}" }
+component_body = { component_section* }
+component_section = _{ props_block | state_block | view_block | style_block | element }
+
+// Props block
+props_block = { "props" ~ "{" ~ prop_def* ~ "}" }
+prop_def = { identifier ~ (":" ~ type_name)? }
+
+// State block
+state_block = { "state" ~ "{" ~ state_def* ~ "}" }
+state_def = { identifier ~ ":" ~ type_name ~ ("=" ~ value)? }
+
+// View block
+view_block = { "view" ~ "{" ~ element* ~ "}" }
+
+// Style block
+style_block = { "style" ~ "{" ~ style_rule* ~ "}" }
+style_rule = { selector ~ "{" ~ style_property* ~ "}" }
+selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")")+ }
+style_property = { property_name ~ ":" ~ property_value ~ ";"? }
+property_name = @{ (ASCII_ALPHA | "-")+ }
+property_value = @{ (!(";" | "}") ~ ANY)+ }
+
+// ============ ELEMENTS (VIEW CONTENT) ============
+element = { control_flow | slot_element | tag_element | text_element }
+
+// Control flow: @for, @if, @error
+control_flow = { for_loop | if_statement | error_block }
+
+for_loop = { "@for" ~ identifier ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
+
+if_statement = { "@if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
+else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
+
+// Form validation error display: @error "fieldname" { ... }
+error_block = { "@error" ~ string_literal ~ "{" ~ element* ~ "}" }
+
+// Slot element
+slot_element = { "slot" ~ identifier? }
+
+// Tag element (HTML-like or Component)
+tag_element = { tag_name ~ attribute* ~ tag_content? }
+tag_name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
+tag_content = { string_with_interpolation | "{" ~ mixed_content* ~ "}" }
+// Silent: contributes string/element pairs directly to tag_content's children
+mixed_content = _{ string_with_interpolation | element }
+
+// Text element (standalone string)
+text_element = { string_with_interpolation }
+
+// ============ ATTRIBUTES ============
+attribute = { attr_name ~ "=" ~ attr_value }
+attr_name = @{ (ASCII_ALPHA | "_" | "-" | ":")+ }
+attr_value = { expression_attr | string_literal | "true" | "false" }
+expression_attr = { "{" ~ expression_content ~ "}" }
+expression_content = @{ (!"}" ~ ANY)* }
+
+// ============ STRINGS AND INTERPOLATION ============
+string_literal = ${ "\"" ~ string_inner ~ "\"" }
+string_inner = @{ (!"\"" ~ !"\\" ~ ANY | "\\" ~ ANY)* }
+
+string_with_interpolation = ${ "\"" ~ interpolated_content ~ "\"" }
+interpolated_content = { (interpolation | text_fragment)* }
+interpolation = { "{" ~ interp_expr ~ "}" }
+// Accepts any expression: {count}, {count + 1}, {user.name}, etc.
+interp_expr = @{ (!"}" ~ ANY)+ }
+text_fragment = @{ (!"\"" ~ !"{" ~ ANY)+ }
+
+// ============ EXPRESSIONS ============
+expression = @{ (!(("{" | "}") ~ WHITESPACE* ~ (element | "}")) ~ ANY)+ }
+
+// ============ VALUES AND TYPES ============
+value = { number | string_literal | boolean | identifier }
+boolean = { "true" | "false" }
+number = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+type_name = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | ",")* }
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+

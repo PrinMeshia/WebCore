@@ -1,0 +1,9 @@
+page "home" {
+    h2 "Derniers articles"
+
+    article {
+        h3 "Découvrir WebCore"
+        p "WebCore est un langage déclaratif qui compile en HTML/CSS/JS minimaliste."
+        link to="/about" { "Lire la suite →" }
+    }
+}

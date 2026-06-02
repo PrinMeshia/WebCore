@@ -1,0 +1,6 @@
+layout MainLayout {
+    header {
+        h1 "Ma Todo List"
+    }
+    main { slot content }
+}

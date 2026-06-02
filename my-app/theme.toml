@@ -1,0 +1,22 @@
+[theme]
+name = "Default"
+
+[theme.colors]
+primary = "#1E88E5"
+onPrimary = "#FFFFFF"
+background = "#FAFAFA"
+text = "#111827"
+text-muted = "#6B7280"
+
+[theme.fonts]
+base = "Inter, system-ui, sans-serif"
+heading = "Poppins, sans-serif"
+
+[theme.radius]
+button = "8px"
+card = "12px"
+
+[theme.breakpoints]
+sm = "640px"
+md = "768px"
+lg = "1024px"

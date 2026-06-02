@@ -1,0 +1,39 @@
+component Counter {
+    state {
+        count: Number = 0
+        step:  Number = 1
+    }
+
+    view {
+        div {
+            p "Valeur : {count}"
+
+            div {
+                button on:click={count -= step} { "−" }
+                button on:click={count += step} { "+" }
+            }
+
+            @if count > 10 {
+                p "Grand nombre !"
+            } @else {
+                p "Continuez..."
+            }
+
+            div {
+                p "Pas :"
+                button on:click={step = max(1, step - 1)} { "−" }
+                p "{step}"
+                button on:click={step += 1} { "+" }
+            }
+        }
+    }
+
+    style {
+        div    { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+        p      { font-size: 2rem; font-weight: bold; margin: 0; }
+        button { padding: 0.5rem 1.5rem; font-size: 1.2rem; cursor: pointer;
+                 border-radius: 8px; border: 2px solid #4F46E5; background: #4F46E5;
+                 color: white; }
+        button:hover { background: #4338CA; }
+    }
+}

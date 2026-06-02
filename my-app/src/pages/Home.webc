@@ -1,0 +1,21 @@
+component HomePage {
+  view {
+    h1 "Bienvenue sur WebCore"
+    p "Un langage pour le web qui unifie tout"
+    
+    div {
+      h3 "Rapide"
+      p "Développement plus rapide"
+    }
+    
+    div {
+      h3 "Sécurisé"
+      p "Permissions et SSO intégrés"
+    }
+    
+    div {
+      h3 "Moderne"
+      p "ES2025 + CSS Next"
+    }
+  }
+}
