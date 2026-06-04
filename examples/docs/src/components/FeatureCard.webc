@@ -1,0 +1,56 @@
+component FeatureCard {
+    props {
+        icon:  String
+        title: String
+        desc:  String
+        tag:   String
+    }
+    view {
+        div class="feature-card" {
+            div class="feature-header" {
+                span class="feature-icon" { "{icon}" }
+                span class="feature-tag" { "{tag}" }
+            }
+            h3 class="feature-title" { "{title}" }
+            p class="feature-desc" { "{desc}" }
+        }
+    }
+    style {
+        .feature-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            transition: border-color 0.15s;
+        }
+        .feature-card:hover { border-color: var(--color-primary); }
+        .feature-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: var(--spacing-sm);
+        }
+        .feature-icon { font-size: 1.5rem; }
+        .feature-tag {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-primary);
+            background: rgba(91, 74, 247, 0.12);
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+        .feature-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: var(--spacing-xs);
+            color: var(--color-text);
+        }
+        .feature-desc {
+            font-size: 0.875rem;
+            color: var(--color-muted);
+            line-height: 1.5;
+        }
+    }
+}

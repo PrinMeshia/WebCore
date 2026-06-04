@@ -1,0 +1,13 @@
+page "post" {
+    div class="post-page" {
+        div class="post-header" {
+            link to="/" class="back-link" { "← Back to home" }
+            h1 "Article: {$route.slug}"
+        }
+        div class="post-body" {
+            p "You are reading the article "
+            strong "{$route.slug}"
+            p "The slug comes from the URL — navigate to /post/hello-world or /post/another-post to see it change."
+        }
+    }
+}

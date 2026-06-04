@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 0.7.0 — Référence complète de la syntaxe `.webc`
+> Version : 1.1.1 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -15,20 +15,28 @@
 7. [Composants](#composants)
    - [Props](#props)
    - [State](#state)
+   - [Computed — État dérivé](#computed--état-dérivé)
    - [View](#view)
    - [Style](#style)
-8. [Éléments HTML](#éléments-html)
-9. [Attributs](#attributs)
-10. [Événements](#événements)
-11. [Interpolation](#interpolation)
-12. [Directives de contrôle](#directives-de-contrôle)
-13. [Routage](#routage)
-14. [Slot](#slot)
-15. [Thème (`theme.toml`)](#thème-themetoml)
-16. [Sortie compilée](#sortie-compilée)
-17. [Internationalisation (i18n)](#internationalisation-i18n)
-18. [SSG — Static Site Generation](#ssg--static-site-generation)
-19. [WebAssembly (WASM)](#webassembly-wasm)
+8. [Lifecycle hooks](#lifecycle-hooks)
+   - [`on:mount`](#onmount)
+   - [`on:destroy`](#ondestroy)
+9. [Événements inter-composants](#événements-inter-composants)
+10. [Éléments HTML](#éléments-html)
+11. [Attributs](#attributs)
+12. [Événements](#événements)
+13. [Interpolation](#interpolation)
+14. [Directives de contrôle](#directives-de-contrôle)
+15. [Routage](#routage)
+16. [Slots](#slots)
+17. [Thème (`theme.toml`)](#thème-themetoml)
+18. [Sortie compilée](#sortie-compilée)
+19. [Validation de formulaires](#validation-de-formulaires)
+20. [Internationalisation (i18n)](#internationalisation-i18n)
+21. [SSG — Static Site Generation](#ssg--static-site-generation)
+22. [WebAssembly (WASM)](#webassembly-wasm)
+23. [Limites actuelles (v1.1.1)](#limites-actuelles-v111)
+24. [Nouveautés v1.1.1](#nouveautés-v111)
 
 ---
 
@@ -38,6 +46,12 @@
 mon-app/
 ├── webc.toml              # Configuration du projet
 ├── theme.toml             # Tokens de design (optionnel)
+├── locales/               # Traductions i18n (optionnel)
+│   ├── fr.toml
+│   └── en.toml
+├── wasm/                  # Module Rust/WASM (optionnel)
+│   ├── Cargo.toml
+│   └── src/lib.rs
 ├── src/
 │   ├── app.webc           # Déclaration de l'application
 │   ├── layouts/           # Layouts (un fichier par layout)
@@ -56,9 +70,10 @@ mon-app/
 
 ```toml
 [app]
-title = "Mon Application"   # Titre HTML des pages
-lang  = "fr"                # Attribut lang de <html>
-mode  = "dev"               # "dev" ou "prod" (active la minification en prod)
+title  = "Mon Application"   # Titre HTML des pages
+lang   = "fr"                # Attribut lang de <html>
+mode   = "dev"               # "dev" ou "prod" (active la minification en prod)
+locale = "fr"                # Locale de rendu par défaut (optionnel, hérite de lang)
 ```
 
 ---
@@ -169,7 +184,21 @@ layout MainLayout {
 }
 ```
 
-Un seul `slot content` par layout. Le nom du layout doit commencer par une majuscule.
+### Layouts multi-zones (named slots)
+
+Un layout peut déclarer plusieurs zones nommées avec `slot <nom>` :
+
+```webc
+layout DashLayout {
+    div {
+        header { slot header }
+        aside  { slot sidebar }
+        main   { slot content }
+    }
+}
+```
+
+Voir [Slots](#slots) pour la description complète.
 
 ---
 
@@ -195,10 +224,13 @@ Les composants sont des blocs réutilisables avec état local, vue et styles sco
 
 ```webc
 component NomComposant {
-    props { ... }    // optionnel
-    state { ... }    // optionnel
-    view  { ... }    // obligatoire
-    style { ... }    // optionnel
+    props    { ... }    // optionnel
+    state    { ... }    // optionnel
+    computed { ... }    // optionnel
+    on:mount { ... }    // optionnel
+    on:destroy { ... }  // optionnel
+    view     { ... }    // obligatoire
+    style    { ... }    // optionnel
 }
 ```
 
@@ -207,24 +239,22 @@ Le nom doit commencer par une majuscule. Un composant s'utilise comme un tag HTM
 ```webc
 NomComposant {}
 NomComposant prop1="valeur" {}
+NomComposant prop1={expr} {}
 ```
 
 ### Props
 
-Les props permettent de passer des valeurs statiques à un composant à l'instanciation.
+Les props permettent de passer des valeurs à un composant à l'instanciation.
+Elles acceptent des **chaînes statiques** ou des **expressions dynamiques**.
 
 ```webc
-component Greeting {
+component Badge {
     props {
-        name: String
-        title: String
+        label: String
+        color: String
     }
-
     view {
-        div {
-            h2 "{title}"
-            p "Bonjour {name} !"
-        }
+        span class={color} "Statut : {label}"
     }
 }
 ```
@@ -232,12 +262,16 @@ component Greeting {
 Utilisation :
 
 ```webc
-Greeting name="Alice" title="Madame" {}
+// Prop statique
+Badge label="Actif" color="green" {}
+
+// Prop dynamique (expression réactive)
+Badge label={statusMsg} color={statusColor} {}
 ```
 
-**Comportement actuel :** les props sont substituées statiquement à la compilation
-(les `{propName}` dans la vue deviennent des nœuds texte avec la valeur passée).
-Les props de type expression (`prop={stateVar}`) ne sont pas encore supportées.
+**Props statiques** (`name="valeur"`) : substituées statiquement à la compilation.  
+**Props dynamiques** (`name={expr}`) : `{propName}` dans la vue devient un span réactif
+`data-webcore-interpolation` évalué à la même expression que la prop passée.
 
 ### State
 
@@ -261,6 +295,44 @@ Syntaxe : `nomVar : Type = valeurParDéfaut`
 | `Boolean` | `false` |
 | `List` | `[]` |
 
+### Computed — État dérivé
+
+Le bloc `computed` déclare des variables dérivées du state local. Elles sont
+réévaluées automatiquement **avant chaque bind DOM** via `rebindComputed()`.
+
+```webc
+component FullName {
+    state {
+        firstName: String = "Jean"
+        lastName:  String = "Dupont"
+    }
+    computed {
+        fullName = firstName + " " + lastName
+    }
+    view {
+        p "Bonjour {fullName}"
+    }
+}
+```
+
+- Les variables computed utilisent `S.setQ(k, v)` — un setter **silencieux** qui met à jour la
+  valeur sans déclencher les listeners, évitant ainsi les boucles réactives.
+- Les expressions computed supportent les mêmes opérations que les interpolations (`+`, `-`, `*`,
+  `/`, `max()`, `min()`, etc.).
+- Une variable computed peut être utilisée dans `view`, `@if`, `@for` et `style`.
+- Plusieurs variables computed peuvent être déclarées dans le même bloc.
+
+```webc
+computed {
+    fullName  = firstName + " " + lastName
+    initials  = firstName + "." + lastName
+    charCount = firstName + lastName
+}
+```
+
+**Ordre d'exécution :** `rebindComputed()` est toujours appelé en premier dans `bind()`,
+garantissant que les valeurs dérivées sont à jour avant tout bind.
+
 ### View
 
 La vue définit l'arbre HTML du composant. Elle supporte tous les éléments HTML,
@@ -279,7 +351,6 @@ view {
 ### Style
 
 Les styles sont scopés au composant via un attribut `data-v` unique (hash FNV-1a).
-Seuls les sélecteurs CSS simples sont supportés (pas de `@media` pour l'instant).
 
 ```webc
 style {
@@ -289,7 +360,168 @@ style {
 }
 ```
 
+**Media queries responsives** sont supportées directement dans le bloc `style` :
+
+```webc
+style {
+    div    { display: flex; gap: 1rem; align-items: center; }
+    button { padding: 0.25rem 0.75rem; }
+    @media (max-width: 480px) {
+        div { flex-direction: column; }
+    }
+}
+```
+
+Le scoping CSS (`data-v`) est automatiquement propagé à l'intérieur des blocs `@media`.
+
 Les sélecteurs `*`, `:root`, `html`, `body` ne sont **pas** scopés (globaux).
+
+**Sélecteurs multi-éléments (virgule)** : un même bloc de règles peut cibler plusieurs éléments :
+
+```webc
+style {
+    input, textarea {
+        padding: 0.5rem;
+        border: 1px solid #334155;
+        border-radius: 6px;
+    }
+    input:focus, textarea:focus { border-color: #3b82f6; }
+}
+```
+
+---
+
+## Lifecycle hooks
+
+Les hooks de cycle de vie permettent d'exécuter du code JS brut à des moments précis
+du cycle de vie du composant.
+
+### `on:mount`
+
+S'exécute une fois dans `DOMContentLoaded`, après l'initialisation complète du runtime.
+Le corps est wrappé dans un IIFE pour isoler les variables locales.
+
+```webc
+component Timer {
+    state {
+        elapsed: Number = 0
+    }
+    on:mount {
+        const id = setInterval(() => {
+            S.set("elapsed", S.get("elapsed") + 1);
+            bind();
+        }, 1000);
+        window.__timerId = id;
+    }
+    view {
+        p "Temps écoulé : {elapsed}s"
+    }
+}
+```
+
+- L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
+- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+- Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
+- Le corps `on:mount { }` supporte les accolades imbriquées à **profondeur arbitraire** — les callbacks JS complexes (`setTimeout`, `setInterval`, `addEventListener` avec corps multi-ligne, objets littéraux) sont entièrement supportés.
+
+### `on:destroy`
+
+S'exécute **avant chaque navigation SPA** (`nav()`) et sur l'événement `window.beforeunload`
+(fermeture ou rechargement de l'onglet).
+
+```webc
+component Timer {
+    state { elapsed: Number = 0 }
+    on:mount {
+        window.__timerId = setInterval(() => {
+            S.set("elapsed", S.get("elapsed") + 1);
+            bind();
+        }, 1000);
+    }
+    on:destroy {
+        clearInterval(window.__timerId);
+    }
+    view {
+        p "Temps : {elapsed}s"
+    }
+}
+```
+
+**Utilisation typique :** nettoyage de timers, annulation de requêtes, désenregistrement de listeners.
+
+Le runtime génère :
+```js
+const DESTROY_HOOKS = [
+    () => { clearInterval(window.__timerId); }
+];
+function runDestroyHooks() { DESTROY_HOOKS.forEach(h => h()); }
+```
+
+`runDestroyHooks()` est appelé en tête de `nav()` et dans `window.addEventListener('beforeunload', ...)`.
+
+---
+
+## Événements inter-composants
+
+WebCore fournit un mécanisme de communication entre composants via des événements DOM personnalisés.
+
+### Émettre un événement — `emit()`
+
+`emit("eventName")` ou `emit("eventName", data)` dans une expression d'événement :
+
+```webc
+component Notifier {
+    view {
+        button on:click={emit("ping", count)} { "Ping" }
+        button on:click={emit("reset")} { "Reset" }
+    }
+}
+```
+
+Compilé vers :
+
+```js
+document.dispatchEvent(new CustomEvent("ping", { detail: count }))
+document.dispatchEvent(new CustomEvent("reset"))
+```
+
+### Écouter un événement — `on:eventName`
+
+Sur un appel de composant, `on:eventName={handler}` enregistre un listener global :
+
+```webc
+page "home" {
+    Notifier on:ping={count += 1} on:reset={count = 0} {}
+    p "Reçu : {count} pings"
+}
+```
+
+Compilé vers un `document.addEventListener('ping', e => { ... })` enregistré dans `DOMContentLoaded`.
+
+### Données de l'événement
+
+Les données passées à `emit("event", data)` sont accessibles via `e.detail` dans le handler :
+
+```webc
+// Émetteur
+component Slider {
+    state { value: Number = 50 }
+    view {
+        input type="range" on:input={emit("slide", value)} {}
+    }
+}
+
+// Récepteur
+page "home" {
+    Slider on:slide={level = e.detail} {}
+    p "Niveau : {level}"
+}
+```
+
+### Portée
+
+Les événements sont dispatché sur `document` — ils sont **globaux**. Si plusieurs instances
+d'un composant émettent le même événement, tous les listeners le reçoivent.
 
 ---
 
@@ -369,8 +601,6 @@ select on:change={selected = event.target.value} { }
 
 ### Expressions d'événements
 
-L'expression peut être n'importe quelle opération sur le state :
-
 ```webc
 // Affectation simple
 button on:click={count = 0} { "Reset" }
@@ -384,9 +614,26 @@ button on:click={count *= 2} { "×2" }
 button on:click={count = max(0, count - 1)} { "−" }
 button on:click={count = min(100, count + 1)} { "+" }
 
+// Émission d'événement inter-composants
+button on:click={emit("ping", count)} { "Ping" }
+
 // Navigation
 button on:click={webcore_navigate(/about)} { "Aller à propos" }
 ```
+
+### Handlers multi-instructions
+
+Plusieurs instructions peuvent être séparées par `;` dans un même handler. Chacune est compilée indépendamment :
+
+```webc
+// Ajouter un item et vider le champ de saisie
+button on:click={items = [...(items ?? []), newItem]; draft = ""} { "Ajouter" }
+
+// Réinitialiser plusieurs variables
+button on:click={count = 0; label = "Nouveau"} { "Reset" }
+```
+
+Chaque instruction du style `var = expr` ou `var += expr` est compilée en un `S.set(...)` distinct. L'expression RHS ne doit pas contenir de `;` littéral.
 
 ### Fonctions utilitaires disponibles dans les expressions
 
@@ -395,6 +642,8 @@ button on:click={webcore_navigate(/about)} { "Aller à propos" }
 | `max(a, b)` | Maximum de a et b |
 | `min(a, b)` | Minimum de a et b |
 | `abs(x)` | Valeur absolue |
+| `emit("event")` | Émet un CustomEvent sur `document` |
+| `emit("event", data)` | Émet un CustomEvent avec données |
 
 ---
 
@@ -407,12 +656,14 @@ p "Bonjour {name} !"
 p "Total : {count + tax}"
 p "Max : {max(a, b)}"
 p "Résultat : {a * b + c}"
+p "Complet : {fullName}"     // variable computed
+p "Traduction : {t("key")}"  // i18n
 ```
 
 ### Expression arbitraire
 
 L'expression entre `{` et `}` est évaluée au runtime. Elle peut référencer
-n'importe quelle variable du state et appeler `max`, `min`, `abs`.
+n'importe quelle variable du state, variable computed, variable store, et appeler `max`, `min`, `abs`.
 
 ```webc
 p "Pair : {count % 2 == 0}"
@@ -455,7 +706,6 @@ La condition est évaluée au runtime et réactive (mise à jour si une variable
 
 ```webc
 @for item in items {
-    // contenu répété pour chaque élément de `items`
     li "{item}"
 }
 ```
@@ -479,6 +729,42 @@ component TaskList {
 }
 ```
 
+### `@for` avec des items objets
+
+Quand les items de la liste sont des **objets**, les propriétés sont accessibles via la notation pointée dans les interpolations :
+
+```webc
+component TodoList {
+    state { items: List }
+    on:mount {
+        S.set('items', [
+            {text: "Acheter des courses", done: false},
+            {text: "Lire un livre",       done: true}
+        ])
+    }
+    view {
+        @for item in items {
+            li "{item.text}"
+        }
+    }
+}
+```
+
+Avec key pour le DOM diffing :
+
+```webc
+@for item key=item.text in items {
+    li "{item.text}"
+}
+```
+
+> **Pattern `window.helper`** : la grammaire interdit les accolades dans les expressions `on:click`. Pour créer des objets, définir un helper dans `on:mount` :
+> ```webc
+> on:mount { window.mkItem = text => ({text, done: false}) }
+> // Puis dans la vue :
+> button on:click={items = [...(items ?? []), mkItem(draft)]; draft = ""} { "Ajouter" }
+> ```
+
 ---
 
 ## Routage
@@ -501,7 +787,7 @@ app MonApp {
 
 ```webc
 button on:click={webcore_navigate(/about)} { "À propos" }
-button on:click={webcore_navigate(root)} { "Accueil" }   // "/" 
+button on:click={webcore_navigate(root)} { "Accueil" }   // "/"
 button on:click={webcore_navigate("/contact")} { "Contact" }
 ```
 
@@ -514,9 +800,16 @@ link to="/about" { "À propos" }
 La navigation SPA utilise `history.pushState` + `fetch` pour charger les pages
 sans rechargement complet. Les URL restent propres (`/about`, non `/about.html`).
 
+### `on:destroy` et navigation
+
+Avant chaque navigation SPA, `runDestroyHooks()` est exécuté automatiquement pour
+nettoyer les ressources de la page courante (voir [on:destroy](#ondestroy)).
+
 ---
 
-## Slot
+## Slots
+
+### Slot unique (défaut)
 
 `slot content` est le point d'injection du contenu de la page dans un layout.
 
@@ -526,7 +819,34 @@ layout MainLayout {
 }
 ```
 
-Un seul slot nommé `content` est supporté par layout.
+### Named slots (multi-zones)
+
+Un layout peut définir plusieurs zones nommées. Chaque `slot <nom>` est remplacé par le
+contenu correspondant fourni par la page.
+
+```webc
+layout DashLayout {
+    header { slot header }
+    aside  { slot sidebar }
+    main   { slot content }
+}
+```
+
+La page fournit le contenu avec la syntaxe `slot <nom> { ... }` :
+
+```webc
+page "dashboard" {
+    slot header  { h1 "Dashboard" }
+    slot sidebar { nav { link to="/" "Accueil" } }
+    p "Contenu principal"   // → slot content par défaut
+}
+```
+
+**Règles :**
+- Les éléments de la page sans `slot name { }` explicite alimentent le slot `content`.
+- Un slot sans contenu fourni par la page est simplement vide (aucune erreur).
+- La résolution est récursive — fonctionne à n'importe quelle profondeur dans l'arbre du layout.
+- Rétrocompatibilité totale : `main { slot content }` fonctionne comme avant.
 
 ---
 
@@ -586,15 +906,39 @@ dist/
 
 ### Runtime JS (`webcore.js`)
 
-Le runtime généré contient :
-- `class State` — état réactif avec `S.get(k)`, `S.set(k, v)`, `S.on(k, cb)`
-- `evalCond(expr)` — évaluation sécurisée des expressions en substituant les variables
-- `bindIf()` — réactivité pour `@if`/`@else`
-- `bindFor()` — réactivité pour `@for`
-- `bindAttrs()` — réactivité pour les attributs dynamiques
-- `bind()` — réactivité pour les interpolations `{expr}`
-- `nav(path)` — navigation SPA via `fetch` + `history.pushState`
-- `H` — objet contenant tous les handlers d'événements compilés
+Le runtime généré contient uniquement les fonctions **réellement utilisées** par le document
+(tree-shaking automatique) :
+
+| Fonction / Constante | Émise si… | Description |
+|---|---|---|
+| `class State` | Toujours | État réactif avec `S.get`, `S.set`, `S.setQ`, `S.on` |
+| `COMPUTED` + `rebindComputed()` | `computed {}` présent | Variables dérivées |
+| `evalCond(expr)` | Interpolation, `@if`, `@for`, ou attributs dynamiques | Évaluation sécurisée des expressions |
+| `bind()` | Interpolation ou `computed {}` | Mise à jour des `data-webcore-interpolation` |
+| `bindIf()` | `@if` présent | Réactivité pour `@if`/`@else` |
+| `bindFor()` | `@for` présent | Réactivité pour `@for` |
+| `bindAttrs()` | Attribut dynamique présent | Réactivité pour `class={expr}` |
+| `validateField()` + `bindValidation()` | `validate:*` ou `@error` présent | Validation de formulaires |
+| `VARS` + `STORE_VARS` | Au moins une fonction de bind réactive | Tableaux de noms de variables |
+| `nav()` + `toFile()` + `popstate` | Routes déclarées ou `webcore_navigate()` | Navigation SPA |
+| `DESTROY_HOOKS` + `runDestroyHooks()` | `on:destroy {}` présent | Nettoyage avant navigation |
+| `LOCALES` + `t()` + `setLocale()` | `locales/` présents | Internationalisation |
+| Loader WASM | `wasm/Cargo.toml` présent | Module WebAssembly |
+
+**Exemple pour un composant simple sans `@for`, `@if`, ni validation :**
+
+```js
+class State { #d=new Map(); #l=new Map();
+  set(k,v){ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) }
+  setQ(k,v){ this.#d.set(k,v) }
+  get(k){ return this.#d.get(k) }
+  on(k,f){ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) }
+}
+const S = new State();
+// evalCond, bind — puis DOMContentLoaded
+```
+
+`bindFor`, `bindIf`, `bindAttrs`, `nav`, etc. sont absents — overhead zéro pour les apps simples.
 
 ### Mode prod
 
@@ -662,8 +1006,9 @@ component ContactForm {
 ### Comportement runtime
 
 - La validation se déclenche au **blur** (sortie du champ) et à la **soumission du formulaire**
+- Le listener de soumission tourne en **phase de capture** avec `stopImmediatePropagation()` — il s'exécute avant tout handler `on:submit` inline ; si la validation échoue, la soumission est bloquée avant d'atteindre le handler
 - Si la validation échoue, `e.preventDefault()` empêche la soumission
-- Les blocs `@error` sont masqués (`display:none`) par défaut ; le runtime les affiche avec le message d'erreur correspondant
+- Les blocs `@error` sont masqués (`display:none`) par défaut ; le runtime injecte le message d'erreur dans le **premier enfant** du bloc (le texte de l'élément enfant est remplacé, la structure reste intacte)
 - La validation au blur ne s'active qu'après la première interaction de l'utilisateur (évite les erreurs prématurées)
 
 ---
@@ -710,7 +1055,7 @@ locale = "fr"    # locale de rendu par défaut (optionnel, hérite de lang si om
 
 ### Utilisation dans les vues
 
-La fonction `t("clé")` retourne la traduction de la locale active. Elle s'utilise dans toute interpolation :
+La fonction `t("clé")` retourne la traduction de la locale active :
 
 ```webc
 component Header {
@@ -744,7 +1089,14 @@ const LOCALES = {
     "fr": { "counter": "Compteur", "welcome": "Bienvenue" }
 };
 let LOCALE = "fr";
-const t = k => LOCALES[LOCALE]?.[k] ?? k;
+const t = (k, a) => {
+  if (a === undefined) return LOCALES[LOCALE]?.[k] ?? k;
+  if (typeof a === 'number') {
+    const pk = a === 1 ? k + '_one' : k + '_other';
+    return (LOCALES[LOCALE]?.[pk] ?? LOCALES[LOCALE]?.[k] ?? k).replace(/\{\{count\}\}/g, String(a));
+  }
+  return (LOCALES[LOCALE]?.[k] ?? k).replace(/\{\{0\}\}/g, String(a));
+};
 const setLocale = l => { if (LOCALES[l]) { LOCALE = l; bind(); bindIf(); bindFor(); bindAttrs() } };
 ```
 
@@ -774,10 +1126,7 @@ Les `<span data-webcore-interpolation>` vides reçoivent leur valeur initiale au
 <!-- Source .webc -->
 p "Compteur : {count}"    <!-- component state: count = 0 -->
 
-<!-- HTML généré sans SSG -->
-<p>Compteur : <span data-webcore-interpolation="count"></span></p>
-
-<!-- HTML généré avec SSG (v0.5.0+) -->
+<!-- HTML généré avec SSG -->
 <p>Compteur : <span data-webcore-interpolation="count">0</span></p>
 ```
 
@@ -788,10 +1137,6 @@ Le bon branchement est affiché dès le premier paint, sans attendre JavaScript 
 ```html
 <!-- State initial : count = 0 -->
 
-<!-- Sans SSG : les deux divs sont visibles jusqu'au DOMContentLoaded -->
-<div data-webcore-if="count &gt; 0">...</div>
-<div data-webcore-else="count &gt; 0">...</div>
-
 <!-- Avec SSG : affichage correct immédiatement -->
 <div data-webcore-if="count &gt; 0" style="display:none">...</div>
 <div data-webcore-else="count &gt; 0" style="display:block">...</div>
@@ -800,7 +1145,7 @@ Le bon branchement est affiché dès le premier paint, sans attendre JavaScript 
 ### Compatibilité runtime
 
 Le runtime JS (`bindIf`, `bind`) continue à opérer normalement après `DOMContentLoaded`.  
-Il met à jour `el.style.display` et `el.textContent` de manière réactive — les styles SSG sont simplement écrasés par les mêmes valeurs, sans conflit.
+Il met à jour `el.style.display` et `el.textContent` de manière réactive.
 
 ### Expressions supportées pour le pré-rendu
 
@@ -809,7 +1154,7 @@ Il met à jour `el.style.display` et `el.textContent` de manière réactive — 
 | Variable directe | `{count}` | valeur initiale de `count` |
 | Littéral numérique | `{42}` | `42` |
 | Addition/soustraction | `{count + 1}` | valeur + 1 |
-| Variable de store | `{$store.hits}` → `{hits}` | valeur du store |
+| Variable de store | `{$store.hits}` | valeur du store |
 | Condition `>`, `<`, `>=`, `<=`, `==`, `!=` | `@if count > 0` | `display:block/none` |
 
 Les expressions complexes (appels de fonction, ternaires, etc.) sont laissées vides — le runtime les résout au chargement.
@@ -863,15 +1208,16 @@ globalThis.wasm = WASM;
 - `Object.assign(WASM, m)` copie toutes les exports du module dans l'objet partagé.
 - Un rebind complet est déclenché après le chargement pour mettre à jour les interpolations qui appellent des fonctions WASM.
 - Les erreurs de chargement sont silencieuses (warning console) : la page reste fonctionnelle sans WASM.
+- Le séquence de rebind après le chargement est contextuelle (tree-shaking) — seules les fonctions de bind présentes dans le document sont appelées.
 
 ### Utilisation dans un composant
 
 ```webc
-component Counter {
-  state { count = 0 }
+component Signer {
+  state { result: String = "" }
   view {
-    button "Signer" onclick={count = wasm.sign_message(count)}
-    p "Résultat : {count}"
+    button on:click={result = wasm.sign(result)} { "Signer" }
+    p "Résultat : {result}"
   }
 }
 ```
@@ -884,11 +1230,109 @@ component Counter {
 
 ---
 
-## Limites actuelles (v0.7.0)
+## Limites actuelles (v1.1.1)
 
-- Les props ne supportent que des valeurs `String` statiques (pas d'expressions réactives)
-- Un seul slot (`content`) par layout
-- Pas de `@media` queries dans les blocs `style { ... }` (à utiliser dans `theme.toml`)
-- SSG limité aux expressions simples (variables, arithmetic ±, comparaisons numériques)
-- i18n limité aux clés de type `t("key")` (pas de pluralisation, pas de paramètres)
-- WASM : un seul module par projet ; `wasm-pack` requis séparément
+| Limite | Contournement |
+|---|---|
+| SSG limité aux expressions simples (variables, arithmetic ±, comparaisons numériques) | Le runtime résout les expressions complexes au chargement |
+| WASM : un seul module par projet | Exporter toutes les fonctions depuis un seul `lib.rs` |
+| Événements inter-composants portée globale (`document`) — pas de portée par instance | Préfixer le nom d'événement pour éviter les collisions |
+| `@for key=` : clé doit être un chemin simple (`item`, `item.id`) — pas d'expressions JS arbitraires | Pré-calculer la clé dans l'état avant la boucle |
+| Routes paramétrées : pas de routes imbriquées ni de regexp custom | Utiliser des routes à un seul segment dynamique par chemin |
+| Objets littéraux interdits dans les expressions `on:click` (accolades ambiguës) | Définir un helper `window.mkObj = ...` dans `on:mount` |
+
+---
+
+## Nouvelles fonctionnalités v1.1.0
+
+### Routes paramétrées
+
+Les routes déclarées dans `app { routes { } }` peuvent contenir des segments `:param` :
+
+```webc
+app MyApp {
+    routes {
+        "/":           HomePage
+        "/post/:slug": PostPage
+        "/user/:id":   ProfilePage
+    }
+}
+
+component PostPage {
+    view { h1 "Article : {$route.slug}" }
+}
+```
+
+Le compilateur génère un tableau `ROUTES` avec patterns RegExp et une fonction
+`matchRoute()`. Les paramètres sont accessibles dans les vues via `{$route.paramName}`.
+`ROUTES` et `ROUTE_PARAMS` sont tree-shaqués si aucune route n'est paramétrée.
+
+### `@for` avec key (DOM diffing)
+
+```webc
+@for post key=post.id in posts {
+    article "{post.title}"
+}
+```
+
+Sans `key`, la liste est entièrement re-rendue à chaque changement. Avec `key`,
+`bindFor()` patche uniquement les nœuds modifiés/ajoutés/supprimés.
+
+### i18n : paramètres et pluralisation
+
+```toml
+# locales/fr.toml
+items_one   = "{{count}} élément"
+items_other = "{{count}} éléments"
+greeting    = "Bonjour, {{0}} !"
+```
+
+```webc
+p "{t(\"items\", count)}"        // "3 éléments"
+p "{t(\"greeting\", username)}"  // "Bonjour, Alice !"
+```
+
+- `t("key", n: Number)` → cherche `key_one` (n=1) ou `key_other`, substitue `{{count}}`
+- `t("key", val)` → substitue `{{0}}` dans la traduction
+
+### Props composées
+
+Les expressions composites dans les vues d'un composant sont maintenant substituées :
+
+```webc
+component Stepper {
+    props { step }
+    view {
+        p "{step + 1}"       // ✓ compilé en "(2) + 1" si step="2"
+        button class={step}  // ✓ class="2"
+    }
+}
+```
+
+---
+
+## Nouveautés v1.1.1
+
+### Handlers multi-instructions
+
+```webc
+button on:click={items = [...(items ?? []), mkItem(draft)]; draft = ""} { "Ajouter" }
+```
+
+Chaque instruction séparée par `;` est compilée indépendamment. Voir [Handlers multi-instructions](#handlers-multi-instructions).
+
+### Items objets dans `@for`
+
+Les items de liste peuvent être des objets. Les propriétés sont accessibles via la notation pointée dans les interpolations. Voir [`@for` avec des items objets](#for-avec-des-items-objets).
+
+### Sélecteurs CSS multi-éléments
+
+`input, textarea { }` dans les blocs `style { }`. Voir [Style](#style).
+
+### Validation de formulaires — phase de capture
+
+Le listener de soumission tourne désormais en phase de capture. Voir [Comportement runtime](#comportement-runtime).
+
+### `on:mount` — imbrication profonde
+
+Les corps `on:mount { }` supportent les accolades JS imbriquées à profondeur arbitraire. Les callbacks complexes ne provoquent plus d'erreur de parse. Voir [`on:mount`](#onmount).

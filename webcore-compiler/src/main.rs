@@ -488,9 +488,31 @@ fn build_project() -> Result<(), String> {
 
     // Generate hybrid routing: separate HTML files + main index with router
     println!("🌐 Generating hybrid routing system...");
+    // Collect any CSS files from public/ to include in <head>
+    let extra_css_files: Vec<String> = {
+        let public_dir = Path::new("public");
+        if public_dir.exists() {
+            let mut files = Vec::new();
+            if let Ok(entries) = fs::read_dir(public_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("css") {
+                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                            files.push(name.to_string());
+                        }
+                    }
+                }
+            }
+            files.sort();
+            files
+        } else {
+            Vec::new()
+        }
+    };
     let options = codegen::codegen_html::HtmlPageOptions {
         lang: config.app_lang.clone(),
         title: config.app_title.clone(),
+        extra_css_files,
     };
 
     // Generate separate HTML files for each page/component
@@ -594,7 +616,34 @@ fn build_project() -> Result<(), String> {
     };
 
     let js_path = dist_dir.join("webcore.js");
-    fs::write(&js_path, final_js).map_err(|e| format!("Failed to write webcore.js: {}", e))?;
+    fs::write(&js_path, &final_js).map_err(|e| format!("Failed to write webcore.js: {}", e))?;
+
+    // Add a content-hash query param to <script src="webcore.js"> in every HTML file
+    // so browsers never serve a stale cached runtime after a rebuild.
+    let js_hash = {
+        let mut h: u32 = 2_166_136_261;
+        for b in final_js.bytes() {
+            h ^= b as u32;
+            h = h.wrapping_mul(16_777_619);
+        }
+        format!("{:08x}", h)
+    };
+    if let Ok(entries) = fs::read_dir(dist_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) == Some("html") {
+                if let Ok(html) = fs::read_to_string(&p) {
+                    let patched = html.replace(
+                        r#"src="webcore.js""#,
+                        &format!(r#"src="webcore.js?v={}""#, js_hash),
+                    );
+                    if patched != html {
+                        let _ = fs::write(&p, patched);
+                    }
+                }
+            }
+        }
+    }
 
     // Copy public assets
     let public_dir = Path::new("public");
@@ -852,6 +901,8 @@ fn get_ws_hmr_script(ws_port: u16) -> String {
 
 fn handle_request(request: Request, ws_port: u16) -> Result<(), String> {
     let url = request.url();
+    // Strip query string (?v=... cache-busting, etc.) before resolving to a file path
+    let url = url.split('?').next().unwrap_or(url);
 
     // Clean URL routing: /about → dist/about.html
     let file_path = if url == "/" {

@@ -1,0 +1,302 @@
+page "features" {
+    div class="page-header" {
+        h1 { "Features" }
+        p class="page-sub" {
+            "Store · Validation · SSG · i18n · WASM · Tree-shaking · Routes · Forms"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Global store" }
+        p {
+            "The "
+            code { "store \{ \}" }
+            " block declares reactive state shared across all components."
+        }
+        pre class="code-block" {
+"// app.webc
+store \{
+    count:  Number  = 0
+    theme:  String  = \"dark\"
+    active: Boolean = false
+\}
+
+// Any component -- prefix with $store.
+component Display \{
+    view \{
+        p \"Global count: \{$store.count\}\"
+        button on:click=\{$store.count += 1\} \{ \"+\" \}
+    \}
+\}
+
+component Badge \{
+    view \{
+        @if $store.active \{
+            span \"Active\"
+        \} @else \{
+            span \"Inactive\"
+        \}
+    \}
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Form validation" }
+        p { "Declarative validation attributes on inputs — no JS event wiring needed." }
+        pre class="code-block" {
+"component SignupForm \{
+    view \{
+        form on:submit=\{handleSubmit\} \{
+            label \"Username\"
+            input type=\"text\" name=\"username\"
+                  validate:required=\"Username is required\"
+                  validate:minlength=\"3,At least 3 characters\"
+            @error \"username\" \{
+                span class=\"error-msg\" \"Check your username\"
+            \}
+            label \"Email\"
+            input type=\"email\" name=\"email\"
+                  validate:required=\"Email is required\"
+                  validate:email=\"Must be a valid email\"
+            @error \"email\" \{
+                span class=\"error-msg\" \"Check your email\"
+            \}
+            button type=\"submit\" \{ \"Sign up\" \}
+        \}
+    \}
+\}"
+        }
+        p {
+            "Validation fires on blur and submit. "
+            code { "@error" }
+            " blocks are hidden by default; shown on failure."
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Attribute" }
+                    th { "Format" }
+                    th { "Description" }
+                } }
+                tbody {
+                    tr { td { code { "validate:required" } } td { "\"message\"" } td { "Field must not be empty" } }
+                    tr { td { code { "validate:minlength" } } td { "\"n,message\"" } td { "Minimum character count" } }
+                    tr { td { code { "validate:maxlength" } } td { "\"n,message\"" } td { "Maximum character count" } }
+                    tr { td { code { "validate:email" } } td { "\"message\"" } td { "Email format check" } }
+                    tr { td { code { "validate:pattern" } } td { "\"regex,message\"" } td { "Custom regex" } }
+                }
+            }
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Static Site Generation (SSG)" }
+        p {
+            "The compiler pre-renders initial state into HTML at build time. "
+            "No flash of unstyled or wrong content on first paint."
+        }
+        pre class="code-block" {
+"// .webc source -- state: count = 0
+p \"Counter: \{count\}\"
+@if count > 0 \{ p \"Positive\" \} @else \{ p \"Zero\" \}
+
+// HTML output (SSG pre-rendered)
+<p>Counter: <span data-webcore-interpolation=\"count\">0</span></p>
+<div data-webcore-if=\"count > 0\" style=\"display:none\">...</div>
+<div data-webcore-else=\"count > 0\" style=\"display:block\">...</div>"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Internationalisation (i18n)" }
+        p {
+            "Place .toml files in "
+            code { "locales/" }
+            ". Use "
+            code { "t(\"key\")" }
+            " in views. Switch with "
+            code { "setLocale(code)" }
+            "."
+        }
+        pre class="code-block" {
+"// locales/en.toml
+welcome   = \"Welcome\"
+increment = \"Increment\"
+
+// locales/fr.toml
+welcome   = \"Bienvenue\"
+increment = \"Incrementer\"
+
+// Component view
+h1 \"\{t(\"welcome\")\}\"
+button on:click=\{count += 1\} \{ \"\{t(\"increment\")\}\" \}
+button on:click=\{setLocale(\"fr\")\} \{ \"FR\" \}
+button on:click=\{setLocale(\"en\")\} \{ \"EN\" \}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "i18n: parameters and pluralization (v1.1.0)" }
+        p {
+            "Pass a second argument to "
+            code { "t()" }
+            " for pluralization or positional substitution."
+        }
+        pre class="code-block" {
+"// locales/en.toml
+items_one   = \"{{count}} item\"
+items_other = \"{{count}} items\"
+greeting    = \"Hello, {{0}}!\"
+score       = \"Your score: {{0}} / {{1}}\"
+
+// locales/fr.toml
+items_one   = \"{{count}} element\"
+items_other = \"{{count}} elements\"
+greeting    = \"Bonjour, {{0}} !\""
+        }
+        pre class="code-block" {
+"// Pluralization -- uses _one or _other key
+p \"\{t(\"items\", 1)\}\"       // \"1 item\"
+p \"\{t(\"items\", count)\}\"   // \"3 items\" (reactive)
+
+// Positional substitution
+p \"\{t(\"greeting\", username)\}\"  // \"Hello, Alice!\""
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Call" }
+                    th { "Behaviour" }
+                } }
+                tbody {
+                    tr { td { code { "t(\"key\")" } } td { "Simple lookup — returns the value or the key if missing" } }
+                    tr { td { code { "t(\"key\", n)" } } td { "Number → picks _one (n=1) or _other, replaces {{count}}" } }
+                    tr { td { code { "t(\"key\", val)" } } td { "Non-number → replaces {{0}} with val" } }
+                }
+            }
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "WebAssembly (WASM)" }
+        p {
+            "Place a Rust crate in "
+            code { "wasm/" }
+            ". The compiler detects it, runs wasm-pack, and injects an async loader."
+        }
+        pre class="code-block" {
+"// wasm/src/lib.rs
+use wasm_bindgen::prelude::*;
+#[wasm_bindgen]
+pub fn compute(n: u32) -> u32 \{ n * n \}
+
+// WebCore component
+component WasmDemo \{
+    state \{ result: Number = 0 \}
+    view \{
+        button on:click=\{result = wasm.compute(result)\} \{ \"Compute\" \}
+        p \"Result: \{result\}\"
+    \}
+\}"
+        }
+        p {
+            code { "globalThis.wasm" }
+            " is filled asynchronously after load. A full rebind fires on success."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Forms example (examples/forms/)" }
+        p {
+            "The "
+            code { "examples/forms/" }
+            " project demonstrates full form validation with two components."
+        }
+        pre class="code-block" {
+"// SignupForm -- username, email, password (pattern), website (optional)
+component SignupForm \{
+    state \{ submitted: Boolean = false; username: String = \"\" \}
+    view \{
+        @if submitted \{
+            div class=\"success-banner\" \{ p \"Welcome, \{username\}!\" \}
+        \} @else \{
+            form on:submit=\{submitted = true\} \{
+                input type=\"text\" name=\"username\"
+                      validate:required=\"Username is required\"
+                      validate:minlength=\"3,At least 3 characters\"
+                      on:input=\{username = event.target.value\}
+                @error \"username\" \{ span class=\"err\" \{ \} \}
+                input type=\"password\" name=\"password\"
+                      validate:pattern=\"^(?=.*[A-Z])(?=.*\\\\d).+$,Must contain uppercase and digit\"
+                @error \"password\" \{ span class=\"err\" \{ \} \}
+                button type=\"submit\" \{ \"Create account\" \}
+            \}
+        \}
+    \}
+\}
+
+// ContactForm -- textarea with char counter (computed state)
+component ContactForm \{
+    state \{ charCount: Number = 0 \}
+    computed \{ remaining = 500 - charCount; overLimit = remaining < 0 \}
+    view \{
+        textarea name=\"message\" on:input=\{charCount = event.target.value.length\}
+        @if overLimit \{
+            span class=\"over\" \{ \"\{remaining\} characters over limit\" \}
+        \} @else \{
+            span \{ \"\{remaining\} characters remaining\" \}
+        \}
+    \}
+\}"
+        }
+        p {
+            "Key patterns: "
+            code { "validate:pattern" }
+            " for regex constraints, "
+            code { "computed" }
+            " for derived counters, "
+            code { "on:input" }
+            " to track live values, and "
+            code { "@if submitted" }
+            " success banners."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Runtime tree-shaking" }
+        p {
+            "The compiler emits only the runtime functions actually used by the document."
+        }
+        pre class="code-block" {
+"// Minimal bundle -- no @for, @if, validation, routing, or WASM
+class State \{
+  #d=new Map(); #l=new Map();
+  set(k,v)\{ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) \}
+  setQ(k,v)\{ this.#d.set(k,v) \}
+  get(k)\{ return this.#d.get(k) \}
+  on(k,f)\{ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) \}
+\}
+const S = new State();
+// bindIf, bindFor, bindAttrs, nav, validateField -- absent"
+        }
+        div class="feature-table" {
+            table {
+                thead { tr {
+                    th { "Feature" }
+                    th { "Emitted when..." }
+                } }
+                tbody {
+                    tr { td { code { "bindFor()" } } td { "At least one " code { "@for" } } }
+                    tr { td { code { "bindIf()" } } td { "At least one " code { "@if" } } }
+                    tr { td { code { "bindAttrs()" } } td { "At least one " code { "attr=\{expr\}" } } }
+                    tr { td { code { "validateField()" } } td { "At least one " code { "validate:*" } " or " code { "@error" } } }
+                    tr { td { code { "nav() + popstate" } } td { "Routes declared or " code { "webcore_navigate()" } " used" } }
+                    tr { td { code { "DESTROY_HOOKS" } } td { "At least one " code { "on:destroy \{\}" } } }
+                    tr { td { code { "COMPUTED + rebindComputed()" } } td { "At least one " code { "computed \{\}" } } }
+                    tr { td { "WASM loader" } td { code { "wasm/Cargo.toml" } " exists" } }
+                }
+            }
+        }
+    }
+}

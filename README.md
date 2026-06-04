@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 0.7.0 |
-| **Statut** | En développement actif |
+| **Version** | 1.1.1 |
+| **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 55 tests unitaires |
+| **Tests** | 76 tests unitaires |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -34,9 +34,28 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **Événements** : `on:click`, `on:submit`, `on:change`, `on:input`
 - **Attributs dynamiques** : `class={expr}` compilé en binding runtime
 - **CSS scopé** : isolation par composant via `data-v` (hash FNV-1a déterministe)
+- **`@media` dans `style { }`** : media queries responsives scopées directement dans les composants
 - **Routage SPA** : History API + `nav()` sans rechargement de page
 - **État réactif** : `class State { #d = new Map() }` ES2022 avec `S.get/set/on`
+- **Props réactives** : `Component value={expr} />` — les props acceptent des expressions dynamiques
+- **Named slots** : layouts multi-zones (`slot header`, `slot sidebar`, `slot content`)
+- **Store global** : `store { ... }` partagé entre tous les composants via `$store.varName`
+- **Validation de formulaires** : `validate:required/email/minlength` + `@error "field" { }`
+- **SSG** : pré-rendu des valeurs initiales, élimination du flash de contenu
+- **i18n** : `locales/*.toml` + `t("key")` + `setLocale()` réactif
+- **WASM** : détection `wasm/Cargo.toml`, `wasm-pack build`, loader async `globalThis.wasm`
 - **Runtime minimal** : `evalCond`, `bindIf`, `bindFor`, `bindAttrs` — <5 Ko
+- **État dérivé** : `computed { fullName = firstName + " " + lastName }` — réévalué avant chaque bind
+- **Lifecycle hooks** : `on:mount { }` / `on:destroy { }` — exécutés au `DOMContentLoaded` / avant navigation
+- **Événements inter-composants** : `emit("event", data)` + `on:event={handler}` sur les appels de composants
+- **Routes paramétrées** : `/post/:slug` avec accès via `{$route.slug}` dans les vues ; tree-shaqué si inutilisé
+- **`@for` avec key** : `@for item key=item.id in items { }` active le DOM diffing par clé — patch minimal
+- **i18n params et pluriel** : `t("items", count)` → `_one`/`_other` + `{{count}}` ; `t("greeting", name)` → `{{0}}`
+- **Props composées** : `{step + 1}` et `class={color}` substitués même dans les expressions composites
+- **Erreurs de parsing enrichies** : ligne source + caret `^` à la colonne fautive + hints contextuels
+- **Handlers multi-instructions** : `on:click={a = 1; b = 2}` — plusieurs instructions séparées par `;` dans un même handler
+- **Sélecteurs CSS multi-éléments** : `input, textarea { }` supporté dans les blocs `style { }`
+- **Exemple formulaires** : `examples/forms/` — `SignupForm` et `ContactForm` avec validation complète
 
 ---
 
@@ -55,7 +74,7 @@ app MyApp {
 }
 ```
 
-### Layout et slot
+### Layout et slots nommés
 
 ```webc
 layout MainLayout {
@@ -64,6 +83,22 @@ layout MainLayout {
         link to="/about" { "À propos" }
     }
     main { slot content }
+}
+
+// Layout multi-zones (v0.8.0)
+layout DashLayout {
+    header { slot header }
+    aside  { slot sidebar }
+    main   { slot content }
+}
+```
+
+```webc
+// Page qui remplit les slots nommés
+page "dashboard" {
+    slot header  { h1 "Dashboard" }
+    slot sidebar { nav { link to="/" "Accueil" } }
+    p "Contenu principal"   // → slot content par défaut
 }
 ```
 
@@ -94,9 +129,53 @@ component Counter {
     }
 
     style {
-        div  { display: flex; gap: 1rem; align-items: center; }
+        div    { display: flex; gap: 1rem; align-items: center; }
         button { padding: 0.25rem 0.75rem; }
+        @media (max-width: 480px) {
+            div { flex-direction: column; }
+        }
     }
+}
+```
+
+### Props réactives (v0.8.0)
+
+```webc
+// Composant avec prop
+component Badge {
+    props { label: String, color: String }
+    view { span class={color} "Statut : {label}" }
+}
+
+// Utilisation — prop statique ou dynamique
+page "home" {
+    Badge label="Actif" color="green" {}
+    Badge label={statusMsg} color={statusColor} {}
+}
+```
+
+### État dérivé, lifecycle et événements inter-composants (v0.9.0)
+
+```webc
+component NomComplet {
+    state {
+        prenom: String = "Jean"
+        nom: String = "Dupont"
+    }
+    computed { nomComplet = prenom + " " + nom }
+    on:mount {
+        prenom = "Marie"
+    }
+    view { p "Bonjour {nomComplet}" }
+}
+
+// Événements inter-composants
+component Notificateur {
+    view { button on:click={emit("ping", count)} { "Ping" } }
+}
+
+page "home" {
+    Notificateur on:ping={count += 1} {}
 }
 ```
 
@@ -109,9 +188,44 @@ component Counter {
     p "Zéro ou négatif"
 }
 
+// Sans key — re-rendu complet à chaque changement
 @for item in items {
     li "{item}"
 }
+
+// Avec key — DOM diffing (v1.1.0)
+@for post key=post.id in posts {
+    article "{post.title}"
+}
+```
+
+### Routes paramétrées (v1.1.0)
+
+```webc
+app MyApp {
+    routes {
+        "/":           HomePage
+        "/post/:slug": PostPage
+    }
+}
+
+component PostPage {
+    view { h1 "Article : {$route.slug}" }
+}
+```
+
+### i18n avec paramètres et pluriel (v1.1.0)
+
+```toml
+# locales/fr.toml
+items_one   = "{{count}} élément"
+items_other = "{{count}} éléments"
+greeting    = "Bonjour, {{0}} !"
+```
+
+```webc
+p "{t(\"items\", count)}"        // "3 éléments"
+p "{t(\"greeting\", username)}"  // "Bonjour, Alice !"
 ```
 
 ### Interpolation et contenu mixte
@@ -137,13 +251,18 @@ cargo build --release
 ### Compiler un projet
 
 ```bash
-./target/release/webc build --input examples/basic.webc --out dist
+# Depuis le répertoire d'un projet (là où se trouve webc.toml)
+cd examples/counter
+webc build
 ```
 
 ### Serveur de développement
 
 ```bash
-./target/release/webc dev --input examples/basic.webc --out dist --port 3000
+cd examples/counter
+webc dev
+# Avec un port personnalisé
+webc dev 3000
 ```
 
 ---
@@ -274,13 +393,59 @@ cargo fmt
 
 ---
 
-### 🔄 Phase 3 — Vision long terme (en cours)
+### ✅ Phase 3 — Vision long terme (complète)
 
 - [x] Store global partagé entre composants — bloc `store { ... }` + accès `$store.varName` dans tout le projet
 - [x] Validation de formulaires déclarative — `validate:required/minlength/maxlength/email/pattern` + `@error "field" { }`
 - [x] SSG — Static Site Generation (pré-rendu des valeurs initiales, `display` initial sur `@if`/`@else`)
 - [x] Internationalisation intégrée (i18n) — `locales/*.toml` + `t("key")` + `setLocale()` réactif
 - [x] Support WebAssembly (logique métier Rust → WASM) — détection `wasm/Cargo.toml`, `wasm-pack build`, loader async `globalThis.wasm`
+
+---
+
+### ✅ v0.8.0 — Modèle de composant v2 (complète)
+
+- [x] **Props réactives** — `Component value={expr} />` : les props acceptent des expressions dynamiques ; `{propName}` dans la vue devient un span réactif au lieu d'un texte figé
+- [x] **Named slots** — layouts multi-zones (`slot header`, `slot sidebar`, `slot content`) ; pages fournissent le contenu via `slot header { ... }` ; résolution récursive à n'importe quelle profondeur
+- [x] **`@media` dans `style { }`** — media queries responsives scopées par composant ; scoping `data-v` propagé à l'intérieur des blocs `@media`
+
+---
+
+### ✅ v0.9.0 — Modèle de composant v3 (complète)
+
+- [x] **État dérivé** — `computed { fullName = firstName + " " + lastName }` ; réévalué via `rebindComputed()` avant chaque bind DOM ; `setQ` (setter silencieux) sur `State` pour éviter les boucles réactives
+- [x] **Lifecycle hook `on:mount`** — bloc `on:mount { }` : code JS exécuté dans `DOMContentLoaded` après l'initialisation ; wrappé dans un IIFE pour l'isolation des variables locales
+- [x] **Événements inter-composants** — `emit("event", data)` compilé vers `CustomEvent` ; `on:event={handler}` sur les appels de composants → `document.addEventListener` dans `DOMContentLoaded`
+
+---
+
+### ✅ v1.0.0 — Release stable (complète)
+
+- [x] **`on:destroy { }`** — lifecycle hook symétrique à `on:mount` ; exécuté avant chaque navigation SPA et à `window.beforeunload`
+- [x] **Tree-shaking du runtime** — `bindFor`, `bindIf`, `bindAttrs`, `validateField`/`bindValidation`, `nav`, `evalCond`, `VARS`/`STORE_VARS`, `COMPUTED`/`rebindComputed` sont émis uniquement si le document les utilise ; économies significatives pour les applications simples
+- [x] **Site de documentation** — `examples/docs/` : site entièrement construit avec WebCore lui-même (4 pages, 2 composants, layout, styles)
+
+---
+
+### ✅ v1.1.0 — Routes, DX et polissage (complète)
+
+- [x] **Routes paramétrées** — `/post/:slug`, `/user/:id` : `ROUTES[]` avec RegExp + `ROUTE_PARAMS` ; accès via `{$route.slug}` dans les vues ; tree-shaké si inutilisé
+- [x] **`@for` avec key** — `@for item key=item.id in items { }` : DOM diffing par clé, patch minimal au lieu de re-rendu complet
+- [x] **i18n params + pluralisation** — `t("key", n)` → clés `_one`/`_other` + `{{count}}` ; `t("key", val)` → `{{0}}`
+- [x] **Props composées** — `{step + 1}`, `class={color}` : substitution word-boundary dans les expressions complexes et les attributs
+- [x] **Erreurs de parsing enrichies** — ligne source + caret `^` à la colonne fautive + hints contextuels pour les erreurs fréquentes
+
+---
+
+### ✅ v1.1.1 — Corrections et polissage (complète)
+
+- [x] **Validation de formulaires** — phase de capture + `stopImmediatePropagation()` garantit l'exécution avant `on:submit` ; blocs `@error` préservés via `firstElementChild`
+- [x] **Handlers multi-instructions** — `on:click={a = 1; b = 2}` : chaque instruction est compilée indépendamment
+- [x] **`on:mount` imbrication profonde** — grammaire Pest récursive pour les accolades JS à profondeur arbitraire
+- [x] **`t()` dans `evalCond`** — passé explicitement aux `new Function()` ; variable locale renommée `_c` pour éviter le masquage
+- [x] **Sélecteurs CSS multi-éléments** — `input, textarea { }` désormais valide dans les blocs `style { }`
+- [x] **DOM diffing `@for` sans wrapper** — clé posée sur `firstElementChild`, éliminant les espaces parasites entre items
+- [x] **Exemple `examples/forms/`** — `SignupForm` + `ContactForm` avec validation complète, computed, compteur de caractères
 
 ---
 

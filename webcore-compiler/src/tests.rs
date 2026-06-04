@@ -11,6 +11,7 @@ fn opts() -> HtmlPageOptions {
     HtmlPageOptions {
         lang: "en".into(),
         title: "Test".into(),
+        extra_css_files: vec![],
     }
 }
 
@@ -120,8 +121,11 @@ fn golden_scoped_css_emits_data_v_selector() {
             name: "Counter".into(),
             props: vec![],
             state: vec![],
+            computed: vec![],
+            mount_body: None,
+            destroy_body: None,
             view: vec![],
-            style: vec![crate::ast::StyleRule {
+            style: vec![crate::ast::StyleItem::Rule(crate::ast::StyleRule {
                 selector: "button".into(),
                 properties: vec![crate::ast::StyleProperty {
                     name: "color".into(),
@@ -129,7 +133,7 @@ fn golden_scoped_css_emits_data_v_selector() {
                     span: Span::default(),
                 }],
                 span: Span::default(),
-            }],
+            })],
             span: Span::default(),
         },
     );
@@ -292,7 +296,12 @@ page "home" {
 fn golden_validation_js_in_runtime() {
     let src = r#"
 layout MainLayout { main { slot content } }
-page "home" { h1 "hi" }
+page "home" {
+    form {
+        input type="email" name="email" validate:email="Email invalide"
+        @error "email" { span "Erreur" }
+    }
+}
 "#;
     let doc = parse_webc(src).expect("parse");
     let js = generate_runtime_js(&[], &doc);
@@ -305,12 +314,57 @@ page "home" { h1 "hi" }
         "bindValidation missing in runtime"
     );
     assert!(
-        js.contains("webcoreValidateRequired"),
-        "required check missing in runtime"
-    );
-    assert!(
         js.contains("webcoreValidateEmail"),
         "email check missing in runtime"
+    );
+}
+
+#[test]
+fn golden_tree_shaking_no_bindfor_when_unused() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { h1 "Hello" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        !js.contains("bindFor"),
+        "bindFor should be absent when no @for:\n{}",
+        js
+    );
+    assert!(
+        !js.contains("bindValidation"),
+        "bindValidation should be absent when no validation:\n{}",
+        js
+    );
+    assert!(
+        !js.contains("nav="),
+        "nav should be absent when no navigation:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_tree_shaking_validation_present_when_used() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    form {
+        input type="text" name="user" validate:required="Requis"
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("validateField"),
+        "validateField should be present when validate: attrs used:\n{}",
+        js
+    );
+    assert!(
+        js.contains("bindValidation"),
+        "bindValidation should be present:\n{}",
+        js
     );
 }
 
@@ -515,3 +569,491 @@ page "home" { h1 "hi" }
     // Shorter than original
     assert!(minified.len() < js.len(), "minified should be shorter");
 }
+
+// ── Props réactives (v0.8.0) ──────────────────────────────────────────────
+
+#[test]
+fn golden_reactive_prop_stays_interpolation() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Badge {
+    props { label: String }
+    view { span "Valeur : {label}" }
+}
+page "home" {
+    Badge label={count} {}
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // Dynamic prop: the interpolation span should reference `count`, not `label`
+    assert!(
+        res.html.contains("data-webcore-interpolation=\"count\""),
+        "reactive prop should produce interpolation for `count`:\n{}",
+        res.html
+    );
+    assert!(
+        !res.html.contains("data-webcore-interpolation=\"label\""),
+        "unresolved `label` span should not appear:\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_static_prop_still_substituted() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Greeting {
+    props { name: String }
+    view { p "Hello {name}!" }
+}
+page "home" { Greeting name="Alice" {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("Alice"),
+        "static prop value missing:\n{}",
+        res.html
+    );
+    assert!(
+        !res.html.contains("data-webcore-interpolation=\"name\""),
+        "unresolved name span should not appear:\n{}",
+        res.html
+    );
+}
+
+// ── Named slots (v0.8.0) ──────────────────────────────────────────────────
+
+#[test]
+fn golden_named_slot_filled_from_page() {
+    let src = r#"
+layout MainLayout {
+    div {
+        header { slot header }
+        main { slot content }
+    }
+}
+page "home" {
+    slot header { h1 "Titre" }
+    p "Contenu principal"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("<h1>Titre"),
+        "named slot header content missing:\n{}",
+        res.html
+    );
+    assert!(
+        res.html.contains("<p>Contenu principal"),
+        "default content slot missing:\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_unnamed_slot_backwards_compat() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { h1 "Simple" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("<h1>Simple"),
+        "backward-compat unnamed slot broken:\n{}",
+        res.html
+    );
+}
+
+// ── computed (v0.9.0) ────────────────────────────────────────────────────
+
+#[test]
+fn golden_computed_emits_rebind_in_js() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Calc {
+    state {
+        a: Number = 2
+        b: Number = 3
+    }
+    computed { sum = a + b }
+    view { p "{sum}" }
+}
+page "home" { Calc {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("rebindComputed"),
+        "rebindComputed missing:\n{}",
+        js
+    );
+    assert!(js.contains("COMPUTED"), "COMPUTED array missing:\n{}", js);
+    assert!(js.contains("'sum'"), "computed var name missing:\n{}", js);
+    // bind() must call rebindComputed
+    assert!(
+        js.contains("rebindComputed()"),
+        "bind does not call rebindComputed:\n{}",
+        js
+    );
+    // State class must have setQ
+    assert!(
+        js.contains("setQ(k,v)"),
+        "setQ missing in State class:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_computed_no_array_when_empty() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Simple {
+    state { count: Number = 0 }
+    view { p "{count}" }
+}
+page "home" { Simple {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    // When no computed vars: both COMPUTED array and rebindComputed are tree-shaken away
+    assert!(
+        !js.contains("const COMPUTED="),
+        "COMPUTED array should be absent when no computed vars:\n{}",
+        js
+    );
+    assert!(
+        !js.contains("rebindComputed"),
+        "rebindComputed should be absent when no computed vars:\n{}",
+        js
+    );
+    // bind() still present for interpolations, but without rebindComputed call
+    assert!(
+        js.contains("data-webcore-interpolation"),
+        "bind() should wire interpolations:\n{}",
+        js
+    );
+}
+
+// ── on:mount (v0.9.0) ────────────────────────────────────────────────────
+
+#[test]
+fn golden_on_mount_body_in_domcontentloaded() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Loader {
+    state { data: String = "" }
+    on:mount {
+        data = "loaded"
+    }
+    view { p "{data}" }
+}
+page "home" { Loader {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    // Mount body should appear inside DOMContentLoaded
+    assert!(
+        js.contains("DOMContentLoaded"),
+        "DOMContentLoaded missing:\n{}",
+        js
+    );
+    assert!(
+        js.contains("loaded"),
+        "on:mount body content missing:\n{}",
+        js
+    );
+}
+
+// ── on:destroy (v1.0.0) ──────────────────────────────────────────────────
+
+#[test]
+fn golden_on_destroy_emits_hooks() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Cleanup {
+    on:destroy {
+        clearInterval(timer)
+    }
+    view { p "test" }
+}
+page "home" { Cleanup {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("DESTROY_HOOKS"),
+        "DESTROY_HOOKS missing:\n{}",
+        js
+    );
+    assert!(
+        js.contains("runDestroyHooks"),
+        "runDestroyHooks missing:\n{}",
+        js
+    );
+    assert!(
+        js.contains("clearInterval"),
+        "destroy body content missing:\n{}",
+        js
+    );
+    assert!(
+        js.contains("beforeunload"),
+        "beforeunload listener missing:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_no_destroy_hooks_when_absent() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Simple {
+    view { p "test" }
+}
+page "home" { Simple {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        !js.contains("DESTROY_HOOKS"),
+        "DESTROY_HOOKS should be absent:\n{}",
+        js
+    );
+    assert!(
+        !js.contains("beforeunload"),
+        "beforeunload should be absent:\n{}",
+        js
+    );
+}
+
+// ── emit / inter-component events (v0.9.0) ──────────────────────────────
+
+#[test]
+fn golden_emit_compiles_to_custom_event() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button on:click={emit("myEvent")} { "Fire" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("CustomEvent"),
+        "CustomEvent missing in compiled emit:\n{}",
+        js
+    );
+    assert!(
+        js.contains("dispatchEvent"),
+        "dispatchEvent missing:\n{}",
+        js
+    );
+    assert!(js.contains("myEvent"), "event name missing:\n{}", js);
+}
+
+#[test]
+fn golden_component_on_event_registers_listener() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Notifier {
+    view { button on:click={emit("ping")} { "Ping" } }
+}
+page "home" {
+    Notifier on:ping={ping_count = 1} {}
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("addEventListener('ping'"),
+        "component event listener missing:\n{}",
+        js
+    );
+}
+
+// ── @media dans les blocs style (v0.8.0) ─────────────────────────────────
+
+#[test]
+fn golden_media_block_scoped_in_css() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Card {
+    view { div "Contenu" }
+    style {
+        .card { padding: 1rem; }
+        @media (max-width: 768px) {
+            .card { padding: 0.5rem; }
+        }
+    }
+}
+page "home" { Card {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let css = crate::codegen::codegen_css::generate_combined_css(None, &doc);
+    assert!(
+        css.contains("@media (max-width: 768px)"),
+        "@media block missing in output:\n{}",
+        css
+    );
+    // Scoped selector must appear inside the @media block
+    assert!(
+        css.contains("[data-v="),
+        "scoped selector missing inside @media:\n{}",
+        css
+    );
+}
+
+// ── v1.1.0 features ───────────────────────────────────────────────────────
+
+#[test]
+fn golden_compound_prop_substituted() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Counter {
+    props { step }
+    view { p "{step + 1}" }
+}
+page "home" { Counter step="2" {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("gen");
+    // Static prop "step"="2" should be substituted inside the compound expression
+    assert!(
+        res.html.contains("(2) + 1"),
+        "compound prop not substituted: {}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_prop_in_attribute_substituted() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Badge {
+    props { color }
+    view { span class={color} "ok" }
+}
+page "home" { Badge color="green" {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("gen");
+    // Static prop "color"="green" → attribute becomes class="green"
+    assert!(
+        res.html.contains("class=\"green\""),
+        "prop not substituted in attribute: {}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_i18n_plural_t_function() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { p "{t(\"items\", 3)}" }
+"#;
+    let mut doc = parse_webc(src).expect("parse");
+    let mut en_msgs = HashMap::new();
+    en_msgs.insert("items_one".into(), "{{count}} item".into());
+    en_msgs.insert("items_other".into(), "{{count}} items".into());
+    doc.locales.insert("en".into(), en_msgs);
+    doc.default_locale = "en".into();
+    let js = generate_runtime_js(&[], &doc);
+    // New t() function signature supports the second arg
+    assert!(
+        js.contains("typeof a==='number'"),
+        "plural t() not emitted: {js}"
+    );
+    assert!(
+        js.contains("_one"),
+        "plural key suffix _one missing: {js}"
+    );
+}
+
+#[test]
+fn golden_for_key_emits_data_attribute() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    @for item key=item in items {
+        li "{item}"
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("gen");
+    assert!(
+        res.html.contains("data-webcore-for-key=\"item\""),
+        "for-key attribute missing: {}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_param_routes_emit_routes_array() {
+    let src = r#"
+app MyApp {
+    routes {
+        "/": HomePage
+        "/post/:slug": PostPage
+    }
+}
+layout MainLayout { main { slot content } }
+page "home" { p "home" }
+page "post" { p "post {$route.slug}" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("const ROUTES=["),
+        "ROUTES array missing: {js}"
+    );
+    assert!(
+        js.contains("ROUTE_PARAMS"),
+        "ROUTE_PARAMS missing: {js}"
+    );
+    assert!(
+        js.contains("slug"),
+        "slug param missing in routes: {js}"
+    );
+}
+
+#[test]
+fn golden_non_param_routes_use_tofile() {
+    let src = r#"
+app MyApp {
+    routes {
+        "/": HomePage
+        "/about": AboutPage
+    }
+}
+layout MainLayout { main { slot content } }
+page "home" { p "home" }
+page "about" { p "about" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    // No parameterized routes — should use simple toFile() approach
+    assert!(
+        js.contains("const toFile="),
+        "toFile function missing for non-param routes: {js}"
+    );
+    assert!(
+        !js.contains("ROUTE_PARAMS"),
+        "ROUTE_PARAMS should not be emitted for non-param routes: {js}"
+    );
+}
+
+#[test]
+fn golden_error_message_has_caret() {
+    // Introduce a parse error: empty interpolation {} is invalid
+    let src = "page \"home\" { p \"hello {}\" }";
+    let err = crate::parser::parse_webc(src).unwrap_err();
+    let display = format!("{}", err);
+    // Should contain a caret line
+    assert!(display.contains('^'), "caret missing in error: {display}");
+}
+

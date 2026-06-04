@@ -1,0 +1,19 @@
+# Rust build artifacts
+target/
+**/target/
+
+# Cargo lock (library crates)
+# Cargo.lock  # keep for binaries
+
+# WebCore build output
+dist/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo

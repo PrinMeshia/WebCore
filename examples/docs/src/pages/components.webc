@@ -1,0 +1,227 @@
+page "components" {
+    div class="page-header" {
+        h1 { "Component Model" }
+        p class="page-sub" {
+            "Props · State · Computed · Lifecycle · Events · Routes"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Anatomy of a component" }
+        pre class="code-block" {
+"component MyComponent \{
+    props    \{ ... \}      // pass-in values
+    state    \{ ... \}      // local reactive state
+    computed \{ ... \}      // derived values
+    on:mount   \{ ... \}    // runs at DOMContentLoaded
+    on:destroy \{ ... \}    // runs before navigation / unload
+    view     \{ ... \}      // required -- the HTML tree
+    style    \{ ... \}      // scoped CSS
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Props" }
+        p {
+            "Props are values passed into a component at call site. "
+            "They accept static strings or dynamic expressions."
+        }
+        pre class="code-block" {
+"component Badge \{
+    props \{ label: String, color: String \}
+    view  \{ span class=\{color\} \"Status: \{label\}\" \}
+\}
+
+// Static props
+Badge label=\"Active\" color=\"green\" \{\}
+
+// Dynamic props -- reactive
+Badge label=\{statusMsg\} color=\{statusColor\} \{\}"
+        }
+        p {
+            "A static prop ("
+            code { "name=\"value\"" }
+            ") is substituted at compile time. "
+            "A dynamic prop ("
+            code { "name=\{expr\}" }
+            ") compiles to a reactive interpolation span."
+        }
+        p { "Compound expressions using a prop name also work (v1.1.0):" }
+        pre class="code-block" {
+"component StepCounter \{
+    props \{ step: Number \}
+    view \{
+        // \{step + 1\} — prop used inside a compound expression
+        p \"Next step: \{step + 1\}\"
+        // class=\{color\} — prop used as a dynamic attribute
+        span class=\{color\} \"Status\"
+    \}
+\}
+
+// Call site
+StepCounter step=\"2\" color=\"green\" \{\}
+// Renders: \"Next step: (2) + 1\" (evaluated at runtime)
+//          <span class=\"green\">"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "State" }
+        p { "Local reactive state. Any assignment triggers a DOM update." }
+        pre class="code-block" {
+"state \{
+    count:  Number  = 0
+    name:   String  = \"World\"
+    active: Boolean = true
+    items:  List    = []
+\}"
+        }
+        p {
+            "Types: "
+            code { "Number" }
+            " · "
+            code { "String" }
+            " · "
+            code { "Boolean" }
+            " · "
+            code { "List" }
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Computed — derived state" }
+        p {
+            "The "
+            code { "computed" }
+            " block declares variables derived from state. Re-evaluated before every DOM bind."
+        }
+        pre class="code-block" {
+"component FullName \{
+    state \{
+        firstName: String = \"Jean\"
+        lastName:  String = \"Dupont\"
+    \}
+    computed \{
+        fullName = firstName + \" \" + lastName
+        initials = firstName + \".\" + lastName
+    \}
+    on:mount \{ firstName = \"Marie\" \}
+    view \{ p \"Hello \{fullName\} (\{initials\})\" \}
+\}"
+        }
+        p {
+            "Computed vars use "
+            code { "S.setQ()" }
+            " (silent setter) — no listener triggers, no reactive loops."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Lifecycle — on:mount" }
+        p {
+            code { "on:mount \{ \}" }
+            " runs once in "
+            code { "DOMContentLoaded" }
+            ", after the runtime is ready. Wrapped in an IIFE for variable isolation."
+        }
+        pre class="code-block" {
+"component Clock \{
+    state \{ time: String = \"\" \}
+    on:mount \{
+        const tick = () => \{ S.set(\"time\", new Date().toLocaleTimeString()); bind(); \};
+        tick();
+        window.__clockId = setInterval(tick, 1000);
+    \}
+    on:destroy \{ clearInterval(window.__clockId); \}
+    view \{ p \"Time: \{time\}\" \}
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Lifecycle — on:destroy" }
+        p {
+            code { "on:destroy \{ \}" }
+            " runs before every SPA navigation and on "
+            code { "window.beforeunload" }
+            ". Use it to clean up timers, cancel requests, or deregister listeners."
+        }
+        pre class="code-block" {
+"// Runtime output (tree-shaken in)
+const DESTROY_HOOKS = [
+    () => \{ clearInterval(window.__clockId); \}
+];
+function runDestroyHooks() \{ DESTROY_HOOKS.forEach(h => h()); \}
+window.addEventListener('beforeunload', runDestroyHooks);"
+        }
+        p {
+            code { "DESTROY_HOOKS" }
+            " and "
+            code { "runDestroyHooks" }
+            " are emitted only when at least one "
+            code { "on:destroy" }
+            " block is present."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Inter-component events" }
+        p {
+            code { "emit(\"name\", data)" }
+            " dispatches a CustomEvent on document. Listen with "
+            code { "on:name=\{handler\}" }
+            " at the call site."
+        }
+        pre class="code-block" {
+"// Emitter component
+component Notifier \{
+    view \{
+        button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}
+        button on:click=\{emit(\"reset\")\}       \{ \"Reset\" \}
+    \}
+\}
+
+// Listening to events at call site
+page \"home\" \{
+    Notifier on:ping=\{total += 1\} on:reset=\{total = 0\} \{\}
+    p \"Received \{total\} pings\"
+\}"
+        }
+        p {
+            "Events are global (document). Payload accessible via "
+            code { "e.detail" }
+            " in handler."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Scoped style and @media" }
+        p {
+            "Every component gets a unique "
+            code { "data-v" }
+            " attribute (FNV-1a hash). Media queries inside "
+            code { "style \{ \}" }
+            " are scoped automatically."
+        }
+        pre class="code-block" {
+"component Card \{
+    view \{ div class=\"card\" \{ slot content \} \}
+    style \{
+        .card \{ padding: 1rem; background: #1e293b; \}
+        @media (max-width: 768px) \{
+            .card \{ padding: 0.5rem; \}
+        \}
+    \}
+\}
+// Output: .card[data-v=\"a1b2\"] \{ ... \}
+//         @media (...) \{ .card[data-v=\"a1b2\"] \{ ... \} \}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Live demo" }
+        p { "The counter below is a live WebCore component with state, computed, and @if." }
+        LiveCounter {}
+    }
+}

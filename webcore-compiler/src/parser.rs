@@ -1,6 +1,9 @@
 //! Parser for .webc files using Pest PEG grammar
 
-use crate::ast::*;
+use crate::ast::{
+    App, Attribute, AttributeValue, Component, ComputedVar, Element, Layout, Page, Prop, Span,
+    StateVar, StyleItem, StyleProperty, StyleRule, WebCoreDocument,
+};
 use pest::Parser;
 use pest_derive::Parser;
 use std::collections::HashMap;
@@ -14,6 +17,8 @@ pub struct WebCoreParser;
 pub struct ParseError {
     pub message: String,
     pub span: Option<Span>,
+    /// The exact source line where the error occurred (for caret display).
+    pub source_line: Option<String>,
 }
 
 impl ParseError {
@@ -21,6 +26,7 @@ impl ParseError {
         Self {
             message: message.into(),
             span: None,
+            source_line: None,
         }
     }
 
@@ -28,14 +34,40 @@ impl ParseError {
         Self {
             message: message.into(),
             span: Some(span),
+            source_line: None,
         }
+    }
+}
+
+fn parse_hint(msg: &str) -> Option<&'static str> {
+    if msg.contains("interp_expr") {
+        Some("{} est vide — écris {maVar} ou utilise un attribut string: attr=\"valeur\"")
+    } else if msg.contains("string_literal") {
+        Some("valeur texte attendue entre guillemets, ex: \"ma valeur\"")
+    } else if msg.contains("identifier") {
+        Some("nom attendu (lettres, chiffres, _) sans guillemets")
+    } else {
+        None
     }
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(span) = &self.span {
-            write!(f, "{}:{}: {}", span.line, span.col, self.message)
+        if let (Some(span), Some(src)) = (&self.span, &self.source_line) {
+            let col0 = (span.col as usize).saturating_sub(1);
+            write!(
+                f,
+                "{}:{}\n  |\n{:>3} | {}\n  | {}^",
+                span.line,
+                span.col,
+                span.line,
+                src,
+                " ".repeat(col0)
+            )?;
+            if let Some(hint) = parse_hint(&self.message) {
+                write!(f, "\n  |\n  = hint: {}", hint)?;
+            }
+            Ok(())
         } else {
             write!(f, "{}", self.message)
         }
@@ -43,8 +75,21 @@ impl std::fmt::Display for ParseError {
 }
 
 pub fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
-    let pairs = WebCoreParser::parse(Rule::document, source)
-        .map_err(|e| ParseError::new(format!("Parse error: {}", e)))?;
+    let pairs = WebCoreParser::parse(Rule::document, source).map_err(|e| {
+        let (line, col) = match e.line_col {
+            pest::error::LineColLocation::Pos((l, c)) => (l as u32, c as u32),
+            pest::error::LineColLocation::Span((l, c), _) => (l as u32, c as u32),
+        };
+        let source_line = source
+            .lines()
+            .nth((line as usize).saturating_sub(1))
+            .map(str::to_string);
+        ParseError {
+            message: format!("{}", e),
+            span: Some(Span::new(0, 0, line, col)),
+            source_line,
+        }
+    })?;
 
     let mut document = WebCoreDocument {
         app: None,
@@ -111,32 +156,35 @@ fn parse_app(pair: pest::iterators::Pair<Rule>) -> Result<App, ParseError> {
 
     // Parse app body
     if let Some(body) = inner.next() {
-        for field in body.into_inner() {
-            match field.as_rule() {
-                Rule::app_theme => {
-                    if let Some(val) = field.into_inner().next() {
-                        app.theme = Some(extract_string_literal(val.as_str()));
+        for field_wrapper in body.into_inner() {
+            // field_wrapper is Rule::app_field; unwrap to get the actual field type
+            for field in field_wrapper.into_inner() {
+                match field.as_rule() {
+                    Rule::app_theme => {
+                        if let Some(val) = field.into_inner().next() {
+                            app.theme = Some(extract_string_literal(val.as_str()));
+                        }
                     }
-                }
-                Rule::app_layout => {
-                    if let Some(val) = field.into_inner().next() {
-                        app.layout = Some(val.as_str().to_string());
+                    Rule::app_layout => {
+                        if let Some(val) = field.into_inner().next() {
+                            app.layout = Some(val.as_str().to_string());
+                        }
                     }
-                }
-                Rule::app_routes => {
-                    for entry in field.into_inner() {
-                        if entry.as_rule() == Rule::route_entry {
-                            let mut parts = entry.into_inner();
-                            if let (Some(path), Some(comp)) = (parts.next(), parts.next()) {
-                                app.routes.insert(
-                                    extract_string_literal(path.as_str()),
-                                    comp.as_str().to_string(),
-                                );
+                    Rule::app_routes => {
+                        for entry in field.into_inner() {
+                            if entry.as_rule() == Rule::route_entry {
+                                let mut parts = entry.into_inner();
+                                if let (Some(path), Some(comp)) = (parts.next(), parts.next()) {
+                                    app.routes.insert(
+                                        extract_string_literal(path.as_str()),
+                                        comp.as_str().to_string(),
+                                    );
+                                }
                             }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
@@ -205,6 +253,9 @@ fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, Parse
         name,
         props: Vec::new(),
         state: Vec::new(),
+        computed: Vec::new(),
+        mount_body: None,
+        destroy_body: None,
         view: Vec::new(),
         style: Vec::new(),
         span,
@@ -219,6 +270,15 @@ fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, Parse
                 }
                 Rule::state_block => {
                     component.state = parse_state_block(section)?;
+                }
+                Rule::computed_block => {
+                    component.computed = parse_computed_block(section)?;
+                }
+                Rule::on_mount_block => {
+                    component.mount_body = Some(parse_on_mount_block(section)?);
+                }
+                Rule::on_destroy_block => {
+                    component.destroy_body = Some(parse_on_mount_block(section)?);
                 }
                 Rule::view_block => {
                     for elem in section.into_inner() {
@@ -304,52 +364,114 @@ fn parse_state_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<StateVar>,
     Ok(state_vars)
 }
 
-fn parse_style_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<StyleRule>, ParseError> {
-    let mut rules = Vec::new();
+fn parse_computed_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ComputedVar>, ParseError> {
+    let mut vars = Vec::new();
 
-    for rule_pair in pair.into_inner() {
-        if rule_pair.as_rule() == Rule::style_rule {
-            let span = Span::from_pest(rule_pair.as_span());
-            let mut inner = rule_pair.into_inner();
+    for def in pair.into_inner() {
+        if def.as_rule() == Rule::computed_def {
+            let span = Span::from_pest(def.as_span());
+            let mut inner = def.into_inner();
 
-            let selector = inner
+            let name = inner
+                .next()
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_default();
+
+            let expr = inner
                 .next()
                 .map(|p| p.as_str().trim().to_string())
                 .unwrap_or_default();
 
-            let mut properties = Vec::new();
-            for prop in inner {
-                if prop.as_rule() == Rule::style_property {
-                    let prop_span = Span::from_pest(prop.as_span());
-                    let mut prop_inner = prop.into_inner();
+            vars.push(ComputedVar { name, expr, span });
+        }
+    }
 
-                    let name = prop_inner
-                        .next()
-                        .map(|p| p.as_str().to_string())
-                        .unwrap_or_default();
+    Ok(vars)
+}
 
-                    let value = prop_inner
-                        .next()
-                        .map(|p| p.as_str().trim().to_string())
-                        .unwrap_or_default();
+fn parse_on_mount_block(pair: pest::iterators::Pair<Rule>) -> Result<String, ParseError> {
+    let raw = pair.into_inner().next().map(|p| p.as_str()).unwrap_or("{}");
+    // Strip outer { } and trim
+    let trimmed = raw.trim();
+    let body = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        trimmed[1..trimmed.len() - 1].trim()
+    } else {
+        trimmed
+    };
+    Ok(body.to_string())
+}
 
-                    properties.push(StyleProperty {
-                        name,
-                        value,
-                        span: prop_span,
-                    });
-                }
-            }
+fn parse_style_rule_pair(rule_pair: pest::iterators::Pair<Rule>) -> Result<StyleRule, ParseError> {
+    let span = Span::from_pest(rule_pair.as_span());
+    let mut inner = rule_pair.into_inner();
 
-            rules.push(StyleRule {
-                selector,
-                properties,
-                span,
+    let selector = inner
+        .next()
+        .map(|p| p.as_str().trim().to_string())
+        .unwrap_or_default();
+
+    let mut properties = Vec::new();
+    for prop in inner {
+        if prop.as_rule() == Rule::style_property {
+            let prop_span = Span::from_pest(prop.as_span());
+            let mut prop_inner = prop.into_inner();
+
+            let name = prop_inner
+                .next()
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_default();
+
+            let value = prop_inner
+                .next()
+                .map(|p| p.as_str().trim().to_string())
+                .unwrap_or_default();
+
+            properties.push(StyleProperty {
+                name,
+                value,
+                span: prop_span,
             });
         }
     }
 
-    Ok(rules)
+    Ok(StyleRule {
+        selector,
+        properties,
+        span,
+    })
+}
+
+fn parse_style_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<StyleItem>, ParseError> {
+    let mut items = Vec::new();
+
+    for item_pair in pair.into_inner() {
+        match item_pair.as_rule() {
+            Rule::style_rule => {
+                items.push(StyleItem::Rule(parse_style_rule_pair(item_pair)?));
+            }
+            Rule::media_block => {
+                let span = Span::from_pest(item_pair.as_span());
+                let mut inner = item_pair.into_inner();
+
+                let query = inner
+                    .next()
+                    .map(|p| p.as_str().trim().to_string())
+                    .unwrap_or_default();
+
+                let mut rules = Vec::new();
+                for rule_pair in inner {
+                    if rule_pair.as_rule() == Rule::style_rule {
+                        rules.push(parse_style_rule_pair(rule_pair)?);
+                    }
+                }
+
+                items.push(StyleItem::Media { query, rules, span });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(items)
 }
 
 fn parse_element(pair: pest::iterators::Pair<Rule>) -> Result<Element, ParseError> {
@@ -386,10 +508,24 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
                 .map(|p| p.as_str().to_string())
                 .unwrap_or_default();
 
-            let iterable = parts
-                .next()
-                .map(|p| p.as_str().trim().to_string())
-                .unwrap_or_default();
+            // Optional key declaration: for_key_decl → for_key_expr
+            let mut key: Option<String> = None;
+            let mut iterable = String::new();
+            for part in parts.by_ref() {
+                match part.as_rule() {
+                    Rule::for_key_decl => {
+                        key = part
+                            .into_inner()
+                            .find(|p| p.as_rule() == Rule::for_key_expr)
+                            .map(|p| p.as_str().to_string());
+                    }
+                    Rule::expression => {
+                        iterable = part.as_str().trim().to_string();
+                        break;
+                    }
+                    _ => {}
+                }
+            }
 
             let mut content = Vec::new();
             for elem in parts {
@@ -401,6 +537,7 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
             Ok(Element::For {
                 item,
                 iterable,
+                key,
                 content,
                 span,
             })
@@ -473,13 +610,37 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
 
 fn parse_slot(pair: pest::iterators::Pair<Rule>) -> Result<Element, ParseError> {
     let span = Span::from_pest(pair.as_span());
-    let name = pair
-        .into_inner()
-        .next()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_else(|| "content".to_string());
+    let mut inner = pair.into_inner().peekable();
 
-    Ok(Element::Slot(name, span))
+    let name = if inner
+        .peek()
+        .map(|p| p.as_rule() == Rule::identifier)
+        .unwrap_or(false)
+    {
+        inner
+            .next()
+            .map(|p| p.as_str().to_string())
+            .unwrap_or_else(|| "content".to_string())
+    } else {
+        "content".to_string()
+    };
+
+    let mut content = Vec::new();
+    for part in inner {
+        if part.as_rule() == Rule::element {
+            content.push(parse_element(part)?);
+        }
+    }
+
+    if content.is_empty() {
+        Ok(Element::Slot(name, span))
+    } else {
+        Ok(Element::SlotContent {
+            name,
+            content,
+            span,
+        })
+    }
 }
 
 fn parse_tag(pair: pest::iterators::Pair<Rule>) -> Result<Element, ParseError> {
@@ -647,40 +808,48 @@ fn parse_text_element(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
     Ok(Element::Text(clean_text.to_string(), span))
 }
 
-/// Split a string potentially containing multiple {var} interpolations into Elements
+/// Split a string potentially containing multiple {var} interpolations into Elements.
+/// Handles escape sequences: \{ → literal '{', \" → literal '"'.
 fn split_interpolated_text(text: &str) -> Vec<Element> {
     let mut elements: Vec<Element> = Vec::new();
-    let mut i = 0usize;
-    let len = text.len();
     let default_span = Span::default();
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0usize;
+    let mut current_text = String::new();
 
     while i < len {
-        if let Some(start) = text[i..].find('{') {
-            let start_idx = i + start;
-
-            // Push prefix text if any
-            if start_idx > i {
-                elements.push(Element::Text(text[i..start_idx].to_string(), default_span));
+        if chars[i] == '\\' && i + 1 < len {
+            match chars[i + 1] {
+                '{' => { current_text.push('{'); i += 2; }
+                '"' => { current_text.push('"'); i += 2; }
+                '\\' => { current_text.push('\\'); i += 2; }
+                other => { current_text.push('\\'); current_text.push(other); i += 2; }
             }
-
+        } else if chars[i] == '{' {
+            // Start of interpolation — flush pending text
+            if !current_text.is_empty() {
+                elements.push(Element::Text(current_text.clone(), default_span));
+                current_text.clear();
+            }
             // Find matching '}'
-            if let Some(end) = text[start_idx..].find('}') {
-                let end_idx = start_idx + end;
-                let var_name = text[start_idx + 1..end_idx].trim().to_string();
-                elements.push(Element::Interpolation(var_name, default_span));
-                i = end_idx + 1;
+            if let Some(close) = chars[i + 1..].iter().position(|&c| c == '}') {
+                let var_name: String = chars[i + 1..i + 1 + close].iter().collect();
+                elements.push(Element::Interpolation(var_name.trim().to_string(), default_span));
+                i += close + 2;
             } else {
-                // No closing brace, treat rest as text
-                elements.push(Element::Text(text[start_idx..].to_string(), default_span));
+                // No closing brace — treat rest as literal text
+                current_text.extend(chars[i..].iter());
                 break;
             }
         } else {
-            // No more '{'
-            if i < len {
-                elements.push(Element::Text(text[i..].to_string(), default_span));
-            }
-            break;
+            current_text.push(chars[i]);
+            i += 1;
         }
+    }
+
+    if !current_text.is_empty() {
+        elements.push(Element::Text(current_text, default_span));
     }
 
     if elements.is_empty() && !text.is_empty() {

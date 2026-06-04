@@ -1,0 +1,119 @@
+component LiveCounter {
+    state {
+        count: Number = 0
+        step:  Number = 1
+    }
+    computed {
+        doubled = count * 2
+    }
+    view {
+        div class="demo-box" {
+            p class="demo-label" { "Live Demo — Reactive Counter" }
+            div class="counter-display" {
+                span class="counter-value" { "{count}" }
+            }
+            div class="counter-controls" {
+                button class="btn btn-secondary" on:click={count = max(0, count - step)} { "−{step}" }
+                button class="btn btn-primary" on:click={count += step} { "+{step}" }
+                button class="btn btn-ghost" on:click={count = 0} { "Reset" }
+            }
+            div class="counter-info" {
+                span { "Doubled: " }
+                strong { "{doubled}" }
+                span { " · Step: " }
+                input type="number" class="step-input" value={step} on:input={step = max(1, event.target.value)}
+            }
+            @if count > 9 {
+                p class="badge badge-accent" { "Double digits!" }
+            } @else {
+                p class="badge badge-muted" { "Keep going…" }
+            }
+        }
+    }
+    style {
+        .demo-box {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            margin: var(--spacing-lg) 0;
+        }
+        .demo-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-primary);
+            font-weight: 600;
+            margin-bottom: var(--spacing-md);
+        }
+        .counter-display {
+            display: flex;
+            justify-content: center;
+            margin: var(--spacing-md) 0;
+        }
+        .counter-value {
+            font-size: 4rem;
+            font-weight: 800;
+            color: var(--color-primary);
+            font-variant-numeric: tabular-nums;
+        }
+        .counter-controls {
+            display: flex;
+            gap: var(--spacing-sm);
+            justify-content: center;
+            margin: var(--spacing-md) 0;
+        }
+        .btn {
+            padding: 0.5rem 1.25rem;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary  { background: var(--color-primary);   color: #fff; }
+        .btn-secondary { background: var(--color-secondary); color: #fff; }
+        .btn-ghost {
+            background: transparent;
+            color: var(--color-muted);
+            border: 1px solid var(--color-border);
+        }
+        .counter-info {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            justify-content: center;
+            color: var(--color-muted);
+            font-size: 0.9rem;
+            margin-top: var(--spacing-md);
+        }
+        .step-input {
+            width: 60px;
+            background: var(--color-code-bg);
+            border: 1px solid var(--color-border);
+            color: var(--color-text);
+            padding: 0.2rem 0.4rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .badge {
+            margin-top: var(--spacing-sm);
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 0.2rem 0.75rem;
+            border-radius: 999px;
+            display: inline-block;
+            text-align: center;
+        }
+        .badge-accent { background: var(--color-accent); color: #000; }
+        .badge-muted  { background: var(--color-border); color: var(--color-muted); }
+
+        @media (max-width: 480px) {
+            .counter-value { font-size: 3rem; }
+            .counter-controls { flex-wrap: wrap; }
+        }
+    }
+}

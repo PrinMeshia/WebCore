@@ -1,0 +1,139 @@
+component SignupForm {
+    state {
+        submitted: Boolean = false
+        username:  String  = ""
+        email:     String  = ""
+    }
+
+    view {
+        section class="form-section" {
+            h2 "Create an account"
+            p class="section-sub" { "All fields marked * are required." }
+
+            @if submitted {
+                div class="success-banner" {
+                    span class="success-icon" { "✓" }
+                    p { "Welcome, " strong { "{username}" } "! Check " strong { "{email}" } " to confirm." }
+                }
+            } @else {
+                form on:submit={submitted = true} {
+                    div class="field" {
+                        label { "Username *" }
+                        input type="text"
+                              name="username"
+                              placeholder="at least 3 characters"
+                              validate:required="Username is required"
+                              validate:minlength="3,At least 3 characters"
+                              on:input={username = event.target.value}
+                        @error "username" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Email *" }
+                        input type="email"
+                              name="email"
+                              placeholder="you@example.com"
+                              validate:required="Email is required"
+                              validate:email="Enter a valid email address"
+                              on:input={email = event.target.value}
+                        @error "email" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Password *" }
+                        input type="password"
+                              name="password"
+                              placeholder="8+ chars, one uppercase, one digit"
+                              validate:required="Password is required"
+                              validate:minlength="8,At least 8 characters"
+                              validate:pattern="^(?=.*[A-Z])(?=.*\\d).+$,Must contain an uppercase letter and a digit"
+                        @error "password" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Website" }
+                        input type="url"
+                              name="website"
+                              placeholder="https://yoursite.com"
+                              validate:pattern="^https?://.+,Must start with http:// or https://"
+                        @error "website" {
+                            span class="err" { }
+                        }
+                    }
+
+                    button type="submit" class="btn-primary" { "Create account →" }
+                }
+            }
+        }
+    }
+
+    style {
+        .form-section {
+            max-width: 480px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #1e293b;
+            border-radius: 10px;
+            border: 1px solid #334155;
+        }
+        h2 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+        .section-sub { color: #64748b; font-size: 0.85rem; margin: 0 0 1.5rem; }
+        .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1.1rem; }
+        label { font-size: 0.85rem; font-weight: 600; color: #cbd5e1; }
+        input {
+            padding: 0.5rem 0.75rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 0.95rem;
+            transition: border-color 0.15s;
+        }
+        input:focus { outline: none; border-color: #3b82f6; }
+        .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
+        .btn-primary {
+            width: 100%;
+            padding: 0.65rem;
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 0.5rem;
+            transition: background 0.15s;
+        }
+        .btn-primary:hover { background: #2563eb; }
+        .success-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 1rem 1.25rem;
+            background: #052e16;
+            border: 1px solid #16a34a;
+            border-radius: 8px;
+        }
+        .success-icon {
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            background: #16a34a;
+            color: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .success-banner p { margin: 0; color: #86efac; line-height: 1.5; }
+        .success-banner strong { color: #4ade80; }
+    }
+}

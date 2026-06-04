@@ -1,0 +1,11 @@
+layout MainLayout {
+    header {
+        nav {
+            span class="brand" { "WebCore i18n" }
+        }
+    }
+    main { slot content }
+    footer {
+        p "Built with WebCore — zero runtime dependencies."
+    }
+}

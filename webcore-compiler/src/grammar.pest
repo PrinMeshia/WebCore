@@ -30,7 +30,19 @@ page_decl = { "page" ~ string_literal ~ "{" ~ element* ~ "}" }
 // ============ COMPONENT DECLARATION ============
 component_decl = { "component" ~ identifier ~ "{" ~ component_body ~ "}" }
 component_body = { component_section* }
-component_section = _{ props_block | state_block | view_block | style_block | element }
+component_section = _{ props_block | state_block | computed_block | on_mount_block | on_destroy_block | view_block | style_block | element }
+
+// Computed state block
+computed_block = { "computed" ~ "{" ~ computed_def* ~ "}" }
+computed_def = { identifier ~ "=" ~ computed_rhs }
+computed_rhs = @{ (!"\n" ~ !"\r" ~ !"}" ~ ANY)+ }
+
+// on:mount / on:destroy lifecycle hooks — recursive brace matching (any nesting depth)
+on_mount_block = { "on:mount" ~ on_mount_body }
+on_destroy_block = { "on:destroy" ~ on_mount_body }
+on_mount_body    = @{ "{" ~ on_mount_content* ~ "}" }
+on_mount_content =  _{ on_mount_nested | (!("{" | "}") ~ ANY) }
+on_mount_nested  =  _{ "{" ~ on_mount_content* ~ "}" }
 
 // Props block
 props_block = { "props" ~ "{" ~ prop_def* ~ "}" }
@@ -44,9 +56,12 @@ state_def = { identifier ~ ":" ~ type_name ~ ("=" ~ value)? }
 view_block = { "view" ~ "{" ~ element* ~ "}" }
 
 // Style block
-style_block = { "style" ~ "{" ~ style_rule* ~ "}" }
+style_block = { "style" ~ "{" ~ style_item* ~ "}" }
+style_item = _{ media_block | style_rule }
+media_block = { "@media" ~ media_query ~ "{" ~ style_rule* ~ "}" }
+media_query = @{ (!"{" ~ ANY)+ }
 style_rule = { selector ~ "{" ~ style_property* ~ "}" }
-selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")")+ }
+selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")+ }
 style_property = { property_name ~ ":" ~ property_value ~ ";"? }
 property_name = @{ (ASCII_ALPHA | "-")+ }
 property_value = @{ (!(";" | "}") ~ ANY)+ }
@@ -57,7 +72,9 @@ element = { control_flow | slot_element | tag_element | text_element }
 // Control flow: @for, @if, @error
 control_flow = { for_loop | if_statement | error_block }
 
-for_loop = { "@for" ~ identifier ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
+for_loop = { "@for" ~ identifier ~ for_key_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
+for_key_decl = { "key" ~ "=" ~ for_key_expr }
+for_key_expr = @{ (ASCII_ALPHANUMERIC | "_" | "." | "[" | "]" | "$")+ }
 
 if_statement = { "@if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
 else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
@@ -65,8 +82,8 @@ else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
 // Form validation error display: @error "fieldname" { ... }
 error_block = { "@error" ~ string_literal ~ "{" ~ element* ~ "}" }
 
-// Slot element
-slot_element = { "slot" ~ identifier? }
+// Slot element: placeholder (`slot header`) or content provision (`slot header { ... }`)
+slot_element = { ("slot" ~ identifier ~ "{" ~ element* ~ "}") | ("slot" ~ identifier?) }
 
 // Tag element (HTML-like or Component)
 tag_element = { tag_name ~ attribute* ~ tag_content? }
@@ -94,7 +111,8 @@ interpolated_content = { (interpolation | text_fragment)* }
 interpolation = { "{" ~ interp_expr ~ "}" }
 // Accepts any expression: {count}, {count + 1}, {user.name}, etc.
 interp_expr = @{ (!"}" ~ ANY)+ }
-text_fragment = @{ (!"\"" ~ !"{" ~ ANY)+ }
+// text_fragment: plain text inside a string, supporting \{ and \" escape sequences
+text_fragment = @{ ("\\" ~ "{" | "\\" ~ "\"" | !"\"" ~ !"{" ~ ANY)+ }
 
 // ============ EXPRESSIONS ============
 expression = @{ (!(("{" | "}") ~ WHITESPACE* ~ (element | "}")) ~ ANY)+ }

@@ -1,0 +1,7 @@
+app FormsDemo {
+    theme: "default"
+    layout: MainLayout
+    routes {
+        "/": HomePage
+    }
+}

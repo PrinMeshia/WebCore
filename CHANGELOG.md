@@ -5,7 +5,112 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.7.0] — 2026-06-02
+## [1.1.1] — 2026-06-04 · [GitHub Release](https://github.com/PrinMeshia/Webcore/releases/tag/v1.1.1)
+
+### Corrections
+
+- **Validation de formulaires** — le listener de soumission tourne maintenant en **phase de capture** avec `stopImmediatePropagation()`, garantissant qu'il s'exécute avant tout handler `on:submit` inline ; le contenu des blocs `@error` est préservé via `firstElementChild` (le texte d'erreur remplace le span interne sans supprimer la structure)
+- **Handlers multi-instructions** — `on:click={a = 1; b = 2}` : les instructions séparées par `;` sont désormais compilées indépendamment (`S.set('a',1);S.set('b',2)`) au lieu de générer une expression JS invalide
+- **`on:mount` imbrication profonde** — la grammaire Pest supporte désormais des accolades imbriquées à profondeur arbitraire dans le corps `on:mount { }` (règles récursives silencieuses `on_mount_nested`) ; les callbacks JS complexes (ex. `setInterval`, `addEventListener` avec corps multi-ligne) ne provoquent plus d'erreur de parse
+- **`t()` dans `evalCond`** — la fonction i18n `t()` est maintenant passée en paramètre explicite aux `new Function()` générés par `evalCond` ; la variable locale interne a été renommée `_c` pour éviter le masquage
+- **Sélecteurs CSS multi-éléments** — `input, textarea { }` est désormais valide dans les blocs `style { }` (virgule ajoutée à la règle `selector` dans `grammar.pest`)
+- **DOM diffing `@for` avec key** — la clé DOM est posée sur `firstElementChild` de l'élément cloné au lieu d'un `<div>` wrapper, éliminant les espaces parasites entre éléments de liste
+- **Navigation SPA** — les chemins dans `nav()` utilisent maintenant `/` comme préfixe (`/about.html`) pour éviter les 404 en mode dev
+
+### Ajouts
+
+- **Exemple `examples/forms/`** — site de démonstration complet avec deux composants de formulaire : `SignupForm` (username, email, password avec validate:pattern, website optionnel) et `ContactForm` (textarea avec compteur de caractères via `on:input` + variable `computed remaining`, bannière de succès, styles dark)
+- **Todo list enrichi** — `examples/todo/` : les items peuvent être marqués comme faits (texte barré) ou supprimés ; délégation d'événements via `data-webcore-idx` ; helper `window.mkTodo` illustre le pattern pour créer des objets literals dans les expressions `on:click`
+
+---
+
+## [1.1.0] 
+
+### Ajouts
+
+- **Routes paramétrées** — les routes peuvent désormais contenir des segments `:param`
+  (ex. `"/post/:slug": PostPage`). Le compilateur génère un tableau `ROUTES` avec
+  patterns RegExp, une fonction `matchRoute()` et un objet `ROUTE_PARAMS` mis à jour
+  à chaque navigation. Les paramètres sont accessibles dans les vues via `{$route.slug}`.
+  Tree-shaké : `ROUTES` / `ROUTE_PARAMS` sont émis uniquement si au moins une route
+  est paramétrée.
+- **`@for` avec key** — syntaxe `@for item key=item.id in items { ... }` pour activer
+  le DOM diffing par clé. Émet `data-webcore-for-key` sur le `<template>` ;
+  `bindFor()` patche uniquement les nœuds modifiés au lieu de re-rendre toute la liste.
+- **i18n : paramètres et pluralisation** — `t("key", n)` pour la pluralisation
+  (`_one` / `_other` + `{{count}}`) et `t("key", value)` pour la substitution
+  positionnelle (`{{0}}` dans le TOML).
+- **Props composées** — `{prop + 1}` ou `{step * count}` sont maintenant substitués
+  même lorsque l'expression n'est pas une correspondance exacte de nom de prop.
+  Même correction sur les valeurs d'attributs dynamiques (`class={color}`).
+- **Messages d'erreur enrichis** — les erreurs de parsing affichent désormais la ligne
+  source avec un caret pointant vers la colonne fautive, plus des hints contextuels
+  pour les erreurs les plus fréquentes.
+
+### Améliorations
+
+- `evalCond` gère le préfixe `$route.xxx` → `ROUTE_PARAMS['xxx']` lorsque des routes
+  paramétrées sont présentes.
+- 7 nouveaux golden tests (76 au total).
+
+---
+
+## [1.0.0] 
+
+### Ajouts
+
+- **`on:destroy { }`** — lifecycle hook symétrique à `on:mount` : le corps JS est exécuté avant chaque navigation SPA (`nav()`) et à `window.beforeunload` ; `DESTROY_HOOKS` tableau + `runDestroyHooks()` injectés dans le runtime ; `destroy_body: Option<String>` ajouté à l'AST `Component` ; `on:destroy` règle de grammaire Pest partagée avec `on_mount_body`
+- **Tree-shaking du runtime** — seules les fonctions réellement utilisées sont émises :
+  - `bindFor` : uniquement si le document contient des directives `@for`
+  - `bindIf` : uniquement si le document contient des directives `@if`
+  - `bindAttrs` : uniquement si le document contient des attributs dynamiques `class={expr}`
+  - `validateField` + `bindValidation` : uniquement si le document contient des attributs `validate:*` ou des blocs `@error`
+  - `nav` + `toFile` + listener `popstate` : uniquement si le document définit des routes ou des appels `webcore_navigate(...)`
+  - `evalCond` : uniquement si l'une des fonctions ci-dessus est présente
+  - `VARS` / `STORE_VARS` : uniquement si au moins une fonction de bind reactive est présente
+  - `COMPUTED` + `rebindComputed` : uniquement si le composant contient un bloc `computed { }`
+- **`runDestroyHooks` dans `nav()`** — avant chaque navigation, tous les hooks `on:destroy` sont exécutés ; `window.addEventListener('beforeunload', runDestroyHooks)` ajouté pour le déchargement de page
+
+### Améliorations
+
+- `webcore_navigate` n'est plus exporté dans `globalThis` si aucune navigation n'est détectée
+- `setLocale` utilise la séquence `all_rebinds` contextuelle plutôt qu'un appel fixe à toutes les fonctions
+- Le loader WASM utilise `all_rebinds` dynamique au lieu d'un appel hardcodé à toutes les fonctions de bind
+
+---
+
+## [0.9.0] 
+
+### Ajouts
+
+- **État dérivé (`computed { }`)** — bloc `computed` dans les composants : `fullName = firstName + " " + lastName` ; les expressions sont compilées avec remplacement des variables d'état (`S.get(...)`) et des fonctions utilitaires (`U.max(...)`) ; `COMPUTED` tableau JS contenant `{name, fn}` pour chaque var dérivée ; `rebindComputed()` réévalue toutes les vars dérivées via `S.setQ(...)` (setter silencieux, sans déclenchement de listeners) avant chaque bind DOM ; `setQ` ajouté à la classe `State` ; `bind()` appelle `rebindComputed()` en premier
+- **Lifecycle hooks (`on:mount { }`)** — bloc `on:mount` dans les composants : code JS brut exécuté dans `DOMContentLoaded` après `bind()`/`bindIf()`/etc. ; chaque corps est wrappé dans un IIFE pour éviter la fuite de variables locales ; `mount_body: Option<String>` ajouté à `Component` dans l'AST
+- **Événements inter-composants (`emit` + `on:event`)** — `emit("eventName")` et `emit("eventName", data)` dans les expressions d'événements compilés vers `document.dispatchEvent(new CustomEvent(...))` ; `on:eventName={handler}` sur un appel de composant (ex. `Notifier on:notify={handler} {}`) enregistre `document.addEventListener('eventName', e => { handler })` dans `DOMContentLoaded` ; `EventListenerMapping` struct dans `codegen_js.rs` ; collecte récursive depuis pages, composants et layouts via `collect_component_event_listeners()`
+
+### Améliorations
+
+- Classe `State` : ajout de `setQ(k,v)` — setter silencieux qui met à jour la map sans déclencher les abonnés (utilisé par `rebindComputed` pour éviter des boucles)
+- `bind()` enchaîne maintenant `rebindComputed()` → les vars dérivées sont toujours à jour avant le rebind des interpolations
+
+---
+
+## [0.8.0] 
+
+### Ajouts
+
+- **Props réactives** — les props acceptent désormais des expressions dynamiques en plus des chaînes statiques : `Counter value={count} />` ; `Interpolation(propName)` dans la vue du composant est remplacée par `Interpolation(expr)` → reste un span réactif `data-webcore-interpolation` au lieu d'un `Text` figé ; les props statiques (`name="Alice"`) continuent de fonctionner comme avant ; `substitute_props` étendu avec paramètre `dynamic_props`
+- **Named slots** — les layouts peuvent déclarer plusieurs slots nommés (`slot header`, `slot sidebar`, `slot content`) ; les pages fournissent le contenu via `slot header { ... }` (nouvelle syntaxe) ; les éléments non rattachés à un slot nommé alimentent le slot `content` par défaut ; résolution récursive via `resolve_slots()` — fonctionne à n'importe quelle profondeur dans l'arbre du layout ; rétrocompatibilité totale avec `main { slot content }`
+- **`@media` dans les blocs `style { }`** — support des media queries directement dans les composants : `@media (max-width: 768px) { .card { ... } }` ; le scoping CSS (`data-v`) est propagé à l'intérieur des blocs `@media` ; nouveau type `StyleItem { Rule | Media { query, rules } }` dans l'AST ; `Component.style` passe de `Vec<StyleRule>` à `Vec<StyleItem>`
+
+### Limites supprimées
+
+- Props : les valeurs d'expressions dynamiques (`value={expr}`) sont maintenant supportées (était `String` statique uniquement)
+- Un seul slot `content` par layout (maintenant N slots nommés)
+- Pas de `@media` dans `style { }` (maintenant supporté)
+
+---
+
+## [0.7.0] 
 
 ### Ajouts
 
@@ -13,7 +118,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.6.0] — 2026-06-02
+## [0.6.0] 
 
 ### Ajouts
 
@@ -21,7 +126,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.5.0] — 2026-06-02
+## [0.5.0]
 
 ### Ajouts
 
@@ -29,7 +134,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0] — 2026-06-02
+## [0.4.0] 
 
 ### Ajouts
 
@@ -43,7 +148,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0] — 2026-06-02
+## [0.3.0] 
 
 ### Ajouts
 
@@ -64,7 +169,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] — 2026-06-01
+## [0.2.0] 
 
 ### Ajouts
 

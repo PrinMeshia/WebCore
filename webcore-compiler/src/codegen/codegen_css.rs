@@ -1,6 +1,6 @@
 //! CSS Code Generator with Scoped Styles
 
-use crate::ast::*;
+use crate::ast::{Component, StyleItem, StyleRule, WebCoreDocument};
 use crate::theme::Theme;
 
 /// Generate a unique scope ID for a component based on its name.
@@ -14,6 +14,17 @@ pub fn generate_scope_id(component_name: &str) -> String {
     format!("wc-{:06x}", hash & 0xFFFFFF)
 }
 
+fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
+    let mut css = String::new();
+    let scoped_selector = scope_selector(&rule.selector, scope_id);
+    css.push_str(&format!("{}{} {{\n", indent, scoped_selector));
+    for prop in &rule.properties {
+        css.push_str(&format!("{}  {}: {};\n", indent, prop.name, prop.value));
+    }
+    css.push_str(&format!("{}}}\n", indent));
+    css
+}
+
 /// Generate scoped CSS for a single component
 pub fn generate_scoped_css(component: &Component) -> String {
     if component.style.is_empty() {
@@ -25,15 +36,19 @@ pub fn generate_scoped_css(component: &Component) -> String {
 
     css.push_str(&format!("/* Component: {} */\n", component.name));
 
-    for rule in &component.style {
-        let scoped_selector = scope_selector(&rule.selector, &scope_id);
-        css.push_str(&format!("{} {{\n", scoped_selector));
-
-        for prop in &rule.properties {
-            css.push_str(&format!("  {}: {};\n", prop.name, prop.value));
+    for item in &component.style {
+        match item {
+            StyleItem::Rule(rule) => {
+                css.push_str(&emit_scoped_rule(rule, &scope_id, ""));
+            }
+            StyleItem::Media { query, rules, .. } => {
+                css.push_str(&format!("@media {} {{\n", query));
+                for rule in rules {
+                    css.push_str(&emit_scoped_rule(rule, &scope_id, "  "));
+                }
+                css.push_str("}\n");
+            }
         }
-
-        css.push_str("}\n");
     }
 
     css.push('\n');

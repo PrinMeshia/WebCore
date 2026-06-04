@@ -5,12 +5,23 @@ use crate::codegen::codegen_html::HandlerMapping;
 use regex::Regex;
 use std::collections::HashSet;
 
-/// Collect all local state variable names from a document (component-level)
+/// Component-level event listener: emitted by `on:eventName={expr}` on a component call.
+pub struct EventListenerMapping {
+    pub event_name: String,
+    pub expression: String,
+}
+
+/// Collect all local state variable names from a document (component-level).
+/// Includes computed var names so that `evalCond('doubled')` resolves to
+/// `S.get('doubled')` rather than a bare identifier that throws ReferenceError.
 pub fn collect_state_variables(document: &WebCoreDocument) -> HashSet<String> {
     let mut vars = HashSet::new();
     for component in document.components.values() {
         for state_var in &component.state {
             vars.insert(state_var.name.clone());
+        }
+        for computed_var in &component.computed {
+            vars.insert(computed_var.name.clone());
         }
     }
     vars
@@ -74,6 +85,19 @@ fn parse_store_simple_assign(expr: &str) -> Option<(String, String)> {
 /// Full expression compiler: handles both `$store.var` and local state vars.
 fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) -> String {
     let compiled = expr.trim();
+
+    // Multi-statement: split on ; and compile each independently
+    // e.g. `items = [...items, draft]; draft = ""`
+    if compiled.contains(';') {
+        let parts: Vec<&str> = compiled.split(';').map(str::trim).filter(|s| !s.is_empty()).collect();
+        if parts.len() > 1 {
+            return parts
+                .iter()
+                .map(|s| compile_expression_full(s, state_vars))
+                .collect::<Vec<_>>()
+                .join(";");
+        }
+    }
 
     // Store compound assigns: $store.count += 1
     if let Some((var, val)) = parse_store_compound_assign(compiled, "+=") {
@@ -142,8 +166,36 @@ fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) -> String {
     if compiled.contains("webcore_navigate(") {
         return compile_navigate_call(compiled);
     }
+    // emit("eventName") / emit("eventName", data) — inter-component events
+    if compiled.contains("emit(") {
+        return compile_emit_call(compiled, state_vars);
+    }
     // Default: replace all variables and utils
     let result = replace_store_and_local(compiled, state_vars);
+    replace_utils_short(&result)
+}
+
+/// Compile emit("eventName") or emit("eventName", data) to CustomEvent dispatch.
+fn compile_emit_call(expr: &str, state_vars: &HashSet<String>) -> String {
+    if let Some(start) = expr.find("emit(") {
+        let inner_start = start + 5;
+        if let Some(paren_end) = expr[inner_start..].rfind(')') {
+            let args_str = &expr[inner_start..inner_start + paren_end];
+            let parts: Vec<&str> = args_str.splitn(2, ',').collect();
+            let event_name = parts[0].trim();
+            if parts.len() == 1 || parts[1].trim().is_empty() {
+                return format!("document.dispatchEvent(new CustomEvent({}))", event_name);
+            } else {
+                let detail_raw = parts[1].trim();
+                let detail = replace_utils_short(&replace_store_and_local(detail_raw, state_vars));
+                return format!(
+                    "document.dispatchEvent(new CustomEvent({},{{detail:{}}}))",
+                    event_name, detail
+                );
+            }
+        }
+    }
+    let result = replace_store_and_local(expr, state_vars);
     replace_utils_short(&result)
 }
 
@@ -226,6 +278,52 @@ fn replace_utils_short(expr: &str) -> String {
     result
 }
 
+/// Convert a route pattern `/post/:slug` to a JS regex string `^\/post\/([^\/]+)$`
+/// and return the list of param names in capture order.
+fn route_to_js_regex(pattern: &str) -> (String, Vec<String>) {
+    if pattern == "/" {
+        return ("^\\/$".to_string(), vec![]);
+    }
+    let mut params = Vec::new();
+    let mut regex = String::from("^");
+    for segment in pattern.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        if let Some(name) = segment.strip_prefix(':') {
+            params.push(name.to_string());
+            regex.push_str("\\/([^\\/]+)");
+        } else {
+            regex.push_str("\\/");
+            for c in segment.chars() {
+                match c {
+                    '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '\\' | '^'
+                    | '$' | '|' => {
+                        regex.push('\\');
+                        regex.push(c);
+                    }
+                    _ => regex.push(c),
+                }
+            }
+        }
+    }
+    regex.push('$');
+    (regex, params)
+}
+
+/// Convert a component/page name to the expected HTML filename (mirrors main.rs logic).
+fn page_name_to_file(name: &str) -> String {
+    let route = name
+        .to_lowercase()
+        .replace("page", "")
+        .replace("home", "index");
+    if route.is_empty() || route == "index" {
+        "index.html".to_string()
+    } else {
+        format!("{}.html", route)
+    }
+}
+
 /// Compile webcore_navigate calls to short nav() function
 fn compile_navigate_call(expr: &str) -> String {
     if let Some(start) = expr.find("webcore_navigate(") {
@@ -246,6 +344,203 @@ fn compile_navigate_call(expr: &str) -> String {
     expr.to_string()
 }
 
+/// Collect on:mount bodies from all components (raw JS to run at DOMContentLoaded).
+fn collect_on_mount_bodies(document: &WebCoreDocument) -> Vec<String> {
+    document
+        .components
+        .values()
+        .filter_map(|c| c.mount_body.as_ref())
+        .filter(|b| !b.trim().is_empty())
+        .cloned()
+        .collect()
+}
+
+/// Collect on:destroy bodies from all components.
+fn collect_on_destroy_bodies(document: &WebCoreDocument) -> Vec<String> {
+    document
+        .components
+        .values()
+        .filter_map(|c| c.destroy_body.as_ref())
+        .filter(|b| !b.trim().is_empty())
+        .cloned()
+        .collect()
+}
+
+/// Features detected by walking the document AST — drives tree-shaking.
+#[derive(Default)]
+struct RuntimeFeatures {
+    has_interpolation: bool,
+    has_if: bool,
+    has_for: bool,
+    has_dynamic_attrs: bool,
+    has_validation: bool,
+    has_navigation: bool,
+    has_param_routes: bool,
+}
+
+fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
+    for elem in elements {
+        match elem {
+            Element::Interpolation(..) => f.has_interpolation = true,
+            Element::For { content, .. } => {
+                f.has_for = true;
+                detect_features_in_elements(content, f);
+            }
+            Element::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                f.has_if = true;
+                detect_features_in_elements(then_branch, f);
+                if let Some(eb) = else_branch {
+                    detect_features_in_elements(eb, f);
+                }
+            }
+            Element::Tag {
+                name,
+                attributes,
+                content,
+                ..
+            } => {
+                if name == "link" && attributes.iter().any(|a| a.name == "to") {
+                    f.has_navigation = true;
+                }
+                for attr in attributes {
+                    if attr.name.starts_with("validate:") {
+                        f.has_validation = true;
+                    }
+                    if let AttributeValue::Expression(expr) = &attr.value {
+                        if !attr.name.starts_with("on:") {
+                            f.has_dynamic_attrs = true;
+                        }
+                        if expr.contains("webcore_navigate(") {
+                            f.has_navigation = true;
+                        }
+                    }
+                }
+                detect_features_in_elements(content, f);
+            }
+            Element::Component { content, .. } => {
+                detect_features_in_elements(content, f);
+            }
+            Element::ErrorBlock { content, .. } => {
+                f.has_validation = true;
+                detect_features_in_elements(content, f);
+            }
+            Element::SlotContent { content, .. } => {
+                detect_features_in_elements(content, f);
+            }
+            Element::Text(..) | Element::Slot(..) => {}
+        }
+    }
+}
+
+fn detect_features(document: &WebCoreDocument) -> RuntimeFeatures {
+    let mut f = RuntimeFeatures::default();
+    if let Some(app) = &document.app {
+        if !app.routes.is_empty() {
+            f.has_navigation = true;
+        }
+        if app.routes.keys().any(|path| path.contains(':')) {
+            f.has_param_routes = true;
+        }
+    }
+    for page in document.pages.values() {
+        detect_features_in_elements(&page.content, &mut f);
+    }
+    for component in document.components.values() {
+        detect_features_in_elements(&component.view, &mut f);
+    }
+    for layout in document.layouts.values() {
+        detect_features_in_elements(&layout.content, &mut f);
+    }
+    f
+}
+
+/// Build the semicolon-separated sequence of rebind calls for a given feature set.
+fn rebind_seq(f: &RuntimeFeatures, needs_bind: bool) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if needs_bind {
+        parts.push("bind()");
+    }
+    if f.has_if {
+        parts.push("bindIf()");
+    }
+    if f.has_for {
+        parts.push("bindFor()");
+    }
+    if f.has_dynamic_attrs {
+        parts.push("bindAttrs()");
+    }
+    if f.has_validation {
+        parts.push("bindValidation()");
+    }
+    parts.join(";")
+}
+
+/// Walk elements collecting on:eventName={expr} attrs on component calls.
+fn collect_event_listeners_from_elements(
+    elements: &[Element],
+    out: &mut Vec<EventListenerMapping>,
+) {
+    for elem in elements {
+        match elem {
+            Element::Component {
+                attributes,
+                content,
+                ..
+            } => {
+                for attr in attributes {
+                    if let Some(event_name) = attr.name.strip_prefix("on:") {
+                        if let AttributeValue::Expression(expr) = &attr.value {
+                            out.push(EventListenerMapping {
+                                event_name: event_name.to_string(),
+                                expression: expr.clone(),
+                            });
+                        }
+                    }
+                }
+                collect_event_listeners_from_elements(content, out);
+            }
+            Element::Tag { content, .. } => collect_event_listeners_from_elements(content, out),
+            Element::For { content, .. } => collect_event_listeners_from_elements(content, out),
+            Element::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                collect_event_listeners_from_elements(then_branch, out);
+                if let Some(eb) = else_branch {
+                    collect_event_listeners_from_elements(eb, out);
+                }
+            }
+            Element::ErrorBlock { content, .. } => {
+                collect_event_listeners_from_elements(content, out)
+            }
+            Element::SlotContent { content, .. } => {
+                collect_event_listeners_from_elements(content, out)
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Collect component-level event listeners from the full document.
+fn collect_component_event_listeners(document: &WebCoreDocument) -> Vec<EventListenerMapping> {
+    let mut out = Vec::new();
+    for page in document.pages.values() {
+        collect_event_listeners_from_elements(&page.content, &mut out);
+    }
+    for component in document.components.values() {
+        collect_event_listeners_from_elements(&component.view, &mut out);
+    }
+    for layout in document.layouts.values() {
+        collect_event_listeners_from_elements(&layout.content, &mut out);
+    }
+    out
+}
+
 pub fn generate_runtime_js(handlers: &[HandlerMapping], document: &WebCoreDocument) -> String {
     let state_vars = collect_state_variables(document);
     let store_vars = collect_store_variables(document);
@@ -264,20 +559,52 @@ pub fn generate_runtime_js_with_vars(
         unique_handlers.insert(handler.id.clone(), handler);
     }
 
+    // ── Feature detection (tree-shaking) ────────────────────────────────────
+    let features = detect_features(document);
+
+    // Computed derived vars
+    let mut computed_entries: Vec<String> = Vec::new();
+    for component in document.components.values() {
+        for cv in &component.computed {
+            let compiled = replace_utils_short(&replace_store_and_local(&cv.expr, state_vars));
+            computed_entries.push(format!("{{name:'{}',fn:()=>{}}}", cv.name, compiled));
+        }
+    }
+    let has_computed = !computed_entries.is_empty();
+
+    // Destroy hooks
+    let destroy_bodies = collect_on_destroy_bodies(document);
+    let has_destroy = !destroy_bodies.is_empty();
+
+    // bind() is needed when there are interpolations or computed vars
+    let needs_bind = features.has_interpolation || has_computed;
+    // evalCond is needed when bind (with interpolations) or any conditional directive exists
+    let needs_eval_cond = features.has_interpolation
+        || features.has_if
+        || features.has_for
+        || features.has_dynamic_attrs;
+    // VARS/STORE_VARS needed whenever any reactive listener subscribes to them
+    let needs_vars = needs_eval_cond || needs_bind;
+
+    // Build the "rebind all" sequence used in nav(), setLocale(), WASM loader, DOMContentLoaded
+    let all_rebinds = rebind_seq(&features, needs_bind);
+
     let mut js = String::new();
 
     js.push_str("// WebCore Runtime (ES2024+)\n");
     js.push_str("{\n");
 
-    // Shared State class for both local state and global store
+    // ── State class ─────────────────────────────────────────────────────────
+    // setQ: silent setter — updates value without notifying listeners (used by computed)
     js.push_str("class State{#d=new Map();#l=new Map();\n");
     js.push_str("set(k,v){this.#d.set(k,v);this.#l.get(k)?.forEach(f=>f(v))}\n");
+    js.push_str("setQ(k,v){this.#d.set(k,v)}\n");
     js.push_str("get(k){return this.#d.get(k)}\n");
     js.push_str("on(k,f){(this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f)}}\n");
     js.push_str("const S=new State();\n");
     js.push_str("const STORE=new State();\n\n");
 
-    // Initialize local component state
+    // ── State initialisation ─────────────────────────────────────────────────
     for component in document.components.values() {
         for state_var in &component.state {
             let default_value = state_var.default_value.as_deref().unwrap_or("null");
@@ -292,8 +619,6 @@ pub fn generate_runtime_js_with_vars(
             js.push_str(&format!("S.set('{}',{});\n", state_var.name, value));
         }
     }
-
-    // Initialize global store
     for store_var in &document.store {
         let default_value = store_var.default_value.as_deref().unwrap_or("null");
         let value = if store_var.type_ == "String"
@@ -307,28 +632,39 @@ pub fn generate_runtime_js_with_vars(
         js.push_str(&format!("STORE.set('{}',{});\n", store_var.name, value));
     }
 
-    // Variable name lists for reactive bindings
-    let mut sorted_vars: Vec<_> = state_vars.iter().collect();
-    sorted_vars.sort();
-    let vars_list = sorted_vars
-        .iter()
-        .map(|v| format!("'{}'", v))
-        .collect::<Vec<_>>()
-        .join(",");
-    js.push_str(&format!("const VARS=[{}];\n", vars_list));
+    // ── VARS / STORE_VARS (only when needed by reactive binding) ─────────────
+    if needs_vars {
+        let mut sorted_vars: Vec<_> = state_vars.iter().collect();
+        sorted_vars.sort();
+        let vars_list = sorted_vars
+            .iter()
+            .map(|v| format!("'{}'", v))
+            .collect::<Vec<_>>()
+            .join(",");
+        js.push_str(&format!("const VARS=[{}];\n", vars_list));
 
-    let mut sorted_store: Vec<_> = store_vars.iter().collect();
-    sorted_store.sort();
-    let store_list = sorted_store
-        .iter()
-        .map(|v| format!("'{}'", v))
-        .collect::<Vec<_>>()
-        .join(",");
-    js.push_str(&format!("const STORE_VARS=[{}];\n", store_list));
+        let mut sorted_store: Vec<_> = store_vars.iter().collect();
+        sorted_store.sort();
+        let store_list = sorted_store
+            .iter()
+            .map(|v| format!("'{}'", v))
+            .collect::<Vec<_>>()
+            .join(",");
+        js.push_str(&format!("const STORE_VARS=[{}];\n", store_list));
+    }
 
     js.push_str("const{max,min,abs}=Math,U={max,min,abs};\n\n");
 
-    // i18n runtime
+    // ── Computed derived state ────────────────────────────────────────────────
+    if has_computed {
+        js.push_str(&format!(
+            "const COMPUTED=[{}];\n",
+            computed_entries.join(",")
+        ));
+        js.push_str("const rebindComputed=()=>COMPUTED.forEach(c=>S.setQ(c.name,c.fn()));\n\n");
+    }
+
+    // ── i18n runtime ─────────────────────────────────────────────────────────
     if !document.locales.is_empty() {
         let mut locale_entries: Vec<String> = document
             .locales
@@ -351,23 +687,77 @@ pub fn generate_runtime_js_with_vars(
             "let LOCALE=\"{}\";\n",
             escape_js_str(&document.default_locale)
         ));
-        js.push_str("const t=k=>LOCALES[LOCALE]?.[k]??k;\n");
-        js.push_str("const setLocale=l=>{if(LOCALES[l]){LOCALE=l;bind();bindIf();bindFor();bindAttrs()}};\n\n");
+        // t(key) — simple lookup
+        // t(key, n: number) — plural: looks for key_one / key_other, replaces {{count}}
+        // t(key, arg) — positional: replaces {{0}} in the translation string
+        js.push_str("const t=(k,a)=>{if(a===undefined)return LOCALES[LOCALE]?.[k]??k;if(typeof a==='number'){const pk=a===1?k+'_one':k+'_other';return(LOCALES[LOCALE]?.[pk]??LOCALES[LOCALE]?.[k]??k).replace(/\\{\\{count\\}\\}/g,String(a));}return(LOCALES[LOCALE]?.[k]??k).replace(/\\{\\{0\\}\\}/g,String(a));};\n");
+        js.push_str(&format!(
+            "const setLocale=l=>{{if(LOCALES[l]){{LOCALE=l;{}}}}};\n\n",
+            all_rebinds
+        ));
     }
 
-    // evalCond: replaces $store.var → STORE.get('var') before local vars → S.get('var')
-    js.push_str("const evalCond=c=>{let e=c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");VARS.forEach(v=>{e=e.replace(new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\")});try{return Function('\"use strict\";return('+e+')')()}catch(_){return false}};\n");
+    // ── evalCond (tree-shaken away when unused) ───────────────────────────────
+    if needs_eval_cond {
+        // Fast-path lookups for simple identifiers avoid new Function entirely, which
+        // is important because (a) new Function runs in global scope so block-scoped
+        // S/STORE/U would not be visible if the fast path were skipped, and (b) it
+        // avoids the catch fallback returning false for numeric-zero values.
+        let route_fast_path = if features.has_param_routes {
+            "const rp=_c.match(/^\\$route\\.([a-zA-Z_]\\w*)$/);if(rp)return ROUTE_PARAMS[rp[1]];"
+        } else {
+            ""
+        };
+        let route_replace = if features.has_param_routes {
+            "e=e.replace(/\\$route\\.([a-zA-Z_]\\w*)/g,\"ROUTE_PARAMS['$1']\");"
+        } else {
+            ""
+        };
+        // S, STORE, U (and t/setLocale when i18n is active) are block-scoped — pass
+        // them explicitly as Function parameters so that the dynamically-created
+        // function body can resolve them even though Function() runs in global scope.
+        let has_locales = !document.locales.is_empty();
+        let fn_call = match (features.has_param_routes, has_locales) {
+            (true,  true)  => "new Function('S','STORE','U','ROUTE_PARAMS','t','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS,t)",
+            (true,  false) => "new Function('S','STORE','U','ROUTE_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS)",
+            (false, true)  => "new Function('S','STORE','U','t','\"use strict\";return('+e+')')(S,STORE,U,t)",
+            (false, false) => "new Function('S','STORE','U','\"use strict\";return('+e+')')(S,STORE,U)",
+        };
+        // Fast path: simple state-var → S.get(name); $store.x → STORE.get(x);
+        // optional $route.x → ROUTE_PARAMS[x].  Complex expressions fall through
+        // to new Function.  On error return undefined (not false) so interpolation
+        // spans show '' rather than the string "false".
+        // Note: local var named _c (not t) to avoid shadowing the i18n t() function.
+        js.push_str(&format!(
+            "const evalCond=c=>{{const _c=c.trim();if(VARS.indexOf(_c)>=0)return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{}VARS.forEach(v=>{{e=e.replace(new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\")}});try{{return {}}}catch(_){{return undefined}}}};\n",
+            route_fast_path,
+            route_replace,
+            fn_call
+        ));
+    }
 
-    // bindIf: reacts to both local state and store changes
-    js.push_str("const bindIf=()=>{document.querySelectorAll('[data-webcore-if]').forEach(el=>{const cond=el.dataset.webcoreIf,next=el.nextElementSibling,hasElse=next?.dataset.webcoreElse===cond,upd=()=>{const v=evalCond(cond);el.style.display=v?'':'none';if(hasElse)next.style.display=v?'none':''};upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))});};\n");
+    // ── Reactive binding functions (tree-shaken) ──────────────────────────────
+    if features.has_if {
+        js.push_str("const bindIf=()=>{document.querySelectorAll('[data-webcore-if]').forEach(el=>{const cond=el.dataset.webcoreIf,next=el.nextElementSibling,hasElse=next?.dataset.webcoreElse===cond,upd=()=>{const v=evalCond(cond);el.style.display=v?'':'none';if(hasElse)next.style.display=v?'none':''};upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))});};\n");
+    }
+    if features.has_for {
+        // bindFor — renders @for loops; supports optional key-based DOM diffing when
+        // data-webcore-for-key is present on the template (avoids full re-render).
+        // fillItem(el, val, i): sets text for interpolation spans (supports "item.prop" paths),
+        // writes data-webcore-idx, and mirrors object properties as data-* attributes for CSS.
+        // Keyed diffing: webcoreKey stored on firstElementChild (no extra wrapper div).
+        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{const items=state.get(itN)??[];if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};render();state.on(itN,render);STORE_VARS.forEach(v=>STORE.on(v,render))});};\n");
+    }
+    if features.has_dynamic_attrs {
+        js.push_str("const bindAttrs=()=>{document.querySelectorAll('[data-webcore-bound]').forEach(el=>{[...el.attributes].filter(a=>a.name.startsWith('data-webcore-attr-')).forEach(a=>{const name=a.name.slice(18),expr=a.value,upd=()=>{const val=String(evalCond(expr)??'');name in el?el[name]=val:el.setAttribute(name,val)};upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))})});};\n");
+    }
+    if features.has_validation {
+        js.push_str("const validateField=input=>{const val=input.value??'';if('webcoreValidateRequired'in input.dataset&&!val.trim())return input.dataset.webcoreValidateRequired||'Champ requis';const ml=input.dataset.webcoreValidateMinlength;if(ml&&val.length<+ml)return input.dataset.webcoreValidateMinlengthMsg||`Minimum ${ml} caractères`;const xl=input.dataset.webcoreValidateMaxlength;if(xl&&val.length>+xl)return input.dataset.webcoreValidateMaxlengthMsg||`Maximum ${xl} caractères`;if('webcoreValidateEmail'in input.dataset&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(val))return input.dataset.webcoreValidateEmail||'Email invalide';const pat=input.dataset.webcoreValidatePattern;if(pat){try{if(!new RegExp(pat).test(val))return input.dataset.webcoreValidatePatternMsg||'Format invalide'}catch(_){}}return''};\n");
+        js.push_str("const bindValidation=()=>{document.querySelectorAll('form').forEach(form=>{const check=input=>{const field=input.dataset.webcoreField,err=validateField(input),el=field&&form.querySelector(`[data-webcore-error=\"${field}\"]`);if(el){(el.firstElementChild||el).textContent=err;el.style.display=err?'':'none'}return!err};form.querySelectorAll('[data-webcore-field]').forEach(input=>{input.addEventListener('blur',()=>{input.dataset.webcoreTouched='1';check(input)});input.addEventListener('input',()=>{if(input.dataset.webcoreTouched)check(input)})});form.addEventListener('submit',e=>{let ok=true;form.querySelectorAll('[data-webcore-field]').forEach(input=>{if(!check(input))ok=false});if(!ok){e.preventDefault();e.stopImmediatePropagation()}},true)});};\n");
+    }
+    js.push('\n');
 
-    // bindFor: supports $store.listName as iterable
-    js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,render=()=>{const items=state.get(itN)??[];cont.innerHTML='';items.forEach(val=>{const cl=tmpl.content.cloneNode(true);cl.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{if(s.dataset.webcoreInterpolation===iN)s.textContent=val});cont.appendChild(cl)})};render();state.on(itN,render);STORE_VARS.forEach(v=>STORE.on(v,render))});};\n");
-
-    // bindAttrs: reacts to both local state and store
-    js.push_str("const bindAttrs=()=>{document.querySelectorAll('[data-webcore-bound]').forEach(el=>{[...el.attributes].filter(a=>a.name.startsWith('data-webcore-attr-')).forEach(a=>{const name=a.name.slice(18),expr=a.value,upd=()=>el.setAttribute(name,String(evalCond(expr)??''));upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))})});};\n\n");
-
-    // Compile handlers — use store-aware compiler
+    // ── Handlers ─────────────────────────────────────────────────────────────
     js.push_str("const H={\n");
     let mut sorted_handlers: Vec<_> = unique_handlers.values().collect();
     sorted_handlers.sort_by(|a, b| a.id.cmp(&b.id));
@@ -377,51 +767,154 @@ pub fn generate_runtime_js_with_vars(
     }
     js.push_str("};\n\n");
 
-    // SPA Navigation
-    js.push_str("const toFile=p=>p==='/'?'index.html':`${p.slice(1)}.html`;\n");
-    // bind: reacts to both local state and store interpolations
-    js.push_str("const bind=()=>document.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{const e=el.dataset.webcoreInterpolation,u=()=>{el.textContent=evalCond(e)??''};u();VARS.forEach(v=>S.on(v,u));STORE_VARS.forEach(v=>STORE.on(v,u))});\n\n");
+    // ── bind() — re-evaluate computed, then wire interpolation spans ──────────
+    if needs_bind {
+        if features.has_interpolation {
+            js.push_str("const bind=()=>{");
+            if has_computed {
+                js.push_str("rebindComputed();");
+            }
+            // u re-runs rebindComputed so computed vars (e.g. doubled) are fresh
+            // before the span's textContent is updated. setQ is side-effect-free
+            // (no listener cascade), so this cannot loop.
+            let recompute_in_u = if has_computed { "rebindComputed();" } else { "" };
+            js.push_str(&format!(
+                "document.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{{const e=el.dataset.webcoreInterpolation,u=()=>{{{}{}}};u();VARS.forEach(v=>S.on(v,u));STORE_VARS.forEach(v=>STORE.on(v,u))}})}};\n\n",
+                recompute_in_u,
+                "el.textContent=String(evalCond(e)??'')"
+            ));
+        } else {
+            // only computed, no interpolations
+            js.push_str("const bind=()=>rebindComputed();\n\n");
+        }
+    }
 
-    js.push_str("const nav=async p=>{\n");
-    js.push_str("const file=toFile(p);\n");
-    js.push_str("try{const html=await(await fetch(file)).text();\n");
-    js.push_str("const doc=new DOMParser().parseFromString(html,'text/html');\n");
-    js.push_str("const main=doc.querySelector('main');\n");
-    js.push_str("if(main)document.querySelector('main').replaceWith(main);\n");
-    js.push_str("history.pushState({},'',p);bind();bindIf();bindFor();bindAttrs();bindValidation()}catch(e){location.href=file}};\n\n");
+    // ── on:destroy hooks ─────────────────────────────────────────────────────
+    if has_destroy {
+        let bodies: Vec<String> = destroy_bodies
+            .iter()
+            .map(|b| format!("()=>{{{}}}", b.trim()))
+            .collect();
+        js.push_str(&format!("const DESTROY_HOOKS=[{}];\n", bodies.join(",")));
+        js.push_str("const runDestroyHooks=()=>DESTROY_HOOKS.forEach(f=>f());\n\n");
+    }
 
-    js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
+    // ── SPA navigation (tree-shaken when unused) ──────────────────────────────
+    if features.has_navigation {
+        if features.has_param_routes {
+            // Build ROUTES array with regex patterns for parameterized routes
+            let routes = document
+                .app
+                .as_ref()
+                .map(|a| &a.routes)
+                .cloned()
+                .unwrap_or_default();
+            let mut route_entries: Vec<(String, String)> = routes.into_iter().collect();
+            route_entries.sort_by_key(|(path, _)| path.clone());
 
+            let mut routes_js = String::from("const ROUTES=[");
+            for (path, page_name) in &route_entries {
+                let (regex, params) = route_to_js_regex(path);
+                let file = page_name_to_file(page_name);
+                let params_js: Vec<String> = params.iter().map(|p| format!("\"{}\"", p)).collect();
+                routes_js.push_str(&format!(
+                    "{{re:/{}/,file:\"{}\",params:[{}]}},",
+                    regex,
+                    escape_js_str(&file),
+                    params_js.join(",")
+                ));
+            }
+            routes_js.push_str("];\n");
+            js.push_str(&routes_js);
+            js.push_str("let ROUTE_PARAMS={};\n");
+            js.push_str("const matchRoute=p=>{for(const r of ROUTES){const m=p.match(r.re);if(m){r.params.forEach((k,i)=>ROUTE_PARAMS[k]=m[i+1]);return r.file;}}return p==='/'?'index.html':`${p.slice(1)}.html`;};\n");
+        } else {
+            js.push_str("const toFile=p=>p==='/'?'index.html':`${p.slice(1)}.html`;\n");
+        }
+        // init=true → replaceState (no duplicate history entry on first load)
+        js.push_str("const nav=async(p,init=false)=>{\n");
+        if has_destroy {
+            js.push_str("runDestroyHooks();\n");
+        }
+        let file_expr = if features.has_param_routes {
+            "matchRoute(p)"
+        } else {
+            "toFile(p)"
+        };
+        js.push_str(&format!("const file={};\n", file_expr));
+        js.push_str("try{const html=await(await fetch('/'+file)).text();\n");
+        js.push_str("const doc=new DOMParser().parseFromString(html,'text/html');\n");
+        js.push_str("const main=doc.querySelector('main');\n");
+        js.push_str("if(main)document.querySelector('main').replaceWith(main);\n");
+        js.push_str(&format!(
+            "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{}}}catch(e){{location.href='/'+file}}}};\n\n",
+            all_rebinds
+        ));
+        js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
+    }
+
+    // ── globalThis exports ────────────────────────────────────────────────────
     let i18n_export = if !document.locales.is_empty() {
         ",setLocale"
     } else {
         ""
     };
+    let nav_export = if features.has_navigation {
+        "webcore_navigate:nav,"
+    } else {
+        ""
+    };
     js.push_str(&format!(
-        "Object.assign(globalThis,{{webcore_navigate:nav,webcore_handle_event:(t,id)=>H[id]?.(){},\n",
-        i18n_export
+        "Object.assign(globalThis,{{{}webcore_handle_event:(t,id)=>H[id]?.(){},\n",
+        nav_export, i18n_export
     ));
-    js.push_str("...Object.fromEntries(['click','submit','change','input'].map(e=>[`webcore_handle_${e}`,id=>H[id]?.()]))});\n\n");
+    js.push_str(
+        "...Object.fromEntries(['click','submit','change','input'].map(e=>[`webcore_handle_${e}`,id=>H[id]?.()]))});\n\n",
+    );
 
-    // Form validation helpers
-    js.push_str("const validateField=input=>{const val=input.value??'';if('webcoreValidateRequired'in input.dataset&&!val.trim())return input.dataset.webcoreValidateRequired||'Champ requis';const ml=input.dataset.webcoreValidateMinlength;if(ml&&val.length<+ml)return input.dataset.webcoreValidateMinlengthMsg||`Minimum ${ml} caractères`;const xl=input.dataset.webcoreValidateMaxlength;if(xl&&val.length>+xl)return input.dataset.webcoreValidateMaxlengthMsg||`Maximum ${xl} caractères`;if('webcoreValidateEmail'in input.dataset&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(val))return input.dataset.webcoreValidateEmail||'Email invalide';const pat=input.dataset.webcoreValidatePattern;if(pat){try{if(!new RegExp(pat).test(val))return input.dataset.webcoreValidatePatternMsg||'Format invalide'}catch(_){}}return''};\n");
-    js.push_str("const bindValidation=()=>{document.querySelectorAll('form').forEach(form=>{const check=input=>{const field=input.dataset.webcoreField,err=validateField(input),el=field&&form.querySelector(`[data-webcore-error=\"${field}\"]`);if(el){el.textContent=err;el.style.display=err?'':'none'}return!err};form.querySelectorAll('[data-webcore-field]').forEach(input=>{input.addEventListener('blur',()=>{input.dataset.webcoreTouched='1';check(input)});input.addEventListener('input',()=>{if(input.dataset.webcoreTouched)check(input)})});form.addEventListener('submit',e=>{let ok=true;form.querySelectorAll('[data-webcore-field]').forEach(input=>{if(!check(input))ok=false});if(!ok)e.preventDefault()})});};\n\n");
+    // ── DOMContentLoaded ─────────────────────────────────────────────────────
+    let mount_bodies = collect_on_mount_bodies(document);
+    let comp_listeners = collect_component_event_listeners(document);
 
-    js.push_str("document.addEventListener('DOMContentLoaded',()=>{bind();bindIf();bindFor();bindAttrs();bindValidation()});\n");
+    // For param routes: populate ROUTE_PARAMS then, if the current URL is a
+    // parameterised path (slug, id, …), asynchronously load the correct page.
+    // The dev server may have served index.html as SPA fallback for /post/hello,
+    // so we need to fetch post.html and swap <main> with the right content.
+    let init_route_params = if features.has_param_routes {
+        "matchRoute(location.pathname);if(Object.keys(ROUTE_PARAMS).length)nav(location.pathname,true);"
+    } else {
+        ""
+    };
+    js.push_str(&format!(
+        "document.addEventListener('DOMContentLoaded',()=>{{{init}{rebinds}",
+        init = init_route_params,
+        rebinds = all_rebinds,
+    ));
+    for body in &mount_bodies {
+        js.push_str(&format!(";(()=>{{{}}})()", body.trim()));
+    }
+    for listener in &comp_listeners {
+        let compiled = compile_expression_full(&listener.expression, state_vars);
+        js.push_str(&format!(
+            ";document.addEventListener('{}',e=>{{{}}})",
+            listener.event_name, compiled
+        ));
+    }
+    if has_destroy {
+        js.push_str(";window.addEventListener('beforeunload',runDestroyHooks)");
+    }
+    js.push_str("});\n");
 
-    // WASM async loader — injected only when a wasm/ module is present.
-    // The WASM object is shared by reference so Object.assign fills it in-place
-    // once the module loads, making wasm.fn() calls reactive on next bind().
+    // ── WASM async loader (only when module detected) ─────────────────────────
     if let Some(module) = &document.wasm_module {
-        // JS: const WASM={};globalThis.wasm=WASM;
-        //     (async()=>{try{...}catch(e){...}})();
         let wasm_loader = format!(
             "const WASM={{}};globalThis.wasm=WASM;\
 (async()=>{{try{{const m=await import('./wasm/{m}.js');\
 await m.default();Object.assign(WASM,m);\
-bind();bindIf();bindFor();bindAttrs();\
+{rb};\
 }}catch(e){{console.warn('[WebCore WASM]',e);}}}})();\n",
             m = escape_js_str(module),
+            rb = all_rebinds,
         );
         js.push_str(&wasm_loader);
     }

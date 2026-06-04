@@ -1,0 +1,5 @@
+[app]
+title = "i18n Demo — WebCore"
+lang  = "en"
+locale = "en"
+mode  = "dev"

@@ -1,0 +1,152 @@
+component ContactForm {
+    state {
+        sent:    Boolean = false
+        charCount: Number  = 0
+    }
+    computed {
+        remaining = 500 - charCount
+        overLimit = remaining < 0
+    }
+
+    view {
+        section class="form-section" {
+            h2 "Send us a message"
+            p class="section-sub" { "We reply within 24 hours." }
+
+            @if sent {
+                div class="success-banner" {
+                    span class="success-icon" { "✓" }
+                    p { "Message sent! We'll be in touch soon." }
+                }
+            } @else {
+                form on:submit={sent = true} {
+                    div class="field" {
+                        label { "Full name *" }
+                        input type="text"
+                              name="fullname"
+                              placeholder="Jane Doe"
+                              validate:required="Name is required"
+                              validate:minlength="2,At least 2 characters"
+                              validate:maxlength="80,80 characters max"
+                        @error "fullname" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Email *" }
+                        input type="email"
+                              name="contact_email"
+                              placeholder="jane@example.com"
+                              validate:required="Email is required"
+                              validate:email="Enter a valid email"
+                        @error "contact_email" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Subject *" }
+                        input type="text"
+                              name="subject"
+                              placeholder="How can we help?"
+                              validate:required="Subject is required"
+                              validate:minlength="5,At least 5 characters"
+                        @error "subject" {
+                            span class="err" { }
+                        }
+                    }
+
+                    div class="field" {
+                        label { "Message * " }
+                        textarea name="message"
+                                 rows="5"
+                                 placeholder="Describe your issue or question…"
+                                 validate:required="Message is required"
+                                 validate:minlength="20,At least 20 characters"
+                                 on:input={charCount = event.target.value.length}
+                        @error "message" {
+                            span class="err" { }
+                        }
+                        p class="char-counter" {
+                            @if overLimit {
+                                span class="over" { "{remaining} characters over limit" }
+                            } @else {
+                                span { "{remaining} characters remaining" }
+                            }
+                        }
+                    }
+
+                    button type="submit" class="btn-primary" { "Send message →" }
+                }
+            }
+        }
+    }
+
+    style {
+        .form-section {
+            max-width: 480px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #1e293b;
+            border-radius: 10px;
+            border: 1px solid #334155;
+        }
+        h2 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+        .section-sub { color: #64748b; font-size: 0.85rem; margin: 0 0 1.5rem; }
+        .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1.1rem; }
+        label { font-size: 0.85rem; font-weight: 600; color: #cbd5e1; }
+        input, textarea {
+            padding: 0.5rem 0.75rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 0.95rem;
+            font-family: inherit;
+            resize: vertical;
+            transition: border-color 0.15s;
+        }
+        input:focus, textarea:focus { outline: none; border-color: #3b82f6; }
+        .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
+        .char-counter { font-size: 0.78rem; color: #64748b; margin: 0.2rem 0 0; text-align: right; }
+        .over { color: #f87171; }
+        .btn-primary {
+            width: 100%;
+            padding: 0.65rem;
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 0.5rem;
+            transition: background 0.15s;
+        }
+        .btn-primary:hover { background: #2563eb; }
+        .success-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 1rem 1.25rem;
+            background: #052e16;
+            border: 1px solid #16a34a;
+            border-radius: 8px;
+        }
+        .success-icon {
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            background: #16a34a;
+            color: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .success-banner p { margin: 0; color: #86efac; }
+    }
+}

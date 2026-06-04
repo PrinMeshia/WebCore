@@ -1,0 +1,7 @@
+app TodoWebCore {
+    theme: "default"
+    layout: MainLayout
+    routes {
+        "/": HomePage
+    }
+}

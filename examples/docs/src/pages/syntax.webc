@@ -1,0 +1,236 @@
+page "syntax" {
+    div class="page-header" {
+        h1 "Syntax Reference"
+        p class="page-sub" {
+            "Complete reference for the "
+            code { ".webc" }
+            " language syntax."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Application" }
+        p {
+            "The "
+            code { "app" }
+            " block is the entry point. It declares the layout and route table."
+        }
+        pre class="code-block" {
+"app MyApp \{
+    theme: \"default\"
+    layout: MainLayout
+    routes \{
+        \"/\":      HomePage
+        \"/about\": AboutPage
+    \}
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Layout" }
+        p {
+            "Layouts wrap every page. Use "
+            code { "slot content" }
+            " for the page injection point. Named slots support multi-zone layouts."
+        }
+        pre class="code-block" {
+"// Single-slot layout
+layout MainLayout \{
+    header \{ nav \{ link to=\"/\" \{ \"Home\" \} \} \}
+    main   \{ slot content \}
+    footer \{ p \"2025 My App\" \}
+\}
+
+// Multi-zone layout (named slots)
+layout DashLayout \{
+    header \{ slot header  \}
+    aside  \{ slot sidebar \}
+    main   \{ slot content \}
+\}"
+        }
+        p { "Pages fill named slots with " code { "slot name \{ ... \}" } " blocks." }
+        pre class="code-block" {
+"page \"dashboard\" \{
+    slot header  \{ h1 \"Dashboard\" \}
+    slot sidebar \{ nav \{ link to=\"/\" \"Home\" \} \}
+    p \"Main content\"   // -> default content slot
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Elements and content" }
+        p { "Any standard HTML tag is valid. Inline text or block children — both work." }
+        pre class="code-block" {
+"div class=\"container\" \{
+    h1 \"Hello world\"
+    p  \"Plain text node\"
+    p  \{ \"Mixed: \" strong \{ \"bold\" \} \" and plain.\" \}
+    img src=\"/logo.png\" alt=\"Logo\"
+    ul \{
+        li \"Item one\"
+        li \"Item two\"
+    \}
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Interpolation" }
+        p {
+            "Expressions inside "
+            code { "\{\}" }
+            " are evaluated reactively at runtime. They support arithmetic, comparisons, "
+            "function calls and computed variables."
+        }
+        pre class="code-block" {
+"p \"Count: \{count\}\"
+p \"Next: \{count + 1\}\"
+p \"Max: \{max(a, b)\}\"
+p \"Full name: \{fullName\}\"    // computed var
+div class=\{dynamicClass\} \{ \}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Control flow" }
+        pre class="code-block" {
+"// @if / @else -- reactive condition
+@if count > 0 \{
+    p \"Positive\"
+\} @else \{
+    p \"Zero or negative\"
+\}
+
+// @for -- reactive list render (full re-render on change)
+@for item in items \{
+    li \"\{item\}\"
+\}
+
+// @for with key -- key-based DOM diffing (v1.1.0)
+// Only modified nodes are patched; focus and animation are preserved
+@for post key=post.id in posts \{
+    article \"\{post.title\}\"
+\}
+
+// @error -- validation error block
+@error \"email\" \{
+    span class=\"error\" \"Invalid email\"
+\}"
+        }
+        p {
+            "With "
+            code { "key=expr" }
+            " the runtime compares keys before patching. "
+            "Added nodes are inserted, removed nodes are deleted, unchanged ones stay untouched."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Events" }
+        p {
+            "Use "
+            code { "on:<type>=\{expr\}" }
+            " on any element. The expression runs when the event fires."
+        }
+        pre class="code-block" {
+"button on:click=\{count += 1\}                    \{ \"+\" \}
+button on:click=\{count = max(0, count - 1)\}      \{ \"-\" \}
+button on:click=\{count = 0\}                      \{ \"Reset\" \}
+input  on:input=\{name = event.target.value\}
+form   on:submit=\{handleSubmit\}
+
+// Navigation
+button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
+
+// Inter-component events
+button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}"
+        }
+        p { "Multiple instructions can be separated by " code { ";" } " in one handler:" }
+        pre class="code-block" {
+"// Each instruction is compiled independently
+button on:click=\{items = [...(items ?? []), newItem]; draft = \"\"\} \{ \"Add\" \}
+button on:click=\{count = 0; label = \"Done\"\} \{ \"Reset all\" \}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Attributes" }
+        pre class="code-block" {
+"// Static string
+div class=\"container\" id=\"main\"
+
+// Boolean
+input disabled
+input required
+
+// Dynamic expression
+div class=\{dynamicClass\}
+input value=\{count\}
+
+// Validation
+input name=\"email\"
+      validate:required=\"Email is required\"
+      validate:email=\"Invalid address\""
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Navigation" }
+        pre class="code-block" {
+"// Declarative link (SPA-aware)
+link to=\"/about\" \{ \"About\" \}
+
+// Programmatic
+button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
+button on:click=\{webcore_navigate(root)\}      \{ \"Home\" \}"
+        }
+        p {
+            "Navigation uses "
+            code { "history.pushState" }
+            " + fetch — no full page reload. "
+            code { "on:destroy" }
+            " hooks run automatically before each navigation."
+        }
+    }
+
+    section class="doc-section" {
+        h2 { "Parameterized routes (v1.1.0)" }
+        p {
+            "Route segments prefixed with "
+            code { ":" }
+            " capture dynamic values. Access them in views with "
+            code { "{$route.paramName}" }
+            "."
+        }
+        pre class="code-block" {
+"// src/app.webc
+app MyApp \{
+    routes \{
+        \"/\":           HomePage
+        \"/post/:slug\": PostPage
+        \"/user/:id\":   UserPage
+    \}
+\}
+
+// src/pages/post.webc
+page \"post\" \{
+    h1 \"Article: \{$route.slug\}\"
+    p  \"Reading post ID: \{$route.slug\}\"
+\}
+
+// Navigation to a parameterized route
+link to=\"/post/hello-world\" \{ \"Hello World\" \}
+button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
+        }
+        p {
+            "The compiler generates a "
+            code { "ROUTES[]" }
+            " array with RegExp patterns. "
+            code { "ROUTE_PARAMS" }
+            " is updated on every navigation and at page load. "
+            "Both arrays are tree-shaken when no parameterized routes are declared."
+        }
+    }
+}

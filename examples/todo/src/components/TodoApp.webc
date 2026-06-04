@@ -1,28 +1,83 @@
 component TodoApp {
     state {
-        items:  List   = []
-        done:   Number = 0
-        total:  Number = 0
+        items: List
+        draft: String = ""
+    }
+    computed {
+        total = (items ?? []).length
+    }
+
+    on:mount {
+        window.mkTodo = text => ({text, done: false})
+        S.set('items', [
+            mkTodo("Buy groceries"),
+            mkTodo("Read a book"),
+            mkTodo("Write some Rust")
+        ])
+        document.querySelector('.todo-list').addEventListener('click', function(e) {
+            const w = e.target.closest('[data-webcore-idx]')
+            if (!w) return
+            const idx = +w.dataset.webcoreIdx
+            if (e.target.classList.contains('btn-delete')) {
+                S.set('items', S.get('items').filter((_, i) => i !== idx))
+            } else if (e.target.classList.contains('btn-toggle')) {
+                S.set('items', S.get('items').map((it, i) =>
+                    i === idx ? Object.assign({}, it, {done: !it.done}) : it
+                ))
+            }
+        })
     }
 
     view {
         div {
-            p "Tâches terminées : {done} / {total}"
+            h2 "Tâches ({total})"
+
+            div class="add-row" {
+                input type="text" placeholder="Nouvelle tâche…" value={draft}
+                      on:input={draft = event.target.value}
+                button on:click={items = [...(items ?? []), mkTodo(draft)]; draft = ""} { "Ajouter" }
+            }
 
             @if total > 0 {
-                div {
-                    @for item in items {
-                        p "{item}"
+                ul class="todo-list" {
+                    @for item key=item.text in items {
+                        li {
+                            button class="btn-toggle" title="Marquer comme fait" { "✓" }
+                            span class="item-text" { "{item.text}" }
+                            button class="btn-delete" title="Supprimer" { "×" }
+                        }
                     }
                 }
             } @else {
-                p "Aucune tâche pour l'instant."
+                p class="empty" { "Aucune tâche pour l'instant." }
             }
         }
     }
 
     style {
-        div   { max-width: 480px; margin: 2rem auto; padding: 1rem; }
-        p     { margin: 0.5rem 0; }
+        div      { max-width: 520px; margin: 2rem auto; padding: 1.5rem; }
+        h2       { margin-bottom: 1rem; }
+        .add-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        input    { flex: 1; padding: 0.4rem 0.7rem; border: 1px solid #555; border-radius: 4px; background: #1e293b; color: #e2e8f0; }
+        ul       { list-style: none; padding: 0; margin: 0; }
+        li       { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0; border-bottom: 1px solid #334; }
+        li:last-child { border-bottom: none; }
+        .item-text { flex: 1; }
+        .btn-toggle {
+            padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid #22c55e;
+            background: transparent; color: #22c55e; cursor: pointer; font-size: 0.9rem;
+        }
+        .btn-delete {
+            padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid #ef4444;
+            background: transparent; color: #ef4444; cursor: pointer; font-size: 0.9rem;
+        }
+        .btn-toggle:hover { background: #22c55e; color: #fff; }
+        .btn-delete:hover  { background: #ef4444; color: #fff; }
+        button { padding: 0.4rem 0.9rem; cursor: pointer; border-radius: 4px; border: none; background: #3b82f6; color: #fff; }
+        button:hover { opacity: 0.85; }
+        .empty   { color: #64748b; font-style: italic; }
+
+        [data-done="true"] .item-text { text-decoration: line-through; opacity: 0.45; }
+        [data-done="true"] .btn-toggle { background: #22c55e; color: #fff; }
     }
 }

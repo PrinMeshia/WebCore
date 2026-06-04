@@ -1,0 +1,10 @@
+app WebCoreDocs {
+    theme: "default"
+    layout: DocsLayout
+    routes {
+        "/": HomePage
+        "/syntax": SyntaxPage
+        "/components": ComponentsPage
+        "/features": FeaturesPage
+    }
+}

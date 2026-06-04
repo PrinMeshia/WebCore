@@ -1,0 +1,9 @@
+app BlogWebCore {
+    theme: "default"
+    layout: MainLayout
+    routes {
+        "/":           HomePage
+        "/about":      AboutPage
+        "/post/:slug": PostPage
+    }
+}

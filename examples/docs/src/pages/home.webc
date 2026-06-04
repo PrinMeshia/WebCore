@@ -1,0 +1,119 @@
+page "home" {
+    div class="hero" {
+        div class="hero-badge" { "v1.1.1 — Stable" }
+        h1 class="hero-title" {
+            "Build web interfaces"
+            span class="hero-accent" { " declaratively" }
+        }
+        p class="hero-sub" {
+            "WebCore unifies HTML, CSS and JavaScript into a single "
+            code { ".webc" }
+            " syntax. The Rust compiler generates semantic HTML, "
+            "scoped CSS and a minimal reactive runtime — no framework, no bundler."
+        }
+        div class="hero-actions" {
+            link to="/syntax" class="btn-hero-primary" { "Read the Docs" }
+            link to="/components" class="btn-hero-secondary" { "Component Model" }
+        }
+        div class="hero-snippet" {
+            pre class="hero-code" {
+"component Counter \{
+    state  \{ count: Number = 0 \}
+    computed \{ doubled = count * 2 \}
+    view \{
+        div \{
+            p \"Value: \{count\} * 2 = \{doubled\}\"
+            button on:click=\{count += 1\} \{ \"+\" \}
+        \}
+    \}
+    style \{ div \{ display: flex; gap: 1rem; \} \}
+\}"
+            }
+        }
+    }
+
+    section class="section" {
+        h2 class="section-title" { "Why WebCore?" }
+        div class="feature-grid" {
+            FeatureCard
+                icon="⚡"
+                title="Zero runtime dependencies"
+                desc="The compiler emits only the JS helpers your document actually uses. Simple apps get a tiny bundle."
+                tag="Performance"
+            {}
+            FeatureCard
+                icon="🦀"
+                title="Rust-powered compiler"
+                desc="A Pest PEG grammar drives a fully typed AST. Errors include file, line, column and source context."
+                tag="Reliability"
+            {}
+            FeatureCard
+                icon="🔒"
+                title="Scoped CSS by default"
+                desc="Each component gets a deterministic FNV-1a hash. Styles never leak across component boundaries."
+                tag="Isolation"
+            {}
+            FeatureCard
+                icon="🌐"
+                title="SPA routing built-in"
+                desc="History API navigation with no full page reload. Routes are declared directly in the app block."
+                tag="Routing"
+            {}
+            FeatureCard
+                icon="🎛️"
+                title="Reactive state"
+                desc="ES2022 private-field State class. Computed vars, lifecycle hooks, and inter-component events included."
+                tag="Reactivity"
+            {}
+            FeatureCard
+                icon="📦"
+                title="Static Site Generation"
+                desc="Initial state values are pre-rendered at compile time. No flash of unstyled or wrong content."
+                tag="SSG"
+            {}
+        }
+    }
+
+    section class="section" {
+        h2 class="section-title" { "Try it live" }
+        p class="section-sub" {
+            "This counter is a real "
+            code { "LiveCounter" }
+            " WebCore component — state, computed vars, "
+            code { "@if" }
+            " directive and responsive styles."
+        }
+        LiveCounter {}
+    }
+
+    section class="section" {
+        h2 class="section-title" { "Get started in seconds" }
+        div class="install-steps" {
+            div class="install-step" {
+                span class="step-num" { "1" }
+                div {
+                    strong { "Clone and build" }
+                    pre class="inline-code" {
+"git clone https://github.com/PrinMeshia/Webcore.git
+cd Webcore/webcore-compiler
+cargo build --release"
+                    }
+                }
+            }
+            div class="install-step" {
+                span class="step-num" { "2" }
+                div {
+                    strong { "Scaffold a new project" }
+                    pre class="inline-code" { "./target/release/webcore-compiler new my-app" }
+                }
+            }
+            div class="install-step" {
+                span class="step-num" { "3" }
+                div {
+                    strong { "Start the dev server" }
+                    pre class="inline-code" { "cd my-app && webc dev 3000" }
+                }
+            }
+        }
+    }
+}

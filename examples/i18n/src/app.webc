@@ -1,0 +1,7 @@
+app I18nDemo {
+    theme: "default"
+    layout: MainLayout
+    routes {
+        "/": HomePage
+    }
+}

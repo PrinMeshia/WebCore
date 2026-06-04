@@ -88,8 +88,11 @@ pub struct Component {
     pub name: String,
     pub props: Vec<Prop>,
     pub state: Vec<StateVar>,
+    pub computed: Vec<ComputedVar>,
+    pub mount_body: Option<String>,
+    pub destroy_body: Option<String>,
     pub view: Vec<Element>,
-    pub style: Vec<StyleRule>,
+    pub style: Vec<StyleItem>,
     pub span: Span,
 }
 
@@ -97,6 +100,13 @@ pub struct Component {
 pub struct Prop {
     pub name: String,
     pub type_: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComputedVar {
+    pub name: String,
+    pub expr: String,
     pub span: Span,
 }
 
@@ -117,7 +127,14 @@ pub enum Element {
         content: Vec<Element>,
         span: Span,
     },
+    /// Slot placeholder in layouts: `slot header`
     Slot(String, Span),
+    /// Slot content provision in pages: `slot header { ... }`
+    SlotContent {
+        name: String,
+        content: Vec<Element>,
+        span: Span,
+    },
     Component {
         name: String,
         attributes: Vec<Attribute>,
@@ -125,10 +142,11 @@ pub enum Element {
         span: Span,
     },
     Interpolation(String, Span),
-    /// Loop: @for item in items { ... }
+    /// Loop: @for item [key=expr] in items { ... }
     For {
         item: String,
         iterable: String,
+        key: Option<String>,
         content: Vec<Element>,
         span: Span,
     },
@@ -153,6 +171,7 @@ impl Element {
             Element::Text(_, span) => *span,
             Element::Tag { span, .. } => *span,
             Element::Slot(_, span) => *span,
+            Element::SlotContent { span, .. } => *span,
             Element::Component { span, .. } => *span,
             Element::Interpolation(_, span) => *span,
             Element::For { span, .. } => *span,
@@ -188,4 +207,15 @@ pub struct StyleProperty {
     pub name: String,
     pub value: String,
     pub span: Span,
+}
+
+/// An item inside a `style { }` block — either a plain rule or a @media block.
+#[derive(Debug, Clone)]
+pub enum StyleItem {
+    Rule(StyleRule),
+    Media {
+        query: String,
+        rules: Vec<StyleRule>,
+        span: Span,
+    },
 }
