@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 1.1.1 — Référence complète de la syntaxe `.webc`
+> Version : 1.2.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -26,6 +26,8 @@
 11. [Attributs](#attributs)
 12. [Événements](#événements)
 13. [Interpolation](#interpolation)
+12. [Événements](#événements)
+13. [Interpolation](#interpolation)
 14. [Directives de contrôle](#directives-de-contrôle)
 15. [Routage](#routage)
 16. [Slots](#slots)
@@ -35,8 +37,10 @@
 20. [Internationalisation (i18n)](#internationalisation-i18n)
 21. [SSG — Static Site Generation](#ssg--static-site-generation)
 22. [WebAssembly (WASM)](#webassembly-wasm)
-23. [Limites actuelles (v1.1.1)](#limites-actuelles-v111)
-24. [Nouveautés v1.1.1](#nouveautés-v111)
+23. [Commande `webc check`](#commande-webc-check)
+24. [Limites actuelles (v1.2.0)](#limites-actuelles-v120)
+25. [Nouveautés v1.1.1](#nouveautés-v111)
+26. [Nouveautés v1.2.0](#nouveautés-v120)
 
 ---
 
@@ -525,6 +529,76 @@ d'un composant émettent le même événement, tous les listeners le reçoivent.
 
 ---
 
+## Lifecycle hooks
+
+Les hooks de cycle de vie permettent d'exécuter du code JS brut à des moments précis
+du cycle de vie du composant.
+
+### `on:mount`
+
+S'exécute une fois dans `DOMContentLoaded`, après l'initialisation complète du runtime.
+Le corps est wrappé dans un IIFE pour isoler les variables locales.
+
+```webc
+component Timer {
+    state {
+        elapsed: Number = 0
+    }
+    on:mount {
+        const id = setInterval(() => {
+            S.set("elapsed", S.get("elapsed") + 1);
+            bind();
+        }, 1000);
+        window.__timerId = id;
+    }
+    view {
+        p "Temps écoulé : {elapsed}s"
+    }
+}
+```
+
+- L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
+- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+- Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
+
+### `on:destroy`
+
+S'exécute **avant chaque navigation SPA** (`nav()`) et sur l'événement `window.beforeunload`
+(fermeture ou rechargement de l'onglet).
+
+```webc
+component Timer {
+    state { elapsed: Number = 0 }
+    on:mount {
+        window.__timerId = setInterval(() => {
+            S.set("elapsed", S.get("elapsed") + 1);
+            bind();
+        }, 1000);
+    }
+    on:destroy {
+        clearInterval(window.__timerId);
+    }
+    view {
+        p "Temps : {elapsed}s"
+    }
+}
+```
+
+**Utilisation typique :** nettoyage de timers, annulation de requêtes, désenregistrement de listeners.
+
+Le runtime génère :
+```js
+const DESTROY_HOOKS = [
+    () => { clearInterval(window.__timerId); }
+];
+function runDestroyHooks() { DESTROY_HOOKS.forEach(h => h()); }
+```
+
+
+`runDestroyHooks()` est appelé en tête de `nav()` et dans `window.addEventListener('beforeunload', ...)`.
+
+---
+
 ## Éléments HTML
 
 Tout tag HTML standard est supporté directement :
@@ -585,6 +659,28 @@ input value={count} type="number"
 ```
 
 Les attributs dynamiques sont évalués au runtime via `bindAttrs()`.
+
+### `bind:` — liaison bidirectionnelle
+
+`bind:attr={var}` est un raccourci qui génère simultanément l'attribut de valeur et le handler de mise à jour :
+
+```webc
+input bind:value={name}       // → value={name} + on:input={name = event.target.value}
+input bind:checked={accepted} // → checked={accepted} + on:change={accepted = event.target.checked}
+```
+
+Équivalent développé :
+
+```webc
+// Sans bind: — version longue
+input value={name} on:input={name = event.target.value}
+
+// Avec bind: — version courte
+input bind:value={name}
+```
+
+`bind:value` utilise l'événement `on:input` (mise à jour à chaque frappe).
+`bind:checked` utilise `on:change` (mise à jour au changement d'état de la case).
 
 ---
 
@@ -726,6 +822,55 @@ component TaskList {
             }
         }
     }
+}
+```
+
+### `@for` avec index
+
+La seconde variable optionnelle dans `@for item, i in list` reçoit l'index (0-based) de l'élément courant :
+
+```webc
+@for item, i in items {
+    li "{i}. {item}"
+}
+```
+
+```webc
+component Ranking {
+    state { scores: List = [] }
+    view {
+        ol {
+            @for entry, rank in scores {
+                li "#{rank + 1} — {entry.name} : {entry.score}"
+            }
+        }
+    }
+}
+```
+
+### `@switch` / `@case` / `@default`
+
+La directive `@switch` est une alternative lisible à une chaîne `@if`/`@else` :
+
+```webc
+@switch status {
+    @case "active"   { span class="badge green"  "Active" }
+    @case "pending"  { span class="badge yellow" "Pending" }
+    @case "archived" { span class="badge gray"   "Archived" }
+    @default         { span class="badge"        "Unknown" }
+}
+```
+
+- L'expression après `@switch` est comparée avec `===` à la valeur de chaque `@case`.
+- Le bloc `@default` est facultatif. S'il est absent et qu'aucun `@case` ne correspond, rien n'est rendu.
+- Compilée en chaîne `@if`/`@else` par le parser — aucun overhead runtime.
+
+```webc
+// Avec une expression complexe
+@switch count % 3 {
+    @case 0 { p "Divisible par 3" }
+    @case 1 { p "Reste 1" }
+    @case 2 { p "Reste 2" }
 }
 ```
 
@@ -898,11 +1043,20 @@ style {
 
 ```
 dist/
-├── index.html     # Page "home" avec layout
-├── about.html     # Page "about" avec layout
-├── theme.css      # Variables CSS + styles scopés des composants
-└── webcore.js     # Runtime réactif (état, routage, événements)
+├── index.html          # Page "home" avec layout
+├── about/
+│   └── index.html      # Page "about" — URL propre : /about
+├── assets/
+│   ├── theme.css       # Variables CSS + styles scopés des composants
+│   ├── webcore.js      # Runtime réactif (état, routage, événements)
+│   └── logo.png        # Assets publics (copiés depuis public/)
 ```
+
+Les pages sont générées dans `slug/index.html` (URLs propres sans `.html`).
+Les assets (JS, CSS, images) sont isolés dans `dist/assets/` ; les chemins sont absolus (`/assets/theme.css`)
+pour que les pages de sous-dossiers résolvent correctement leurs ressources.
+
+`webc build` affiche un récapitulatif de l'arborescence générée avec les tailles de fichiers.
 
 ### Runtime JS (`webcore.js`)
 
@@ -1230,7 +1384,30 @@ component Signer {
 
 ---
 
-## Limites actuelles (v1.1.1)
+## Commande `webc check`
+
+`webc check` valide le projet sans générer de fichiers de sortie.
+
+```bash
+cd mon-app
+webc check
+```
+
+Contrôles effectués :
+
+| Contrôle | Exemple d'erreur |
+|---|---|
+| Syntaxe `.webc` | Accolade manquante, expression vide `{}` |
+| Routes → pages | `/about: AboutPage` déclarée mais aucune page `"about"` dans les fichiers `.webc` |
+| Composants instanciés | `Counter {}` utilisé mais composant `Counter` introuvable |
+| Types de props | Prop `count: Number` reçoit `label="hello"` (type incohérent) |
+
+En cas d'erreur, `webc check` affiche le fichier, la ligne et un message explicite, puis quitte avec code 1.
+Si tout est valide, il affiche `✓ projet valide` et quitte avec code 0.
+
+---
+
+## Limites actuelles (v1.2.0)
 
 | Limite | Contournement |
 |---|---|
@@ -1336,3 +1513,36 @@ Le listener de soumission tourne désormais en phase de capture. Voir [Comportem
 ### `on:mount` — imbrication profonde
 
 Les corps `on:mount { }` supportent les accolades JS imbriquées à profondeur arbitraire. Les callbacks complexes ne provoquent plus d'erreur de parse. Voir [`on:mount`](#onmount).
+
+---
+
+## Nouveautés v1.2.0
+
+### `@switch` / `@case` / `@default`
+
+Directive multi-branches compilée en chaîne `@if`/`@else` au parsing. Voir [`@switch`](#switch--case--default).
+
+### `bind:` — liaison bidirectionnelle
+
+`bind:value={x}` et `bind:checked={x}` : raccourci pour l'attribut de valeur + le handler de mise à jour.
+Voir [`bind:`](#bind--liaison-bidirectionnelle).
+
+### `@for item, i in items` — index de boucle
+
+La seconde variable optionnelle dans `@for` reçoit l'index (0-based) de l'élément courant. Voir [`@for` avec index](#for-avec-index).
+
+### `webc check` — validation sans build
+
+Nouvelle commande CLI qui parse et vérifie les références sans générer de fichiers. Voir [Commande `webc check`](#commande-webc-check).
+
+### URLs propres
+
+Les pages sont générées dans `slug/index.html` — les URLs n'ont plus d'extension `.html`.
+
+### `dist/assets/` — séparation HTML / assets
+
+JS, CSS et assets publics dans `dist/assets/` ; HTML à la racine de `dist/`. Les chemins d'assets sont absolus pour les pages imbriquées.
+
+### CSS public minifié en mode prod
+
+Les fichiers `.css` dans `public/` sont désormais traités par LightningCSS quand `mode = "prod"` est activé dans `webc.toml`.

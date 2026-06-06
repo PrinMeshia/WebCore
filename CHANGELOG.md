@@ -5,6 +5,25 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.2.0] — 2026-06-05
+
+### Ajouts
+
+- **`@switch` / `@case` / `@default`** — nouvelle directive de contrôle multi-branches ; compilée en chaîne `@if`/`@else` au parsing, sans changement du codegen JS
+- **`bind:` two-way binding** — `bind:value={x}` expande en `value={x}` + `on:input={x = event.target.value}` ; `bind:checked={x}` → `on:change={x = event.target.checked}` ; traitement en pré-passe dans `expand_bind_attrs()` avant la génération du tag
+- **`@for item, i in items`** — accès à l'index courant dans les boucles ; `i` est disponible dans les interpolations et expressions imbriquées ; émet `data-webcore-for-index` sur le `<template>` ; `bindFor()` injecte la valeur d'index dans `fillItem`
+- **`webc check`** — commande CLI : parse et valide les références (routes ↔ pages, composants instanciés, types de props) sans générer de fichiers ; rapporte les erreurs de cohérence avec fichier et ligne
+- **URLs propres** — les pages sont générées dans `slug/index.html` au lieu de `slug.html` ; les liens SPA et le serveur dev résolvent correctement les chemins sans extension
+- **`dist/assets/`** — JS, CSS et assets publics placés dans `dist/assets/` ; les HTML restent à la racine de `dist/` ; les chemins d'assets sont absolus (`/assets/theme.css`) pour les sous-répertoires
+- **Arborescence du build** — `webc build` affiche un récapitulatif `dist/` avec tailles de fichiers et total
+- **CSS public minifié** — les fichiers `.css` dans `public/` sont traités par LightningCSS en mode `prod`
+
+### Améliorations
+
+- 4 nouveaux golden tests (`@switch`, `bind:value`, `bind:checked`) — 80 tests au total
+
+---
+
 ## [1.1.1] — 2026-06-04 · [GitHub Release](https://github.com/PrinMeshia/Webcore/releases/tag/v1.1.1)
 
 ### Corrections
@@ -24,7 +43,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.0] 
+## [1.1.0] — 2026-06-03
 
 ### Ajouts
 
@@ -55,7 +74,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.0] 
+## [1.0.0] — 2026-06-02
 
 ### Ajouts
 
@@ -79,7 +98,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.9.0] 
+## [0.9.0] — 2026-06-02
 
 ### Ajouts
 
@@ -94,7 +113,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.8.0] 
+## [0.8.0] — 2026-06-02
 
 ### Ajouts
 
@@ -110,7 +129,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.7.0] 
+## [0.7.0] — 2026-06-02
 
 ### Ajouts
 
@@ -118,7 +137,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.6.0] 
+## [0.6.0] — 2026-06-02
 
 ### Ajouts
 
@@ -126,7 +145,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.5.0]
+## [0.5.0] — 2026-06-02
 
 ### Ajouts
 
@@ -134,7 +153,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0] 
+## [0.4.0] — 2026-06-02
 
 ### Ajouts
 
@@ -148,7 +167,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0] 
+## [0.3.0] — 2026-06-02
 
 ### Ajouts
 
@@ -169,7 +188,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] 
+## [0.2.0] — 2026-06-01
 
 ### Ajouts
 

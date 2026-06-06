@@ -1057,3 +1057,100 @@ fn golden_error_message_has_caret() {
     assert!(display.contains('^'), "caret missing in error: {display}");
 }
 
+
+// ── @switch (v1.2.0) ─────────────────────────────────────────────────────────
+
+#[test]
+fn golden_switch_expands_to_if_chain() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    @switch status {
+        @case "active"  { span "Active" }
+        @case "pending" { span "Pending" }
+        @default        { span "Unknown" }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // @switch expands to @if chain — bindIf must be present in JS
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("bindIf"),
+        "bindIf missing — @switch should expand to @if chain:\n{js}"
+    );
+    // Each case becomes a data-webcore-if condition using ===
+    assert!(
+        res.html.contains("status === &quot;active&quot;") || res.html.contains("status === \"active\""),
+        "case condition missing in HTML:\n{}", res.html
+    );
+    assert!(res.html.contains("Active"), "case content missing");
+    assert!(res.html.contains("Unknown"), "default content missing");
+}
+
+#[test]
+fn golden_switch_without_default() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    @switch role {
+        @case "admin" { span "Admin panel" }
+        @case "user"  { span "User view" }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(res.html.contains("Admin panel"), "admin case missing");
+    assert!(res.html.contains("User view"), "user case missing");
+}
+
+// ── bind: two-way binding (v1.2.0) ───────────────────────────────────────────
+
+#[test]
+fn golden_bind_value_expands_to_attr_and_handler() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Form {
+    state { username: String = "" }
+    view {
+        input type="text" bind:value={username}
+        p "Hello {username}"
+    }
+}
+page "home" { Form {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // bind:value should generate a dynamic attr binding for value
+    assert!(
+        res.html.contains("data-webcore-attr-value"),
+        "dynamic value binding missing:\n{}", res.html
+    );
+    // and an on:input handler that writes back to username
+    assert!(
+        res.html.contains("username = event.target.value") ||
+        res.handlers.iter().any(|h| h.expression.contains("username = event.target.value")),
+        "on:input handler missing:\n{:?}", res.handlers
+    );
+}
+
+#[test]
+fn golden_bind_checked_uses_onchange() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Toggle {
+    state { active: Boolean = false }
+    view { input type="checkbox" bind:checked={active} }
+}
+page "home" { Toggle {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-attr-checked") ||
+        res.handlers.iter().any(|h| h.expression.contains("event.target.checked")),
+        "checked binding missing:\n{}", res.html
+    );
+}

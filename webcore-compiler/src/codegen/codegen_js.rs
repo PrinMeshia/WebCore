@@ -1,4 +1,31 @@
 //! JavaScript Code Generator for WebCore Runtime
+//!
+//! ## Runtime naming conventions
+//!
+//! The generated JavaScript uses short names intentionally — the runtime is
+//! embedded verbatim in every built page and the names survive minification:
+//!
+//! | Name    | Meaning                              |
+//! |---------|--------------------------------------|
+//! | `S`     | Local component `State` instance     |
+//! | `STORE` | Global shared `State` instance       |
+//! | `U`     | Math utilities (`max`, `min`, `abs`) |
+//! | `VARS`  | Array of local state variable names  |
+//! | `STORE_VARS` | Array of global store var names |
+//!
+//! ## Block-scoping constraint
+//!
+//! The entire runtime is wrapped in a `{}` JS block so that `const` declarations
+//! do not pollute `globalThis`.  As a consequence, `new Function(body)` cannot
+//! see block-scoped bindings — `S`, `STORE`, `U` and `t` must therefore be
+//! passed explicitly as named parameters whenever a dynamic `Function` is
+//! constructed (see `evalCond`).
+//!
+//! ## Tree-shaking
+//!
+//! `generate_runtime_js_with_vars` calls `detect_features()` to inspect the
+//! document AST and emits each runtime helper only when it is actually needed.
+//! Simple pages (no `@if`, no `@for`, no validation) get a runtime of ~300 bytes.
 
 use crate::ast::*;
 use crate::codegen::codegen_html::HandlerMapping;
@@ -320,7 +347,7 @@ fn page_name_to_file(name: &str) -> String {
     if route.is_empty() || route == "index" {
         "index.html".to_string()
     } else {
-        format!("{}.html", route)
+        format!("{}/index.html", route)
     }
 }
 
@@ -738,7 +765,23 @@ pub fn generate_runtime_js_with_vars(
 
     // ── Reactive binding functions (tree-shaken) ──────────────────────────────
     if features.has_if {
-        js.push_str("const bindIf=()=>{document.querySelectorAll('[data-webcore-if]').forEach(el=>{const cond=el.dataset.webcoreIf,next=el.nextElementSibling,hasElse=next?.dataset.webcoreElse===cond,upd=()=>{const v=evalCond(cond);el.style.display=v?'':'none';if(hasElse)next.style.display=v?'none':''};upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))});};\n");
+        js.push_str(
+            "const bindIf=()=>{\n\
+             document.querySelectorAll('[data-webcore-if]').forEach(el=>{\n\
+               const cond=el.dataset.webcoreIf,\n\
+                     next=el.nextElementSibling,\n\
+                     hasElse=next?.dataset.webcoreElse===cond,\n\
+                     upd=()=>{\n\
+                       const v=evalCond(cond);\n\
+                       el.style.display=v?'':'none';\n\
+                       if(hasElse)next.style.display=v?'none':''\n\
+                     };\n\
+               upd();\n\
+               VARS.forEach(v=>S.on(v,upd));\n\
+               STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+             })\n\
+             };\n"
+        );
     }
     if features.has_for {
         // bindFor — renders @for loops; supports optional key-based DOM diffing when
@@ -746,14 +789,73 @@ pub fn generate_runtime_js_with_vars(
         // fillItem(el, val, i): sets text for interpolation spans (supports "item.prop" paths),
         // writes data-webcore-idx, and mirrors object properties as data-* attributes for CSS.
         // Keyed diffing: webcoreKey stored on firstElementChild (no extra wrapper div).
-        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{const items=state.get(itN)??[];if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};render();state.on(itN,render);STORE_VARS.forEach(v=>STORE.on(v,render))});};\n");
+        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{const items=state.get(itN)??[];if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};render();state.on(itN,render);STORE_VARS.forEach(v=>STORE.on(v,render))});};\n");
     }
     if features.has_dynamic_attrs {
-        js.push_str("const bindAttrs=()=>{document.querySelectorAll('[data-webcore-bound]').forEach(el=>{[...el.attributes].filter(a=>a.name.startsWith('data-webcore-attr-')).forEach(a=>{const name=a.name.slice(18),expr=a.value,upd=()=>{const val=String(evalCond(expr)??'');name in el?el[name]=val:el.setAttribute(name,val)};upd();VARS.forEach(v=>S.on(v,upd));STORE_VARS.forEach(v=>STORE.on(v,upd))})});};\n");
+        js.push_str(
+            "const bindAttrs=()=>{\n\
+             document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
+               [...el.attributes]\n\
+                 .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
+                 .forEach(a=>{\n\
+                   const name=a.name.slice(18),expr=a.value,\n\
+                         upd=()=>{\n\
+                           const val=String(evalCond(expr)??'');\n\
+                           name in el?el[name]=val:el.setAttribute(name,val)\n\
+                         };\n\
+                   upd();\n\
+                   VARS.forEach(v=>S.on(v,upd));\n\
+                   STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+                 })\n\
+             })\n\
+             };\n"
+        );
     }
     if features.has_validation {
-        js.push_str("const validateField=input=>{const val=input.value??'';if('webcoreValidateRequired'in input.dataset&&!val.trim())return input.dataset.webcoreValidateRequired||'Champ requis';const ml=input.dataset.webcoreValidateMinlength;if(ml&&val.length<+ml)return input.dataset.webcoreValidateMinlengthMsg||`Minimum ${ml} caractères`;const xl=input.dataset.webcoreValidateMaxlength;if(xl&&val.length>+xl)return input.dataset.webcoreValidateMaxlengthMsg||`Maximum ${xl} caractères`;if('webcoreValidateEmail'in input.dataset&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(val))return input.dataset.webcoreValidateEmail||'Email invalide';const pat=input.dataset.webcoreValidatePattern;if(pat){try{if(!new RegExp(pat).test(val))return input.dataset.webcoreValidatePatternMsg||'Format invalide'}catch(_){}}return''};\n");
-        js.push_str("const bindValidation=()=>{document.querySelectorAll('form').forEach(form=>{const check=input=>{const field=input.dataset.webcoreField,err=validateField(input),el=field&&form.querySelector(`[data-webcore-error=\"${field}\"]`);if(el){(el.firstElementChild||el).textContent=err;el.style.display=err?'':'none'}return!err};form.querySelectorAll('[data-webcore-field]').forEach(input=>{input.addEventListener('blur',()=>{input.dataset.webcoreTouched='1';check(input)});input.addEventListener('input',()=>{if(input.dataset.webcoreTouched)check(input)})});form.addEventListener('submit',e=>{let ok=true;form.querySelectorAll('[data-webcore-field]').forEach(input=>{if(!check(input))ok=false});if(!ok){e.preventDefault();e.stopImmediatePropagation()}},true)});};\n");
+        js.push_str(
+            "const validateField=input=>{\n\
+               const val=input.value??'';\n\
+               if('webcoreValidateRequired'in input.dataset&&!val.trim())\n\
+                 return input.dataset.webcoreValidateRequired||'Champ requis';\n\
+               const ml=input.dataset.webcoreValidateMinlength;\n\
+               if(ml&&val.length<+ml)\n\
+                 return input.dataset.webcoreValidateMinlengthMsg||`Minimum ${ml} caractères`;\n\
+               const xl=input.dataset.webcoreValidateMaxlength;\n\
+               if(xl&&val.length>+xl)\n\
+                 return input.dataset.webcoreValidateMaxlengthMsg||`Maximum ${xl} caractères`;\n\
+               if('webcoreValidateEmail'in input.dataset&&\n\
+                  !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(val))\n\
+                 return input.dataset.webcoreValidateEmail||'Email invalide';\n\
+               const pat=input.dataset.webcoreValidatePattern;\n\
+               if(pat){try{if(!new RegExp(pat).test(val))\n\
+                 return input.dataset.webcoreValidatePatternMsg||'Format invalide'}catch(_){}}\n\
+               return''\n\
+             };\n"
+        );
+        js.push_str(
+            "const bindValidation=()=>{\n\
+             document.querySelectorAll('form').forEach(form=>{\n\
+               const check=input=>{\n\
+                 const field=input.dataset.webcoreField,\n\
+                       err=validateField(input),\n\
+                       el=field&&form.querySelector(`[data-webcore-error=\"${field}\"]`);\n\
+                 if(el){(el.firstElementChild||el).textContent=err;el.style.display=err?'':'none'}\n\
+                 return!err\n\
+               };\n\
+               form.querySelectorAll('[data-webcore-field]').forEach(input=>{\n\
+                 input.addEventListener('blur',()=>{input.dataset.webcoreTouched='1';check(input)});\n\
+                 input.addEventListener('input',()=>{if(input.dataset.webcoreTouched)check(input)})\n\
+               });\n\
+               form.addEventListener('submit',e=>{\n\
+                 let ok=true;\n\
+                 form.querySelectorAll('[data-webcore-field]').forEach(input=>{\n\
+                   if(!check(input))ok=false\n\
+                 });\n\
+                 if(!ok){e.preventDefault();e.stopImmediatePropagation()}\n\
+               },true)\n\
+             })\n\
+             };\n"
+        );
     }
     js.push('\n');
 
@@ -827,9 +929,9 @@ pub fn generate_runtime_js_with_vars(
             routes_js.push_str("];\n");
             js.push_str(&routes_js);
             js.push_str("let ROUTE_PARAMS={};\n");
-            js.push_str("const matchRoute=p=>{for(const r of ROUTES){const m=p.match(r.re);if(m){r.params.forEach((k,i)=>ROUTE_PARAMS[k]=m[i+1]);return r.file;}}return p==='/'?'index.html':`${p.slice(1)}.html`;};\n");
+            js.push_str("const matchRoute=p=>{for(const r of ROUTES){const m=p.match(r.re);if(m){r.params.forEach((k,i)=>ROUTE_PARAMS[k]=m[i+1]);return r.file;}}return p==='/'?'index.html':`${p.slice(1)}/index.html`;};\n");
         } else {
-            js.push_str("const toFile=p=>p==='/'?'index.html':`${p.slice(1)}.html`;\n");
+            js.push_str("const toFile=p=>p==='/'?'index.html':`${p.slice(1)}/index.html`;\n");
         }
         // init=true → replaceState (no duplicate history entry on first load)
         js.push_str("const nav=async(p,init=false)=>{\n");

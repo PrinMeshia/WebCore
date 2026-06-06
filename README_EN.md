@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 1.1.1 |
+| **Version** | 1.2.0 |
 | **Status** | Stable |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 76 unit tests |
+| **Tests** | 80 unit tests |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -56,6 +56,13 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 - **Multi-statement handlers**: `on:click={a = 1; b = 2}` — multiple `;`-separated instructions in a single handler
 - **Multi-element CSS selectors**: `input, textarea { }` supported inside `style { }` blocks
 - **Forms example**: `examples/forms/` — `SignupForm` and `ContactForm` with full validation
+- **`@switch` / `@case` / `@default`**: multi-branch directive compiled to an `@if`/`@else` chain — zero runtime overhead
+- **`bind:` two-way binding**: `bind:value={x}` and `bind:checked={x}` expand to attribute + `on:input`/`on:change` handler
+- **`@for item, i in items`**: access the current index in loops via a second variable
+- **`webc check`**: validate syntax and references (routes, components, props) without generating any files
+- **Clean URLs**: pages served without `.html` extension (e.g. `/about` instead of `/about.html`)
+- **`dist/assets/`**: JS, CSS and public assets isolated in a dedicated subfolder
+- **Build tree**: `dist/` summary with file sizes printed after every `webc build`
 
 ---
 
@@ -135,6 +142,16 @@ component Counter {
             div { flex-direction: column; }
         }
     }
+    view { p "Hello {fullName}" }
+}
+
+// Inter-component events
+component Notifier {
+    view { button on:click={emit("ping", count)} { "Ping" } }
+}
+
+page "home" {
+    Notifier on:ping={count += 1} {}
 }
 ```
 
@@ -197,6 +214,26 @@ page "home" {
 @for post key=post.id in posts {
     article "{post.title}"
 }
+
+// With index — access the current rank (v1.2.0)
+@for item, i in items {
+    li "{i}. {item}"
+}
+
+// Multi-branch switch (v1.2.0)
+@switch status {
+    @case "active"   { span class="green"  "Active"  }
+    @case "pending"  { span class="yellow" "Pending" }
+    @default         { span class="gray"   "Unknown" }
+}
+```
+
+### `bind:` two-way binding (v1.2.0)
+
+```webc
+// Keeps value and state in sync automatically
+input bind:value={name}    // ≡ value={name} + on:input={name = event.target.value}
+input bind:checked={agree} // ≡ checked={agree} + on:change={agree = event.target.checked}
 ```
 
 ### Parameterized routes (v1.1.0)
@@ -263,6 +300,14 @@ cd examples/counter
 webc dev
 # With a custom port
 webc dev 3000
+```
+
+### Validate without building
+
+```bash
+cd examples/counter
+webc check
+# → parse + validate routes, components and prop types without writing any files
 ```
 
 ---
@@ -434,6 +479,19 @@ cargo fmt
 - [x] **i18n params + pluralization** — `t("key", n)` → `_one`/`_other` keys + `{{count}}`; `t("key", val)` → `{{0}}`
 - [x] **Compound props** — `{step + 1}`, `class={color}`: word-boundary substitution in composite expressions and attributes
 - [x] **Enriched parse errors** — source line + caret `^` at the faulty column + contextual hints for common mistakes
+
+---
+
+### ✅ v1.2.0 — DX & directives (complete)
+
+- [x] **`@switch` / `@case` / `@default`** — multi-branch directive compiled to an `@if`/`@else` chain at parse time; zero runtime overhead
+- [x] **`bind:` two-way binding** — `bind:value={x}` / `bind:checked={x}`: attribute + handler generated automatically by `expand_bind_attrs()`
+- [x] **`@for item, i in items`** — current index accessible inside the loop; `data-webcore-for-index` on the `<template>`; `fillItem` injects the value
+- [x] **`webc check`** — CLI validation without file generation: parse + routes/components/props consistency check
+- [x] **Clean URLs** — `slug/index.html` instead of `slug.html`; dev server resolves `/about` → `dist/about/index.html`
+- [x] **`dist/assets/`** — JS/CSS/public assets in a subfolder, HTML at the root; absolute paths `/assets/`
+- [x] **Build tree** — `dist/` summary with file sizes printed after every `webc build`
+- [x] **Public CSS minified** — `public/*.css` processed by LightningCSS in `prod` mode
 
 ---
 

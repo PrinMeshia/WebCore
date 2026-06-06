@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 1.1.1 |
+| **Version** | 1.2.0 |
 | **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 76 tests unitaires |
+| **Tests** | 80 tests unitaires |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -56,6 +56,13 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **Handlers multi-instructions** : `on:click={a = 1; b = 2}` — plusieurs instructions séparées par `;` dans un même handler
 - **Sélecteurs CSS multi-éléments** : `input, textarea { }` supporté dans les blocs `style { }`
 - **Exemple formulaires** : `examples/forms/` — `SignupForm` et `ContactForm` avec validation complète
+- **`@switch` / `@case` / `@default`** : directive multi-branches compilée en chaîne `@if`/`@else` — aucun overhead runtime
+- **`bind:` two-way binding** : `bind:value={x}` et `bind:checked={x}` expandés en attribut + handler `on:input`/`on:change`
+- **`@for item, i in items`** : accès à l'index courant dans les boucles via la seconde variable
+- **`webc check`** : valide la syntaxe et les références (routes, composants, props) sans générer de fichiers
+- **URLs propres** : les pages sont servies sans extension (ex. `/about` au lieu de `/about.html`)
+- **`dist/assets/`** : JS, CSS et assets publics isolés dans un sous-dossier dédié
+- **Arborescence du build** : résumé `dist/` avec tailles de fichiers affiché après chaque build
 
 ---
 
@@ -135,6 +142,16 @@ component Counter {
             div { flex-direction: column; }
         }
     }
+    view { p "Bonjour {nomComplet}" }
+}
+
+// Événements inter-composants
+component Notificateur {
+    view { button on:click={emit("ping", count)} { "Ping" } }
+}
+
+page "home" {
+    Notificateur on:ping={count += 1} {}
 }
 ```
 
@@ -197,6 +214,26 @@ page "home" {
 @for post key=post.id in posts {
     article "{post.title}"
 }
+
+// Avec index — accès au rang courant (v1.2.0)
+@for item, i in items {
+    li "{i}. {item}"
+}
+
+// Multi-branches (v1.2.0)
+@switch status {
+    @case "active"   { span class="green" "Active" }
+    @case "pending"  { span class="yellow" "Pending" }
+    @default         { span class="gray" "Unknown" }
+}
+```
+
+### `bind:` two-way binding (v1.2.0)
+
+```webc
+// Synchronise automatiquement la valeur dans les deux sens
+input bind:value={name}    // ≡ value={name} + on:input={name = event.target.value}
+input bind:checked={agree} // ≡ checked={agree} + on:change={agree = event.target.checked}
 ```
 
 ### Routes paramétrées (v1.1.0)
@@ -263,6 +300,14 @@ cd examples/counter
 webc dev
 # Avec un port personnalisé
 webc dev 3000
+```
+
+### Validation sans build
+
+```bash
+cd examples/counter
+webc check
+# → parse + valide routes, composants et types de props sans écrire de fichiers
 ```
 
 ---
@@ -434,6 +479,19 @@ cargo fmt
 - [x] **i18n params + pluralisation** — `t("key", n)` → clés `_one`/`_other` + `{{count}}` ; `t("key", val)` → `{{0}}`
 - [x] **Props composées** — `{step + 1}`, `class={color}` : substitution word-boundary dans les expressions complexes et les attributs
 - [x] **Erreurs de parsing enrichies** — ligne source + caret `^` à la colonne fautive + hints contextuels pour les erreurs fréquentes
+
+---
+
+### ✅ v1.2.0 — DX & directives (complète)
+
+- [x] **`@switch` / `@case` / `@default`** — directive multi-branches compilée en chaîne `@if`/`@else` au parsing ; aucun overhead runtime
+- [x] **`bind:` two-way binding** — `bind:value={x}` / `bind:checked={x}` : attribut + handler générés automatiquement par `expand_bind_attrs()`
+- [x] **`@for item, i in items`** — index courant accessible dans la boucle ; `data-webcore-for-index` sur le `<template>` ; `fillItem` injecte la valeur
+- [x] **`webc check`** — validation CLI sans génération de fichiers : parse + cohérence routes/composants/props
+- [x] **URLs propres** — `slug/index.html` au lieu de `slug.html` ; le serveur dev résout `/about` → `dist/about/index.html`
+- [x] **`dist/assets/`** — JS/CSS/assets publics dans un sous-dossier, HTML à la racine ; chemins absolus `/assets/`
+- [x] **Arborescence du build** — résumé `dist/` avec tailles de fichiers après chaque `webc build`
+- [x] **CSS public minifié** — `public/*.css` traités par LightningCSS en mode `prod`
 
 ---
 

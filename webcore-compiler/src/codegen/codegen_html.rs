@@ -11,6 +11,11 @@ pub struct HtmlPageOptions {
     pub extra_css_files: Vec<String>,
 }
 
+/// Tracks a compiled event handler so the JS runtime can wire it up.
+///
+/// `id` is a page-scoped unique string (`<prefix>btn<n>`) used as the
+/// `data-webcore-handler` HTML attribute value and as the key in the
+/// generated `onclick`/`onsubmit`/etc. handler map.
 #[derive(Debug, Clone)]
 pub struct HandlerMapping {
     pub id: String,
@@ -18,8 +23,11 @@ pub struct HandlerMapping {
     pub expression: String,
 }
 
+/// Output of generating HTML for one page.
 pub struct HtmlGenerationResult {
     pub html: String,
+    /// All event handlers collected while generating this page's HTML,
+    /// to be emitted into `webcore.js` as `onclick`/`onsubmit` assignments.
     pub handlers: Vec<HandlerMapping>,
 }
 
@@ -94,10 +102,10 @@ pub fn generate_hybrid_index(
         "  <title>{}</title>\n",
         html_escape(&options.title)
     ));
-    html.push_str("  <link rel=\"stylesheet\" href=\"theme.css\">\n");
+    html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\">\n");
     for css in &options.extra_css_files {
         html.push_str(&format!(
-            "  <link rel=\"stylesheet\" href=\"{}\">\n",
+            "  <link rel=\"stylesheet\" href=\"/assets/{}\">\n",
             html_escape(css)
         ));
     }
@@ -109,7 +117,7 @@ pub fn generate_hybrid_index(
 
     // Content area will be added by the layout shell
 
-    html.push_str("  <script src=\"webcore.js\"></script>\n");
+    html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
     html.push_str("</body>\n</html>");
 
     Ok(HtmlGenerationResult {
@@ -137,10 +145,10 @@ pub fn generate_spa_html(
         "  <title>{}</title>\n",
         html_escape(&options.title)
     ));
-    html.push_str("  <link rel=\"stylesheet\" href=\"theme.css\">\n");
+    html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\">\n");
     for css in &options.extra_css_files {
         html.push_str(&format!(
-            "  <link rel=\"stylesheet\" href=\"{}\">\n",
+            "  <link rel=\"stylesheet\" href=\"/assets/{}\">\n",
             html_escape(css)
         ));
     }
@@ -183,7 +191,7 @@ pub fn generate_spa_html(
 
     html.push_str("  </div>\n");
 
-    html.push_str("  <script src=\"webcore.js\"></script>\n");
+    html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
     html.push_str("</body>\n</html>");
 
     Ok(HtmlGenerationResult {
@@ -218,10 +226,10 @@ pub fn generate_page_content_only(
         "  <title>{}</title>\n",
         html_escape(&options.title)
     ));
-    html.push_str("  <link rel=\"stylesheet\" href=\"theme.css\">\n");
+    html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\">\n");
     for css in &options.extra_css_files {
         html.push_str(&format!(
-            "  <link rel=\"stylesheet\" href=\"{}\">\n",
+            "  <link rel=\"stylesheet\" href=\"/assets/{}\">\n",
             html_escape(css)
         ));
     }
@@ -232,7 +240,7 @@ pub fn generate_page_content_only(
         generate_layout_with_page_and_components(layout, page, document)?;
     html.push_str(&layout_content);
 
-    html.push_str("  <script src=\"webcore.js\"></script>\n");
+    html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
     html.push_str("</body>\n</html>");
 
     Ok(HtmlGenerationResult { html, handlers })
@@ -264,10 +272,10 @@ pub fn generate_html(
         "  <title>{}</title>\n",
         html_escape(&options.title)
     ));
-    html.push_str("  <link rel=\"stylesheet\" href=\"theme.css\">\n");
+    html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\">\n");
     for css in &options.extra_css_files {
         html.push_str(&format!(
-            "  <link rel=\"stylesheet\" href=\"{}\">\n",
+            "  <link rel=\"stylesheet\" href=\"/assets/{}\">\n",
             html_escape(css)
         ));
     }
@@ -278,7 +286,7 @@ pub fn generate_html(
         generate_layout_with_page_and_components(layout, page, document)?;
     html.push_str(&layout_content);
 
-    html.push_str("  <script src=\"webcore.js\"></script>\n");
+    html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
     html.push_str("</body>\n</html>");
 
     Ok(HtmlGenerationResult { html, handlers })
@@ -335,6 +343,7 @@ fn resolve_slots(
             }
             Element::For {
                 item,
+                index,
                 iterable,
                 key,
                 content,
@@ -342,6 +351,7 @@ fn resolve_slots(
             } => {
                 resolved.push(Element::For {
                     item: item.clone(),
+                    index: index.clone(),
                     iterable: iterable.clone(),
                     key: key.clone(),
                     content: resolve_slots(content, slot_map, default_content),
@@ -434,6 +444,350 @@ fn generate_elements_with_scope_and_counter(
     Ok((result, all_handlers))
 }
 
+/// Expand `bind:attr={expr}` into a value/checked attr + event handler pair.
+/// `bind:value={x}`   → `value={x}` + `on:input={x = event.target.value}`
+/// `bind:checked={x}` → `checked={x}` + `on:change={x = event.target.checked}`
+fn expand_bind_attrs(attributes: &[Attribute]) -> Vec<Attribute> {
+    if !attributes.iter().any(|a| a.name.starts_with("bind:")) {
+        return attributes.to_vec();
+    }
+    let mut result = Vec::with_capacity(attributes.len() + 2);
+    for attr in attributes {
+        if let Some(target) = attr.name.strip_prefix("bind:") {
+            if let AttributeValue::Expression(expr) = &attr.value {
+                result.push(Attribute {
+                    name: target.to_string(),
+                    value: AttributeValue::Expression(expr.clone()),
+                    span: attr.span,
+                });
+                let (event, prop) = if target == "checked" || target == "selected" {
+                    ("on:change", "event.target.checked")
+                } else {
+                    ("on:input", "event.target.value")
+                };
+                result.push(Attribute {
+                    name: event.to_string(),
+                    value: AttributeValue::Expression(
+                        format!("{} = {}", expr.trim(), prop),
+                    ),
+                    span: attr.span,
+                });
+            }
+        } else {
+            result.push(attr.clone());
+        }
+    }
+    result
+}
+
+/// Generate HTML for a single `<tag>` element, including:
+/// - CSS scope attribute (`data-v`)
+/// - Static, boolean, and expression attributes
+/// - Event handler attributes (`on:click` → `onclick="webcore_handle_click(...)"`)
+/// - Validation data attributes (`validate:required` → `data-webcore-validate-required`)
+/// - SPA-aware `<a href>` with `onclick="webcore_navigate(...)"` for internal links
+fn generate_tag_element(
+    name: &str,
+    attributes: &[Attribute],
+    content: &[Element],
+    document: &WebCoreDocument,
+    counter: &mut usize,
+    scope_id: Option<&str>,
+    prefix: &str,
+) -> Result<(String, Vec<HandlerMapping>), String> {
+    let mut result = String::new();
+    let mut handlers = Vec::new();
+    if name == "text" {
+        let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
+            content, document, scope_id, counter, prefix,
+        )?;
+        return Ok((content_html, content_handlers));
+    }
+
+    // Expand bind:attr={expr} → attr={expr} + on:event={expr = event.target.value}
+    let expanded = expand_bind_attrs(attributes);
+    let attributes = &expanded;
+
+    let mapped_name = if name == "link" { "a" } else { name };
+    let is_link = mapped_name == "a";
+    let mut resolved_href: Option<String> = None;
+    result.push_str(&format!("<{}", mapped_name));
+
+    // Add scope attribute for CSS scoping
+    if let Some(sid) = scope_id {
+        result.push_str(&format!(" data-v=\"{}\"", sid));
+    }
+
+    // Mark elements that have dynamic (expression) attribute bindings
+    if attributes.iter().any(|a| {
+        !a.name.starts_with("on:") && matches!(&a.value, AttributeValue::Expression(_))
+    }) {
+        result.push_str(" data-webcore-bound");
+    }
+
+    // Detect validate:* attributes and add data-webcore-field
+    let has_validate = attributes.iter().any(|a| a.name.starts_with("validate:"));
+    if has_validate {
+        let field_name = attributes.iter().find(|a| a.name == "name").and_then(|a| {
+            if let AttributeValue::String(v) = &a.value {
+                Some(v.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(field) = field_name {
+            result.push_str(&format!(" data-webcore-field=\"{}\"", html_escape(&field)));
+        }
+    }
+
+    // Generate attributes
+    for attr in attributes {
+        // Skip validate:* here — converted below after the loop
+        if attr.name.starts_with("validate:") {
+            continue;
+        }
+        match &attr.value {
+            AttributeValue::String(value) => {
+                if is_link && attr.name == "to" {
+                    resolved_href = Some(value.clone());
+                } else {
+                    result.push_str(&format!(" {}=\"{}\"", attr.name, html_escape(value)));
+                }
+            }
+            AttributeValue::Boolean(true) => {
+                result.push_str(&format!(" {}", attr.name));
+            }
+            AttributeValue::Boolean(false) => {}
+            AttributeValue::Expression(expr) => {
+                if attr.name.starts_with("on:") {
+                    // Event handler: on:click={ count += 1 }
+                    let event_type = attr.name.strip_prefix("on:").unwrap_or("click");
+                    *counter += 1;
+                    let handler_id = format!("{}btn{}", prefix, counter);
+
+                    // Extract href from webcore_navigate() for links
+                    if is_link && expr.contains("webcore_navigate") {
+                        if let Some(path) = extract_navigate_path(expr) {
+                            resolved_href = Some(path);
+                        }
+                    }
+
+                    // Add handler to our collection
+                    handlers.push(HandlerMapping {
+                        id: handler_id.clone(),
+                        event_type: event_type.to_string(),
+                        expression: expr.clone(),
+                    });
+
+                    // Use native HTML5 event attributes with simple IDs
+                    match event_type {
+                        "click" => result.push_str(&format!(" id=\"{}\" onclick=\"webcore_handle_click('{}'); return false;\"", handler_id, handler_id)),
+                        "submit" => result.push_str(&format!(" id=\"{}\" onsubmit=\"webcore_handle_submit('{}'); return false;\"", handler_id, handler_id)),
+                        "change" => result.push_str(&format!(" id=\"{}\" onchange=\"webcore_handle_change('{}')\"", handler_id, handler_id)),
+                        "input" => result.push_str(&format!(" id=\"{}\" oninput=\"webcore_handle_input('{}')\"", handler_id, handler_id)),
+                        _ => result.push_str(&format!(" id=\"{}\" on{}=\"webcore_handle_event('{}', '{}')\"", handler_id, event_type, event_type, handler_id)),
+                    }
+                } else {
+                    // Dynamic attribute: bound at runtime via bindAttrs()
+                    result.push_str(&format!(
+                        " data-webcore-attr-{}=\"{}\"",
+                        attr.name,
+                        html_escape(expr)
+                    ));
+                }
+            }
+        }
+    }
+
+    // Emit validate:* attrs as data-webcore-validate-* attributes
+    for attr in attributes
+        .iter()
+        .filter(|a| a.name.starts_with("validate:"))
+    {
+        let validator = attr.name.strip_prefix("validate:").unwrap_or("");
+        match &attr.value {
+            AttributeValue::String(v) => match validator {
+                "minlength" | "maxlength" => {
+                    let (constraint, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
+                    result.push_str(&format!(
+                        " data-webcore-validate-{}=\"{}\"",
+                        validator,
+                        html_escape(constraint.trim())
+                    ));
+                    if !msg.is_empty() {
+                        result.push_str(&format!(
+                            " data-webcore-validate-{}-msg=\"{}\"",
+                            validator,
+                            html_escape(msg.trim())
+                        ));
+                    }
+                }
+                "pattern" => {
+                    let (pat, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
+                    result.push_str(&format!(
+                        " data-webcore-validate-pattern=\"{}\"",
+                        html_escape(pat.trim())
+                    ));
+                    if !msg.is_empty() {
+                        result.push_str(&format!(
+                            " data-webcore-validate-pattern-msg=\"{}\"",
+                            html_escape(msg.trim())
+                        ));
+                    }
+                }
+                _ => {
+                    result.push_str(&format!(
+                        " data-webcore-validate-{}=\"{}\"",
+                        validator,
+                        html_escape(v)
+                    ));
+                }
+            },
+            AttributeValue::Boolean(true) => {
+                result.push_str(&format!(" data-webcore-validate-{}=\"\"", validator));
+            }
+            _ => {}
+        }
+    }
+
+    if is_link {
+        if let Some(h) = resolved_href {
+            let has_nav = document
+                .app
+                .as_ref()
+                .map(|a| !a.routes.is_empty())
+                .unwrap_or(false);
+            // Internal paths get an onclick for SPA navigation so clicking
+            // never triggers a full page reload.  href is kept as fallback.
+            if has_nav && h.starts_with('/') {
+                result.push_str(&format!(
+                    " href=\"{}\" onclick=\"webcore_navigate('{}'); return false;\"",
+                    html_escape(&h),
+                    h
+                ));
+            } else {
+                result.push_str(&format!(" href=\"{}\"", html_escape(&h)));
+            }
+        } else if !attributes.iter().any(|a| a.name == "href") {
+            result.push_str(" href=\"#\"");
+        }
+    }
+
+    result.push('>');
+    let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
+        content, document, scope_id, counter, prefix,
+    )?;
+    result.push_str(&content_html);
+    result.push_str(&format!("</{}>", mapped_name));
+    handlers.extend(content_handlers);
+    Ok((result, handlers))
+}
+
+/// Render a component call site: resolve the component definition, substitute props,
+/// apply the component's CSS scope, and recursively generate the view.
+/// Falls back to rendering as a plain HTML element if the component is unknown.
+fn generate_component_element(
+    name: &str,
+    attributes: &[Attribute],
+    content: &[Element],
+    document: &WebCoreDocument,
+    counter: &mut usize,
+    scope_id: Option<&str>,
+    prefix: &str,
+) -> Result<(String, Vec<HandlerMapping>), String> {
+    // Find the component definition
+    if let Some(component) = document.components.get(name) {
+        // Collect static prop values
+        let static_props: std::collections::HashMap<String, String> = attributes
+            .iter()
+            .filter_map(|a| {
+                if let AttributeValue::String(v) = &a.value {
+                    Some((a.name.clone(), v.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Collect dynamic (expression) prop values — reactive props
+        let dynamic_props: std::collections::HashMap<String, String> = attributes
+            .iter()
+            .filter_map(|a| {
+                if let AttributeValue::Expression(e) = &a.value {
+                    Some((a.name.clone(), e.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Generate scope ID for this component's CSS
+        let component_scope = generate_scope_id(name);
+
+        // Substitute props into the view
+        let substituted;
+        let view: &[Element] = if static_props.is_empty() && dynamic_props.is_empty() {
+            &component.view
+        } else {
+            substituted = substitute_props(&component.view, &static_props, &dynamic_props);
+            &substituted
+        };
+
+        generate_elements_with_scope_and_counter(
+            view,
+            document,
+            Some(&component_scope),
+            counter,
+            prefix,
+        )
+    } else {
+        // Component not found, generate as HTML element
+        let mut result = String::new();
+        result.push_str(&format!("<{}", name));
+
+        // Add scope if we have one
+        if let Some(sid) = scope_id {
+            result.push_str(&format!(" data-v=\"{}\"", sid));
+        }
+
+        // Mark elements that have dynamic attribute bindings
+        if attributes
+            .iter()
+            .any(|a| matches!(&a.value, AttributeValue::Expression(_)))
+        {
+            result.push_str(" data-webcore-bound");
+        }
+
+        // Generate attributes
+        for attr in attributes {
+            match &attr.value {
+                AttributeValue::String(value) => {
+                    result.push_str(&format!(" {}=\"{}\"", attr.name, html_escape(value)));
+                }
+                AttributeValue::Boolean(true) => {
+                    result.push_str(&format!(" {}", attr.name));
+                }
+                AttributeValue::Boolean(false) => {}
+                AttributeValue::Expression(expr) => {
+                    result.push_str(&format!(
+                        " data-webcore-attr-{}=\"{}\"",
+                        attr.name,
+                        html_escape(expr)
+                    ));
+                }
+            }
+        }
+
+        result.push('>');
+        let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
+            content, document, scope_id, counter, prefix,
+        )?;
+        result.push_str(&content_html);
+        result.push_str(&format!("</{}>", name));
+        Ok((result, content_handlers))
+    }
+}
+
 fn generate_element_with_scope(
     element: &Element,
     document: &WebCoreDocument,
@@ -448,190 +802,8 @@ fn generate_element_with_scope(
             attributes,
             content,
             ..
-        } => {
-            let mut result = String::new();
-            let mut handlers = Vec::new();
-            if name == "text" {
-                let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-                    content, document, scope_id, counter, prefix,
-                )?;
-                return Ok((content_html, content_handlers));
-            }
-
-            let mapped_name = if name == "link" { "a" } else { name.as_str() };
-            let is_link = mapped_name == "a";
-            let mut resolved_href: Option<String> = None;
-            result.push_str(&format!("<{}", mapped_name));
-
-            // Add scope attribute for CSS scoping
-            if let Some(sid) = scope_id {
-                result.push_str(&format!(" data-v=\"{}\"", sid));
-            }
-
-            // Mark elements that have dynamic (expression) attribute bindings
-            if attributes.iter().any(|a| {
-                !a.name.starts_with("on:") && matches!(&a.value, AttributeValue::Expression(_))
-            }) {
-                result.push_str(" data-webcore-bound");
-            }
-
-            // Detect validate:* attributes and add data-webcore-field
-            let has_validate = attributes.iter().any(|a| a.name.starts_with("validate:"));
-            if has_validate {
-                let field_name = attributes.iter().find(|a| a.name == "name").and_then(|a| {
-                    if let AttributeValue::String(v) = &a.value {
-                        Some(v.clone())
-                    } else {
-                        None
-                    }
-                });
-                if let Some(field) = field_name {
-                    result.push_str(&format!(" data-webcore-field=\"{}\"", html_escape(&field)));
-                }
-            }
-
-            // Generate attributes
-            for attr in attributes {
-                // Skip validate:* here — converted below after the loop
-                if attr.name.starts_with("validate:") {
-                    continue;
-                }
-                match &attr.value {
-                    AttributeValue::String(value) => {
-                        if is_link && attr.name == "to" {
-                            resolved_href = Some(value.clone());
-                        } else {
-                            result.push_str(&format!(" {}=\"{}\"", attr.name, html_escape(value)));
-                        }
-                    }
-                    AttributeValue::Boolean(true) => {
-                        result.push_str(&format!(" {}", attr.name));
-                    }
-                    AttributeValue::Boolean(false) => {}
-                    AttributeValue::Expression(expr) => {
-                        if attr.name.starts_with("on:") {
-                            // Event handler: on:click={ count += 1 }
-                            let event_type = attr.name.strip_prefix("on:").unwrap_or("click");
-                            *counter += 1;
-                            let handler_id = format!("{}btn{}", prefix, counter);
-
-                            // Extract href from webcore_navigate() for links
-                            if is_link && expr.contains("webcore_navigate") {
-                                if let Some(path) = extract_navigate_path(expr) {
-                                    resolved_href = Some(path);
-                                }
-                            }
-
-                            // Add handler to our collection
-                            handlers.push(HandlerMapping {
-                                id: handler_id.clone(),
-                                event_type: event_type.to_string(),
-                                expression: expr.clone(),
-                            });
-
-                            // Use native HTML5 event attributes with simple IDs
-                            match event_type {
-                                "click" => result.push_str(&format!(" id=\"{}\" onclick=\"webcore_handle_click('{}'); return false;\"", handler_id, handler_id)),
-                                "submit" => result.push_str(&format!(" id=\"{}\" onsubmit=\"webcore_handle_submit('{}'); return false;\"", handler_id, handler_id)),
-                                "change" => result.push_str(&format!(" id=\"{}\" onchange=\"webcore_handle_change('{}')\"", handler_id, handler_id)),
-                                "input" => result.push_str(&format!(" id=\"{}\" oninput=\"webcore_handle_input('{}')\"", handler_id, handler_id)),
-                                _ => result.push_str(&format!(" id=\"{}\" on{}=\"webcore_handle_event('{}', '{}')\"", handler_id, event_type, event_type, handler_id)),
-                            }
-                        } else {
-                            // Dynamic attribute: bound at runtime via bindAttrs()
-                            result.push_str(&format!(
-                                " data-webcore-attr-{}=\"{}\"",
-                                attr.name,
-                                html_escape(expr)
-                            ));
-                        }
-                    }
-                }
-            }
-
-            // Emit validate:* attrs as data-webcore-validate-* attributes
-            for attr in attributes
-                .iter()
-                .filter(|a| a.name.starts_with("validate:"))
-            {
-                let validator = attr.name.strip_prefix("validate:").unwrap_or("");
-                match &attr.value {
-                    AttributeValue::String(v) => match validator {
-                        "minlength" | "maxlength" => {
-                            let (constraint, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
-                            result.push_str(&format!(
-                                " data-webcore-validate-{}=\"{}\"",
-                                validator,
-                                html_escape(constraint.trim())
-                            ));
-                            if !msg.is_empty() {
-                                result.push_str(&format!(
-                                    " data-webcore-validate-{}-msg=\"{}\"",
-                                    validator,
-                                    html_escape(msg.trim())
-                                ));
-                            }
-                        }
-                        "pattern" => {
-                            let (pat, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
-                            result.push_str(&format!(
-                                " data-webcore-validate-pattern=\"{}\"",
-                                html_escape(pat.trim())
-                            ));
-                            if !msg.is_empty() {
-                                result.push_str(&format!(
-                                    " data-webcore-validate-pattern-msg=\"{}\"",
-                                    html_escape(msg.trim())
-                                ));
-                            }
-                        }
-                        _ => {
-                            result.push_str(&format!(
-                                " data-webcore-validate-{}=\"{}\"",
-                                validator,
-                                html_escape(v)
-                            ));
-                        }
-                    },
-                    AttributeValue::Boolean(true) => {
-                        result.push_str(&format!(" data-webcore-validate-{}=\"\"", validator));
-                    }
-                    _ => {}
-                }
-            }
-
-            if is_link {
-                if let Some(h) = resolved_href {
-                    let has_nav = document
-                        .app
-                        .as_ref()
-                        .map(|a| !a.routes.is_empty())
-                        .unwrap_or(false);
-                    // Internal paths get an onclick for SPA navigation so clicking
-                    // never triggers a full page reload.  href is kept as fallback.
-                    if has_nav && h.starts_with('/') {
-                        result.push_str(&format!(
-                            " href=\"{}\" onclick=\"webcore_navigate('{}'); return false;\"",
-                            html_escape(&h),
-                            h
-                        ));
-                    } else {
-                        result.push_str(&format!(" href=\"{}\"", html_escape(&h)));
-                    }
-                } else if !attributes.iter().any(|a| a.name == "href") {
-                    result.push_str(" href=\"#\"");
-                }
-            }
-
-            result.push('>');
-            let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-                content, document, scope_id, counter, prefix,
-            )?;
-            result.push_str(&content_html);
-            result.push_str(&format!("</{}>", mapped_name));
-            handlers.extend(content_handlers);
-            Ok((result, handlers))
-        }
+        } =>
+            generate_tag_element(name, attributes, content, document, counter, scope_id, prefix),
         Element::Slot(name, _span) => Ok((format!("<!-- Slot: {} -->", name), Vec::new())),
         Element::SlotContent { content, .. } => {
             // SlotContent consumed by slot matching; render children as fallback
@@ -642,99 +814,8 @@ fn generate_element_with_scope(
             attributes,
             content,
             ..
-        } => {
-            // Find the component definition
-            if let Some(component) = document.components.get(name) {
-                // Collect static prop values
-                let static_props: std::collections::HashMap<String, String> = attributes
-                    .iter()
-                    .filter_map(|a| {
-                        if let AttributeValue::String(v) = &a.value {
-                            Some((a.name.clone(), v.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // Collect dynamic (expression) prop values — reactive props
-                let dynamic_props: std::collections::HashMap<String, String> = attributes
-                    .iter()
-                    .filter_map(|a| {
-                        if let AttributeValue::Expression(e) = &a.value {
-                            Some((a.name.clone(), e.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // Generate scope ID for this component's CSS
-                let component_scope = generate_scope_id(name);
-
-                // Substitute props into the view
-                let substituted;
-                let view: &[Element] = if static_props.is_empty() && dynamic_props.is_empty() {
-                    &component.view
-                } else {
-                    substituted = substitute_props(&component.view, &static_props, &dynamic_props);
-                    &substituted
-                };
-
-                generate_elements_with_scope_and_counter(
-                    view,
-                    document,
-                    Some(&component_scope),
-                    counter,
-                    prefix,
-                )
-            } else {
-                // Component not found, generate as HTML element
-                let mut result = String::new();
-                result.push_str(&format!("<{}", name));
-
-                // Add scope if we have one
-                if let Some(sid) = scope_id {
-                    result.push_str(&format!(" data-v=\"{}\"", sid));
-                }
-
-                // Mark elements that have dynamic attribute bindings
-                if attributes
-                    .iter()
-                    .any(|a| matches!(&a.value, AttributeValue::Expression(_)))
-                {
-                    result.push_str(" data-webcore-bound");
-                }
-
-                // Generate attributes
-                for attr in attributes {
-                    match &attr.value {
-                        AttributeValue::String(value) => {
-                            result.push_str(&format!(" {}=\"{}\"", attr.name, html_escape(value)));
-                        }
-                        AttributeValue::Boolean(true) => {
-                            result.push_str(&format!(" {}", attr.name));
-                        }
-                        AttributeValue::Boolean(false) => {}
-                        AttributeValue::Expression(expr) => {
-                            result.push_str(&format!(
-                                " data-webcore-attr-{}=\"{}\"",
-                                attr.name,
-                                html_escape(expr)
-                            ));
-                        }
-                    }
-                }
-
-                result.push('>');
-                let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-                    content, document, scope_id, counter, prefix,
-                )?;
-                result.push_str(&content_html);
-                result.push_str(&format!("</{}>", name));
-                Ok((result, content_handlers))
-            }
-        }
+        } =>
+            generate_component_element(name, attributes, content, document, counter, scope_id, prefix),
         Element::Interpolation(expr, _span) => Ok((
             format!(
                 "<span data-webcore-interpolation=\"{}\"></span>",
@@ -756,6 +837,7 @@ fn generate_element_with_scope(
         }
         Element::For {
             item,
+            index,
             iterable,
             key,
             content,
@@ -766,6 +848,9 @@ fn generate_element_with_scope(
                 "<template data-webcore-for=\"{}\" data-webcore-in=\"{}\"",
                 item, iterable
             );
+            if let Some(idx) = index {
+                open.push_str(&format!(" data-webcore-for-index=\"{}\"", html_escape(idx)));
+            }
             if let Some(k) = key {
                 open.push_str(&format!(" data-webcore-for-key=\"{}\"", html_escape(k)));
             }
@@ -990,12 +1075,14 @@ fn substitute_props_elem(
         },
         Element::For {
             item,
+            index,
             iterable,
             key,
             content,
             span,
         } => Element::For {
             item: item.clone(),
+            index: index.clone(),
             iterable: iterable.clone(),
             key: key.clone(),
             content: substitute_props(content, static_props, dynamic_props),

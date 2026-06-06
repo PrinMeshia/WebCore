@@ -508,11 +508,17 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
                 .map(|p| p.as_str().to_string())
                 .unwrap_or_default();
 
-            // Optional key declaration: for_key_decl → for_key_expr
+            // Optional index variable: @for item, i in items
+            let mut index: Option<String> = None;
             let mut key: Option<String> = None;
             let mut iterable = String::new();
+
             for part in parts.by_ref() {
                 match part.as_rule() {
+                    // Second identifier after a comma is the index var
+                    Rule::identifier => {
+                        index = Some(part.as_str().to_string());
+                    }
                     Rule::for_key_decl => {
                         key = part
                             .into_inner()
@@ -536,6 +542,7 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
 
             Ok(Element::For {
                 item,
+                index,
                 iterable,
                 key,
                 content,
@@ -578,6 +585,72 @@ fn parse_control_flow(pair: pest::iterators::Pair<Rule>) -> Result<Element, Pars
                 else_branch,
                 span,
             })
+        }
+        Rule::switch_statement => {
+            let span = Span::from_pest(inner.as_span());
+            let mut parts = inner.into_inner();
+
+            // First child is switch_expr (dedicated atomic rule, stops before {)
+            let switch_expr = parts
+                .next()
+                .map(|p| p.as_str().trim().to_string())
+                .unwrap_or_default();
+
+            // Collect @case / @default clauses
+            let mut case_entries: Vec<(String, Vec<Element>)> = Vec::new();
+            let mut default_content: Option<Vec<Element>> = None;
+
+            for clause in parts {
+                match clause.as_rule() {
+                    Rule::case_clause => {
+                        let mut clause_parts = clause.into_inner();
+                        let val = clause_parts
+                            .next()
+                            .map(|p| p.as_str().trim().to_string())
+                            .unwrap_or_default();
+                        let mut content = Vec::new();
+                        for elem in clause_parts {
+                            if elem.as_rule() == Rule::element {
+                                content.push(parse_element(elem)?);
+                            }
+                        }
+                        case_entries.push((val, content));
+                    }
+                    Rule::default_clause => {
+                        let mut content = Vec::new();
+                        for elem in clause.into_inner() {
+                            if elem.as_rule() == Rule::element {
+                                content.push(parse_element(elem)?);
+                            }
+                        }
+                        default_content = Some(content);
+                    }
+                    _ => {}
+                }
+            }
+
+            if case_entries.is_empty() {
+                return Err(ParseError::with_span(
+                    "@switch must have at least one @case",
+                    span,
+                ));
+            }
+
+            // Build @if / @else chain from last case to first
+            let mut else_branch: Option<Vec<Element>> = default_content;
+            for (val, content) in case_entries.into_iter().rev() {
+                let condition = format!("{} === {}", switch_expr, val);
+                else_branch = Some(vec![Element::If {
+                    condition,
+                    then_branch: content,
+                    else_branch,
+                    span,
+                }]);
+            }
+
+            else_branch
+                .and_then(|mut v| v.pop())
+                .ok_or_else(|| ParseError::with_span("@switch: empty case chain", span))
         }
         Rule::error_block => {
             let span = Span::from_pest(inner.as_span());
@@ -686,6 +759,20 @@ fn parse_tag(pair: pest::iterators::Pair<Rule>) -> Result<Element, ParseError> {
     }
 }
 
+/// Parse a single attribute from its Pest pair.
+///
+/// The grammar rule is:
+/// ```pest
+/// attribute  = { attr_name ~ "=" ~ attr_value }
+/// attr_value = { expression_attr | string_literal | "true" | "false" }
+/// expression_attr = { "{" ~ expression_content ~ "}" }
+/// ```
+///
+/// So each attribute pair has exactly two inner pairs:
+/// 1. `attr_name`  — the raw attribute name string (e.g. `class`, `on:click`, `validate:required`)
+/// 2. `attr_value` — one of: `expression_attr` (wraps `expression_content`),
+///                            `string_literal` (wraps `string_inner`),
+///                            or a bare boolean token `true`/`false`
 fn parse_attribute(pair: pest::iterators::Pair<Rule>) -> Result<Attribute, ParseError> {
     let span = Span::from_pest(pair.as_span());
     let mut inner = pair.into_inner();

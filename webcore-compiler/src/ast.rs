@@ -142,9 +142,10 @@ pub enum Element {
         span: Span,
     },
     Interpolation(String, Span),
-    /// Loop: @for item [key=expr] in items { ... }
+    /// Loop: @for item [, index] [key=expr] in items { ... }
     For {
         item: String,
+        index: Option<String>,
         iterable: String,
         key: Option<String>,
         content: Vec<Element>,

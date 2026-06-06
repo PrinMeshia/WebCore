@@ -3,13 +3,17 @@
 use crate::ast::{Component, StyleItem, StyleRule, WebCoreDocument};
 use crate::theme::Theme;
 
+// FNV-1a 32-bit constants (https://tools.ietf.org/html/draft-eastlake-fnv)
+const FNV_OFFSET_BASIS: u32 = 2_166_136_261;
+const FNV_PRIME: u32 = 16_777_619;
+
 /// Generate a unique scope ID for a component based on its name.
 /// Uses FNV-1a 32-bit hash — deterministic across compilations and Rust versions.
 pub fn generate_scope_id(component_name: &str) -> String {
-    let mut hash: u32 = 2166136261;
+    let mut hash: u32 = FNV_OFFSET_BASIS;
     for byte in component_name.bytes() {
         hash ^= byte as u32;
-        hash = hash.wrapping_mul(16777619);
+        hash = hash.wrapping_mul(FNV_PRIME);
     }
     format!("wc-{:06x}", hash & 0xFFFFFF)
 }
