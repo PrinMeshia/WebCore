@@ -2,26 +2,27 @@
 
 mod analysis;
 mod attrs;
+mod components;
+mod elements;
 mod minify;
 mod props;
+mod shell;
+mod slots;
+mod tags;
 mod utils;
 
-#[cfg(test)]
-use crate::core::ast::Component;
-use crate::core::ast::{Attribute, AttributeValue, Element, Layout, Page, WebCoreDocument};
-use crate::codegen::attr_names;
-use crate::codegen::css::generate_scope_id;
+use crate::core::ast::WebCoreDocument;
 use crate::core::error::CompileError;
+use crate::core::ssg::SsgContext;
+#[cfg(test)]
 use std::fmt::Write as _;
 use std::path::Path;
 
 use analysis::{document_needs_js, find_layout};
-use attrs::{
-    expand_bind_attrs, handle_class_binding, handle_event_attr, handle_ref_attr,
-    handle_style_binding, handle_validation_attr,
-};
-use props::substitute_props;
-use utils::{html_escape, safe_id_prefix};
+use shell::emit_html_shell;
+#[cfg(test)]
+use shell::{generate_component_content, generate_layout_shell, generate_page_content};
+use slots::generate_layout_with_page_and_components;
 
 pub(crate) use analysis::collect_page_components;
 pub(crate) use minify::minify_html;
@@ -60,60 +61,23 @@ pub struct HtmlGenerationResult {
     pub handlers: Vec<HandlerMapping>,
 }
 
-/// Emit the standard HTML shell opening: `<!DOCTYPE html>…<head>…</head><body>\n`.
+/// Shared, page-scoped generation state threaded through the HTML emitters.
 ///
-/// `title` and `css_href` are HTML-escaped by the caller or here as appropriate.
-/// `needs_js` controls whether the preload hint for webcore.js is included.
-/// When `critical_css` is set, it is inlined in a `<style>` tag and the full
-/// stylesheet is loaded non-blocking (`media="print"` swap + `<noscript>` fallback).
-fn emit_html_shell(
-    title: &str,
-    lang: &str,
-    extra_css_files: &[String],
-    needs_js: bool,
-    critical_css: Option<&str>,
-    csp_meta: Option<&str>,
-) -> String {
-    let mut html = String::new();
-    html.push_str("<!DOCTYPE html>\n");
-    write!(html, "<html lang=\"{}\">\n<head>\n", html_escape(lang)).unwrap();
-    html.push_str("  <meta charset=\"UTF-8\">\n");
-    html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
-    if let Some(csp) = csp_meta {
-        writeln!(
-            html,
-            "  <meta http-equiv=\"Content-Security-Policy\" content=\"{}\">",
-            html_escape(csp)
-        )
-        .unwrap();
-    }
-    writeln!(html, "  <title>{}</title>", html_escape(title)).unwrap();
-    if let Some(css) = critical_css {
-        // Critical CSS: inline the page's own styles, defer the full stylesheet.
-        // `data-webcore-defer` is swapped to media="all" by DOMContentLoaded (CSP-safe).
-        // Escape </style> sequences so injected CSS can't break out of the tag.
-        let safe_css = css.replace("</", "<\\/");
-        writeln!(html, "  <style>{safe_css}</style>").unwrap();
-        html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\" media=\"print\" data-webcore-defer>\n");
-        html.push_str(
-            "  <noscript><link rel=\"stylesheet\" href=\"/assets/theme.css\"></noscript>\n",
-        );
-    } else {
-        html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\">\n");
-    }
-    for css in extra_css_files {
-        writeln!(
-            html,
-            "  <link rel=\"stylesheet\" href=\"/assets/{}\">",
-            html_escape(css)
-        )
-        .unwrap();
-    }
-    if needs_js {
-        html.push_str("  <link rel=\"preload\" as=\"script\" href=\"/assets/webcore.js\">\n");
-    }
-    html.push_str("</head>\n<body>\n");
-    html
+/// Bundles what used to be five separate parameters (`document`, `counter`,
+/// `prefix`, `project_root`, …) so element generators only take the varying
+/// per-node arguments plus the current CSS `scope_id`.
+pub(super) struct GenContext<'a> {
+    pub document: &'a WebCoreDocument,
+    /// Page-scoped id prefix for generated handler ids (`<prefix>btn<n>`).
+    pub prefix: &'a str,
+    /// Project root for compile-time asset lookups (`webc:img` dimensions).
+    pub project_root: Option<&'a Path>,
+    /// SSG pre-rendering context: when set, interpolation spans are filled
+    /// with their initial value and `@if`/`@else` divs get an initial
+    /// `display` style at emission time.
+    pub ssg: Option<&'a SsgContext<'a>>,
+    /// Monotonic counter for unique handler ids within the page.
+    pub counter: usize,
 }
 
 #[cfg(test)]
@@ -150,7 +114,7 @@ pub(crate) fn generate_spa_html(
             page_name.to_lowercase(),
             page_name.to_lowercase()
         )
-        .unwrap();
+        .expect("write! to String is infallible");
         html.push_str(&page_html);
         html.push_str("    </div>\n");
         all_handlers.extend(handlers);
@@ -165,7 +129,7 @@ pub(crate) fn generate_spa_html(
                 html,
                 "    <div id=\"page-{route_name}\" data-route=\"/{route_name}\">"
             )
-            .unwrap();
+            .expect("write! to String is infallible");
             html.push_str(&page_html);
             html.push_str("    </div>\n");
             all_handlers.extend(handlers);
@@ -183,19 +147,16 @@ pub(crate) fn generate_spa_html(
     })
 }
 
-pub(crate) fn generate_page_content_only(
-    document: &WebCoreDocument,
-    page_name: &str,
-    options: &HtmlPageOptions,
-) -> Result<HtmlGenerationResult, CompileError> {
-    generate_page_content_only_with_root(document, page_name, options, None)
-}
-
-pub(crate) fn generate_page_content_only_with_root(
+/// Generate one full page (shell + layout + content).
+///
+/// `ssg` enables compile-time pre-rendering of initial state values; pass
+/// `None` to emit runtime-only bindings (used by most golden tests).
+pub(crate) fn generate_page(
     document: &WebCoreDocument,
     page_name: &str,
     options: &HtmlPageOptions,
     project_root: Option<&Path>,
+    ssg: Option<&SsgContext>,
 ) -> Result<HtmlGenerationResult, CompileError> {
     // Find the page
     let page = document
@@ -209,8 +170,7 @@ pub(crate) fn generate_page_content_only_with_root(
 
     // critical_css injects a deferred <link> whose media swap requires JS;
     // force needs_js=true so webcore.js is included even on otherwise static pages.
-    let needs_js =
-        document_needs_js(document, page_name) || options.critical_css.is_some();
+    let needs_js = document_needs_js(document, page_name) || options.critical_css.is_some();
     let mut html = emit_html_shell(
         &options.title,
         &options.lang,
@@ -222,7 +182,7 @@ pub(crate) fn generate_page_content_only_with_root(
 
     // Generate layout content, replacing slots with page content
     let (layout_content, handlers) =
-        generate_layout_with_page_and_components(layout, page, document, project_root)?;
+        generate_layout_with_page_and_components(layout, page, document, project_root, ssg)?;
     html.push_str(&layout_content);
 
     if needs_js {
@@ -233,1060 +193,20 @@ pub(crate) fn generate_page_content_only_with_root(
     Ok(HtmlGenerationResult { html, handlers })
 }
 
+/// Test-only alias of [`generate_page`] without root/SSG, kept for the golden tests.
 #[cfg(test)]
 pub(crate) fn generate_html(
     document: &WebCoreDocument,
     page_name: &str,
     options: &HtmlPageOptions,
 ) -> Result<HtmlGenerationResult, CompileError> {
-    // Find the page
-    let page = document
-        .pages
-        .get(page_name)
-        .ok_or_else(|| CompileError::MissingPage {
-            name: page_name.to_string(),
-        })?;
-
-    let layout = find_layout(document)?;
-
-    let needs_js =
-        document_needs_js(document, page_name) || options.critical_css.is_some();
-    let mut html = emit_html_shell(
-        &options.title,
-        &options.lang,
-        &options.extra_css_files,
-        needs_js,
-        options.critical_css.as_deref(),
-        options.csp_meta.as_deref(),
-    );
-
-    // Generate layout content, replacing slots with page content
-    let (layout_content, handlers) =
-        generate_layout_with_page_and_components(layout, page, document, None)?;
-    html.push_str(&layout_content);
-
-    if needs_js {
-        html.push_str("  <script defer src=\"/assets/webcore.js\"></script>\n");
-    }
-    html.push_str("</body>\n</html>");
-
-    Ok(HtmlGenerationResult { html, handlers })
-}
-
-/// Returns `true` if any element in the slice (or its descendants) is a `Slot`
-/// or `SlotContent`. Used to short-circuit `resolve_slots` on subtrees that
-/// need no substitution.
-fn contains_slot(elements: &[Element]) -> bool {
-    elements.iter().any(|e| match e {
-        Element::Slot(..) | Element::SlotContent { .. } => true,
-        Element::Tag { content, .. }
-        | Element::Component { content, .. }
-        | Element::For { content, .. }
-        | Element::ErrorBlock { content, .. }
-        | Element::Fragment { content, .. } => contains_slot(content),
-        Element::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            contains_slot(then_branch)
-                || else_branch.as_ref().is_some_and(|eb| contains_slot(eb))
-        }
-        _ => false,
-    })
-}
-
-/// Recursively replace Slot placeholders in a layout tree with provided page content.
-fn resolve_slots(
-    elements: &[Element],
-    slot_map: &std::collections::HashMap<String, Vec<Element>>,
-    default_content: &[Element],
-) -> Vec<Element> {
-    if !contains_slot(elements) {
-        return elements.to_vec();
-    }
-    let mut resolved = Vec::new();
-    for element in elements {
-        match element {
-            Element::Slot(name, _) => {
-                if name == "content" {
-                    if let Some(content) = slot_map.get("content") {
-                        resolved.extend_from_slice(content);
-                    } else {
-                        resolved.extend_from_slice(default_content);
-                    }
-                } else if let Some(content) = slot_map.get(name.as_str()) {
-                    resolved.extend_from_slice(content);
-                }
-            }
-            Element::SlotContent {
-                name,
-                content,
-                span: _,
-            } => {
-                // SlotContent in a layout = slot position with default content
-                if let Some(page_content) = slot_map.get(name.as_str()) {
-                    // Page provided content → use it (override default)
-                    resolved.extend_from_slice(page_content);
-                } else if name == "content" {
-                    // Default content slot → use page's non-slot elements
-                    resolved.extend_from_slice(default_content);
-                } else {
-                    // Named slot with no page content → render layout's default
-                    let resolved_defaults = resolve_slots(content, slot_map, default_content);
-                    resolved.extend(resolved_defaults);
-                }
-            }
-            Element::Tag {
-                name,
-                attributes,
-                content,
-                span,
-            } => {
-                resolved.push(Element::Tag {
-                    name: name.clone(),
-                    attributes: attributes.clone(),
-                    content: resolve_slots(content, slot_map, default_content),
-                    span: *span,
-                });
-            }
-            Element::Component {
-                name,
-                attributes,
-                content,
-                span,
-            } => {
-                resolved.push(Element::Component {
-                    name: name.clone(),
-                    attributes: attributes.clone(),
-                    content: resolve_slots(content, slot_map, default_content),
-                    span: *span,
-                });
-            }
-            Element::For {
-                item,
-                index,
-                iterable,
-                key,
-                content,
-                span,
-            } => {
-                resolved.push(Element::For {
-                    item: item.clone(),
-                    index: index.clone(),
-                    iterable: iterable.clone(),
-                    key: key.clone(),
-                    content: resolve_slots(content, slot_map, default_content),
-                    span: *span,
-                });
-            }
-            Element::If {
-                condition,
-                then_branch,
-                else_branch,
-                span,
-            } => {
-                resolved.push(Element::If {
-                    condition: condition.clone(),
-                    then_branch: resolve_slots(then_branch, slot_map, default_content),
-                    else_branch: else_branch
-                        .as_ref()
-                        .map(|eb| resolve_slots(eb, slot_map, default_content)),
-                    span: *span,
-                });
-            }
-            Element::ErrorBlock {
-                field,
-                content,
-                span,
-            } => {
-                resolved.push(Element::ErrorBlock {
-                    field: field.clone(),
-                    content: resolve_slots(content, slot_map, default_content),
-                    span: *span,
-                });
-            }
-            Element::Fragment { content, span } => {
-                resolved.push(Element::Fragment {
-                    content: resolve_slots(content, slot_map, default_content),
-                    span: *span,
-                });
-            }
-            _ => resolved.push(element.clone()),
-        }
-    }
-    resolved
-}
-
-/// Split page content into named slot provisions and default (unnamed) content.
-fn separate_slot_content(
-    page_content: &[Element],
-) -> (
-    std::collections::HashMap<String, Vec<Element>>,
-    Vec<Element>,
-) {
-    let mut named: std::collections::HashMap<String, Vec<Element>> =
-        std::collections::HashMap::new();
-    let mut default_content = Vec::new();
-
-    for elem in page_content {
-        if let Element::SlotContent { name, content, .. } = elem {
-            named.insert(name.clone(), content.clone());
-        } else {
-            default_content.push(elem.clone());
-        }
-    }
-
-    (named, default_content)
-}
-
-fn generate_layout_with_page_and_components(
-    layout: &Layout,
-    page: &Page,
-    document: &WebCoreDocument,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let prefix = safe_id_prefix(&page.name);
-    let (named_slots, default_content) = separate_slot_content(&page.content);
-    let resolved = resolve_slots(&layout.content, &named_slots, &default_content);
-    let mut counter = 0usize;
-    generate_elements_with_scope_and_counter(
-        &resolved,
-        document,
-        None,
-        &mut counter,
-        &prefix,
-        project_root,
-    )
-}
-
-fn generate_elements_with_scope_and_counter(
-    elements: &[Element],
-    document: &WebCoreDocument,
-    scope_id: Option<&str>,
-    counter: &mut usize,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let mut result = String::new();
-    let mut all_handlers = Vec::new();
-
-    for element in elements {
-        let (element_html, handlers) = generate_element_with_scope(
-            element,
-            document,
-            counter,
-            scope_id,
-            prefix,
-            project_root,
-        )?;
-        result.push_str(&element_html);
-        result.push('\n');
-        all_handlers.extend(handlers);
-    }
-    Ok((result, all_handlers))
-}
-
-/// Generate HTML for a single `<tag>` element, including:
-/// - CSS scope attribute (`data-v`)
-/// - Static, boolean, and expression attributes
-/// - Event handler attributes (`on:click` → `onclick="webcore_handle_click(...)"`)
-/// - Validation data attributes (`validate:required` → `data-webcore-validate-required`)
-/// - SPA-aware `<a href>` with `onclick="webcore_navigate(...)"` for internal links
-#[allow(clippy::too_many_arguments)]
-fn generate_tag_element(
-    name: &str,
-    attributes: &[Attribute],
-    content: &[Element],
-    document: &WebCoreDocument,
-    counter: &mut usize,
-    scope_id: Option<&str>,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let mut result = String::new();
-    let mut handlers = Vec::new();
-    if name == "text" {
-        let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-            content,
-            document,
-            scope_id,
-            counter,
-            prefix,
-            project_root,
-        )?;
-        return Ok((content_html, content_handlers));
-    }
-
-    // Expand bind:attr={expr} → attr={expr} + on:event={expr = event.target.value}
-    let expanded = expand_bind_attrs(attributes);
-    let attributes = &expanded;
-
-    let mapped_name = if name == "link" { "a" } else { name };
-    let is_link = mapped_name == "a";
-    let mut resolved_href: Option<String> = None;
-    write!(result, "<{mapped_name}").unwrap();
-
-    // Add scope attribute for CSS scoping
-    if let Some(sid) = scope_id {
-        write!(result, " {}=\"{}\"", attr_names::SCOPE, sid).unwrap();
-    }
-
-    // Mark elements that have dynamic (expression) attribute bindings via data-webcore-attr-*
-    if attributes.iter().any(|a| {
-        !a.name.starts_with("on:")
-            && !a.name.starts_with("class:")
-            && matches!(&a.value, AttributeValue::Expression(_))
-    }) {
-        write!(result, " {}", attr_names::BOUND).unwrap();
-    }
-    // Mark elements with class: bindings separately so bindClassBindings can use a targeted
-    // selector instead of querySelectorAll('*') which scans the entire DOM.
-    if attributes
-        .iter()
-        .any(|a| a.name.starts_with("class:") && matches!(&a.value, AttributeValue::Expression(_)))
-    {
-        write!(result, " {}", attr_names::CLASS_BOUND).unwrap();
-    }
-
-    // Detect validate:* attributes and add data-webcore-field
-    let has_validate = attributes.iter().any(|a| a.name.starts_with("validate:"));
-    if has_validate {
-        let field_name = attributes.iter().find(|a| a.name == "name").and_then(|a| {
-            if let AttributeValue::String(v) = &a.value {
-                Some(v.clone())
-            } else {
-                None
-            }
-        });
-        if let Some(field) = field_name {
-            write!(result, " data-webcore-field=\"{}\"", html_escape(&field)).unwrap();
-        }
-    }
-
-    // Single-pass attribute scan — avoids multiple O(n) passes over the attribute list.
-    struct TagScan {
-        has_webc_img: bool,
-        has_alt: bool,
-        has_loading: bool,
-        has_decoding: bool,
-        src_value: Option<String>,
-    }
-    let scan = {
-        let mut s = TagScan {
-            has_webc_img: false,
-            has_alt: false,
-            has_loading: false,
-            has_decoding: false,
-            src_value: None,
-        };
-        for a in attributes {
-            match a.name.as_str() {
-                "webc:img" => s.has_webc_img = true,
-                "alt" => s.has_alt = true,
-                "loading" => s.has_loading = true,
-                "decoding" => s.has_decoding = true,
-                "src" => {
-                    if let AttributeValue::String(v) = &a.value {
-                        s.src_value = Some(v.clone());
-                    }
-                }
-                _ => {}
-            }
-        }
-        s
-    };
-
-    // webc:img — smart image defaults (Feature A)
-    // Detect on the *original* tag name (before link→a mapping) AND mapped name
-    let is_img = name == "img";
-    let has_webc_img = is_img && scan.has_webc_img;
-    if has_webc_img {
-        // Emit a11y warning if alt is absent
-        if !scan.has_alt {
-            eprintln!("warning[a11y]: <img> with webc:img is missing alt attribute");
-        }
-        // Inject loading="lazy" if not already present
-        if !scan.has_loading {
-            result.push_str(" loading=\"lazy\"");
-        }
-        // Inject decoding="async" if not already present
-        if !scan.has_decoding {
-            result.push_str(" decoding=\"async\"");
-        }
-        // Read image dimensions at compile time
-        if let Some(root) = project_root {
-            if let Some(src) = &scan.src_value {
-                let rel = src.trim_start_matches('/');
-                let img_path = root.join("public").join(rel);
-                if img_path.exists() {
-                    if let Ok(sz) = imagesize::size(&img_path) {
-                        write!(result, " width=\"{}\" height=\"{}\"", sz.width, sz.height).unwrap();
-                    }
-                }
-            }
-        }
-    }
-
-    // Generate attributes
-    for attr in attributes {
-        // Skip validate:* here — converted below after the loop
-        if attr.name.starts_with("validate:") {
-            continue;
-        }
-        // Skip webc:img — it's a compiler directive, not a real HTML attribute
-        if attr.name == "webc:img" {
-            continue;
-        }
-        // Skip on:event|debounce="N" modifier-only attributes (just a delay hint, no handler)
-        if attr.name.starts_with("on:") && attr.name.contains("|debounce") {
-            if let AttributeValue::String(_) = &attr.value {
-                // This is purely a delay specifier — skip it (handled in JS codegen)
-                continue;
-            }
-        }
-        // ref:name=true → data-webcore-ref="name"
-        if attr.name.starts_with("ref:") {
-            if let Some(s) = handle_ref_attr(&attr.name) {
-                result.push_str(&s);
-            }
-            continue;
-        }
-        // webc:transition="name" → data-webcore-transition="name"
-        if attr.name == "webc:transition" {
-            if let AttributeValue::String(value) = &attr.value {
-                write!(
-                    result,
-                    " {}=\"{}\"",
-                    attr_names::TRANSITION,
-                    html_escape(value)
-                )
-                .unwrap();
-            }
-            continue;
-        }
-        // style:prop={expr} → data-webcore-style-prop="expr"
-        if attr.name.starts_with("style:") {
-            if let AttributeValue::Expression(expr) = &attr.value {
-                if let Some(s) = handle_style_binding(&attr.name, expr) {
-                    result.push_str(&s);
-                }
-            }
-            continue;
-        }
-        match &attr.value {
-            AttributeValue::String(value) => {
-                if is_link && attr.name == "to" {
-                    resolved_href = Some(value.clone());
-                } else {
-                    write!(result, " {}=\"{}\"", attr.name, html_escape(value)).unwrap();
-                }
-            }
-            AttributeValue::Boolean(true) => {
-                write!(result, " {}", attr.name).unwrap();
-            }
-            AttributeValue::Boolean(false) => {}
-            AttributeValue::Expression(expr) => {
-                if attr.name.starts_with("class:") {
-                    // Conditional class binding: class:name={expr} → data-webcore-class-name="expr"
-                    if let Some(s) = handle_class_binding(&attr.name, expr) {
-                        result.push_str(&s);
-                    }
-                } else if attr.name.starts_with("on:") {
-                    // Event handler: on:click={ count += 1 }
-                    if let Some(s) = handle_event_attr(
-                        &attr.name,
-                        expr,
-                        is_link,
-                        prefix,
-                        counter,
-                        &mut handlers,
-                        &mut resolved_href,
-                    ) {
-                        result.push_str(&s);
-                    }
-                } else {
-                    // Dynamic attribute: bound at runtime via bindAttrs()
-                    write!(
-                        result,
-                        " data-webcore-attr-{}=\"{}\"",
-                        attr.name,
-                        html_escape(expr)
-                    )
-                    .unwrap();
-                }
-            }
-        }
-    }
-
-    // Emit validate:* attrs as data-webcore-validate-* attributes
-    for attr in attributes
-        .iter()
-        .filter(|a| a.name.starts_with("validate:"))
-    {
-        if let Some(s) = handle_validation_attr(attr) {
-            result.push_str(&s);
-        }
-    }
-
-    if is_link {
-        if let Some(h) = resolved_href {
-            let has_nav = document.app.as_ref().is_some_and(|a| !a.routes.is_empty());
-            // Internal paths use data-webcore-nav for CSP-safe SPA navigation.
-            // The JS runtime delegates via document.addEventListener('click', ...).
-            if has_nav && h.starts_with('/') {
-                write!(result, " href=\"{}\" data-webcore-nav", html_escape(&h)).unwrap();
-            } else {
-                write!(result, " href=\"{}\"", html_escape(&h)).unwrap();
-            }
-        } else if !attributes.iter().any(|a| a.name == "href") {
-            result.push_str(" href=\"#\"");
-        }
-    }
-
-    result.push('>');
-    let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-        content,
-        document,
-        scope_id,
-        counter,
-        prefix,
-        project_root,
-    )?;
-    result.push_str(&content_html);
-    write!(result, "</{mapped_name}>").unwrap();
-    handlers.extend(content_handlers);
-    Ok((result, handlers))
-}
-
-/// Render a component call site: resolve the component definition, substitute props,
-/// apply the component's CSS scope, and recursively generate the view.
-/// Falls back to rendering as a plain HTML element if the component is unknown.
-#[allow(clippy::too_many_arguments)]
-fn generate_component_element(
-    name: &str,
-    attributes: &[Attribute],
-    content: &[Element],
-    document: &WebCoreDocument,
-    counter: &mut usize,
-    scope_id: Option<&str>,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    // Find the component definition
-    if let Some(component) = document.components.get(name) {
-        // Validate props — warn on unknown prop names
-        if !component.props.is_empty() {
-            let prop_names: std::collections::HashSet<&str> =
-                component.props.iter().map(|p| p.name.as_str()).collect();
-            for attr in attributes {
-                // Skip directive/event attributes
-                if attr.name.starts_with("on:")
-                    || attr.name.starts_with("class:")
-                    || attr.name.starts_with("style:")
-                    || attr.name.starts_with("ref:")
-                    || attr.name.starts_with("webc:")
-                    || attr.name.starts_with("bind:")
-                {
-                    continue;
-                }
-                if !prop_names.contains(attr.name.as_str()) {
-                    eprintln!(
-                        "warning[props]: component '{}' received unknown prop '{}'",
-                        name, attr.name
-                    );
-                }
-            }
-        }
-
-        // Collect static prop values — may be extended below with default values
-        let static_props: std::collections::HashMap<String, String> = attributes
-            .iter()
-            .filter_map(|a| {
-                if let AttributeValue::String(v) = &a.value {
-                    Some((a.name.clone(), v.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Collect dynamic (expression) prop values — reactive props
-        let dynamic_props: std::collections::HashMap<String, String> = attributes
-            .iter()
-            .filter_map(|a| {
-                if let AttributeValue::Expression(e) = &a.value {
-                    Some((a.name.clone(), e.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Inject default prop values for props not supplied by the caller
-        let mut static_props = static_props;
-        for prop in &component.props {
-            if let Some(ref default_val) = prop.default_value {
-                if !static_props.contains_key(&prop.name) && !dynamic_props.contains_key(&prop.name) {
-                    static_props.insert(prop.name.clone(), default_val.clone());
-                }
-            }
-        }
-
-        // Generate scope ID for this component's CSS — only if the component has styles.
-        // Unstyled components do not need data-v attributes, which reduces HTML weight.
-        let component_scope_str = if component.style.is_empty() {
-            None
-        } else {
-            Some(generate_scope_id(name))
-        };
-
-        // Substitute props into the view
-        let substituted;
-        let view: &[Element] = if static_props.is_empty() && dynamic_props.is_empty() {
-            &component.view
-        } else {
-            substituted = substitute_props(&component.view, &static_props, &dynamic_props);
-            &substituted
-        };
-
-        generate_elements_with_scope_and_counter(
-            view,
-            document,
-            component_scope_str.as_deref(),
-            counter,
-            prefix,
-            project_root,
-        )
-    } else {
-        // Component not found, generate as HTML element
-        let mut result = String::new();
-        write!(result, "<{name}").unwrap();
-
-        // Add scope if we have one
-        if let Some(sid) = scope_id {
-            write!(result, " {}=\"{}\"", attr_names::SCOPE, sid).unwrap();
-        }
-
-        // Mark elements that have dynamic attribute bindings
-        if attributes
-            .iter()
-            .any(|a| matches!(&a.value, AttributeValue::Expression(_)))
-        {
-            write!(result, " {}", attr_names::BOUND).unwrap();
-        }
-
-        // Generate attributes
-        for attr in attributes {
-            match &attr.value {
-                AttributeValue::String(value) => {
-                    write!(result, " {}=\"{}\"", attr.name, html_escape(value)).unwrap();
-                }
-                AttributeValue::Boolean(true) => {
-                    write!(result, " {}", attr.name).unwrap();
-                }
-                AttributeValue::Boolean(false) => {}
-                AttributeValue::Expression(expr) => {
-                    write!(
-                        result,
-                        " data-webcore-attr-{}=\"{}\"",
-                        attr.name,
-                        html_escape(expr)
-                    )
-                    .unwrap();
-                }
-            }
-        }
-
-        result.push('>');
-        let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-            content,
-            document,
-            scope_id,
-            counter,
-            prefix,
-            project_root,
-        )?;
-        result.push_str(&content_html);
-        write!(result, "</{name}>").unwrap();
-        Ok((result, content_handlers))
-    }
-}
-
-fn generate_element_with_scope(
-    element: &Element,
-    document: &WebCoreDocument,
-    counter: &mut usize,
-    scope_id: Option<&str>,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    match element {
-        Element::Text(text, _span) => Ok((html_escape(text), Vec::new())),
-        Element::Tag {
-            name,
-            attributes,
-            content,
-            ..
-        } => generate_tag_element(
-            name,
-            attributes,
-            content,
-            document,
-            counter,
-            scope_id,
-            prefix,
-            project_root,
-        ),
-        Element::Slot(name, _span) => Ok((format!("<!-- Slot: {name} -->"), Vec::new())),
-        Element::SlotContent { content, .. } => {
-            // SlotContent consumed by slot matching; render children as fallback
-            generate_elements_with_scope_and_counter(
-                content,
-                document,
-                scope_id,
-                counter,
-                prefix,
-                project_root,
-            )
-        }
-        Element::Component {
-            name,
-            attributes,
-            content,
-            ..
-        } => generate_component_element(
-            name,
-            attributes,
-            content,
-            document,
-            counter,
-            scope_id,
-            prefix,
-            project_root,
-        ),
-        Element::Interpolation(expr, _span) => Ok((
-            format!(
-                "<span {}=\"{}\"></span>",
-                attr_names::INTERPOLATION,
-                html_escape(expr)
-            ),
-            Vec::new(),
-        )),
-        Element::ErrorBlock { field, content, .. } => {
-            let mut html = format!(
-                "<div {}=\"{}\" style=\"display:none\">\n",
-                attr_names::ERROR,
-                html_escape(field)
-            );
-            let (content_html, handlers) = generate_elements_with_scope_and_counter(
-                content,
-                document,
-                scope_id,
-                counter,
-                prefix,
-                project_root,
-            )?;
-            html.push_str(&content_html);
-            html.push_str("</div>\n");
-            Ok((html, handlers))
-        }
-        Element::For {
-            item,
-            index,
-            iterable,
-            key,
-            content,
-            ..
-        } => render_for_element(
-            item,
-            index.as_deref(),
-            iterable,
-            key.as_deref(),
-            content,
-            document,
-            counter,
-            scope_id,
-            prefix,
-            project_root,
-        ),
-        Element::If {
-            condition,
-            then_branch,
-            else_branch,
-            ..
-        } => render_if_element(
-            condition,
-            then_branch,
-            else_branch.as_deref(),
-            document,
-            counter,
-            scope_id,
-            prefix,
-            project_root,
-        ),
-        Element::Fragment { content, .. } => generate_elements_with_scope_and_counter(
-            content,
-            document,
-            scope_id,
-            counter,
-            prefix,
-            project_root,
-        ),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_for_element(
-    item: &str,
-    index: Option<&str>,
-    iterable: &str,
-    key: Option<&str>,
-    content: &[Element],
-    document: &WebCoreDocument,
-    counter: &mut usize,
-    scope_id: Option<&str>,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    // Detect range syntax: "0..5" or "N..M"
-    let is_range = {
-        let parts: Vec<&str> = iterable.splitn(2, "..").collect();
-        parts.len() == 2
-            && parts[0].trim().parse::<i64>().is_ok()
-            && parts[1].trim().parse::<i64>().is_ok()
-    };
-
-    let mut open = format!(
-        "<template {}=\"{}\" {}=\"{}\"",
-        attr_names::FOR,
-        item,
-        attr_names::FOR_IN,
-        iterable
-    );
-    if is_range {
-        write!(
-            open,
-            " {}=\"{}\"",
-            attr_names::FOR_RANGE,
-            html_escape(iterable)
-        )
-        .unwrap();
-    }
-    if let Some(idx) = index {
-        write!(open, " {}=\"{}\"", attr_names::FOR_INDEX, html_escape(idx)).unwrap();
-    }
-    if let Some(k) = key {
-        write!(open, " {}=\"{}\"", attr_names::FOR_KEY, html_escape(k)).unwrap();
-    }
-    if let Some(sid) = scope_id {
-        write!(open, " {}=\"{}\"", attr_names::SCOPE, sid).unwrap();
-    }
-    open.push('>');
-    let (content_html, handlers) = generate_elements_with_scope_and_counter(
-        content,
-        document,
-        scope_id,
-        counter,
-        prefix,
-        project_root,
-    )?;
-    let result = format!(
-        "{}\n{}</template>\n<div {}=\"{}\"></div>",
-        open,
-        content_html,
-        attr_names::FOR_CONTAINER,
-        iterable
-    );
-    Ok((result, handlers))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_if_element(
-    condition: &str,
-    then_branch: &[Element],
-    else_branch: Option<&[Element]>,
-    document: &WebCoreDocument,
-    counter: &mut usize,
-    scope_id: Option<&str>,
-    prefix: &str,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let scope_attr = scope_id.map_or(String::new(), |sid| {
-        format!(" {}=\"{}\"", attr_names::SCOPE, sid)
-    });
-    let mut result = format!(
-        "<div {}=\"{}\"{}>\n",
-        attr_names::IF,
-        html_escape(condition),
-        scope_attr
-    );
-    let mut all_handlers = Vec::new();
-
-    let (then_html, then_handlers) = generate_elements_with_scope_and_counter(
-        then_branch,
-        document,
-        scope_id,
-        counter,
-        prefix,
-        project_root,
-    )?;
-    result.push_str(&then_html);
-    result.push_str("</div>\n");
-    all_handlers.extend(then_handlers);
-
-    if let Some(else_content) = else_branch {
-        writeln!(
-            result,
-            "<div {}=\"{}\"{}>",
-            attr_names::IF_ELSE,
-            html_escape(condition),
-            scope_attr
-        )
-        .unwrap();
-        let (else_html, else_handlers) = generate_elements_with_scope_and_counter(
-            else_content,
-            document,
-            scope_id,
-            counter,
-            prefix,
-            project_root,
-        )?;
-        result.push_str(&else_html);
-        result.push_str("</div>\n");
-        all_handlers.extend(else_handlers);
-    }
-    Ok((result, all_handlers))
-}
-
-// Helper functions for SPA generation (test-only)
-#[cfg(test)]
-fn generate_layout_shell(
-    layout: &Layout,
-    document: &WebCoreDocument,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let mut result = String::new();
-    let mut all_handlers = Vec::new();
-    let mut counter = 0usize;
-
-    for element in &layout.content {
-        match element {
-            Element::Slot(slot_name, _span) => {
-                if slot_name == "content" {
-                    result.push_str("  <main id=\"webcore-content\">\n");
-                    result.push_str(
-                        "    <!-- Content will be loaded here by the hybrid router -->\n",
-                    );
-                    result.push_str("  </main>\n");
-                } else {
-                    write!(result, "  <div id=\"webcore-slot-{slot_name}\">\n    <!-- Named slot: {slot_name} -->\n  </div>\n").unwrap();
-                }
-            }
-            Element::Tag { name, content, .. } => {
-                if name == "main" && content.len() == 1 {
-                    if let Element::Slot(slot_name, _) = &content[0] {
-                        if slot_name == "content" {
-                            result.push_str("  <main id=\"webcore-content\">\n");
-                            result.push_str(
-                                "    <!-- Content will be loaded here by the hybrid router -->\n",
-                            );
-                            result.push_str("  </main>\n");
-                            continue;
-                        }
-                    }
-                }
-                let (element_html, handlers) = generate_element_with_scope(
-                    element,
-                    document,
-                    &mut counter,
-                    None,
-                    "ly",
-                    project_root,
-                )?;
-                result.push_str(&element_html);
-                all_handlers.extend(handlers);
-            }
-            _ => {
-                let (element_html, handlers) = generate_element_with_scope(
-                    element,
-                    document,
-                    &mut counter,
-                    None,
-                    "ly",
-                    project_root,
-                )?;
-                result.push_str(&element_html);
-                result.push('\n');
-                all_handlers.extend(handlers);
-            }
-        }
-    }
-
-    Ok((result, all_handlers))
-}
-
-#[cfg(test)]
-fn generate_page_content(
-    page: &Page,
-    document: &WebCoreDocument,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let prefix = safe_id_prefix(&page.name);
-    let mut result = String::new();
-    let mut all_handlers = Vec::new();
-    let mut counter = 0usize;
-
-    for element in &page.content {
-        let (html, handlers) = generate_element_with_scope(
-            element,
-            document,
-            &mut counter,
-            None,
-            &prefix,
-            project_root,
-        )?;
-        result.push_str(&html);
-        result.push('\n');
-        all_handlers.extend(handlers);
-    }
-
-    Ok((result, all_handlers))
-}
-
-#[cfg(test)]
-fn generate_component_content(
-    component: &Component,
-    document: &WebCoreDocument,
-    project_root: Option<&Path>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let scope_id = generate_scope_id(&component.name);
-    let prefix = safe_id_prefix(&component.name);
-    let mut result = String::new();
-    let mut all_handlers = Vec::new();
-    let mut counter = 0usize;
-
-    for element in &component.view {
-        let (html, handlers) = generate_element_with_scope(
-            element,
-            document,
-            &mut counter,
-            Some(&scope_id),
-            &prefix,
-            project_root,
-        )?;
-        result.push_str(&html);
-        result.push('\n');
-        all_handlers.extend(handlers);
-    }
-
-    Ok((result, all_handlers))
+    generate_page(document, page_name, options, None, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::ast::Span;
+    use crate::core::ast::{Attribute, AttributeValue, Element, Layout, Page, Span};
 
     fn make_button_page(page_name: &str) -> Page {
         Page {
@@ -1310,14 +230,14 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
-            locales: std::collections::HashMap::new(),
+            locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
-            layouts: std::collections::HashMap::new(),
-            pages: std::collections::HashMap::new(),
-            components: std::collections::HashMap::new(),
+            layouts: std::collections::BTreeMap::new(),
+            pages: std::collections::BTreeMap::new(),
+            components: std::collections::BTreeMap::new(),
             imports: vec![],
-            data_imports: std::collections::HashMap::new(),
+            data_imports: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -1370,14 +290,14 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
-            locales: std::collections::HashMap::new(),
+            locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
-            layouts: std::collections::HashMap::new(),
-            pages: std::collections::HashMap::new(),
-            components: std::collections::HashMap::new(),
+            layouts: std::collections::BTreeMap::new(),
+            pages: std::collections::BTreeMap::new(),
+            components: std::collections::BTreeMap::new(),
             imports: vec![],
-            data_imports: std::collections::HashMap::new(),
+            data_imports: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -1434,14 +354,14 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
-            locales: std::collections::HashMap::new(),
+            locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
-            layouts: std::collections::HashMap::new(),
-            pages: std::collections::HashMap::new(),
-            components: std::collections::HashMap::new(),
+            layouts: std::collections::BTreeMap::new(),
+            pages: std::collections::BTreeMap::new(),
+            components: std::collections::BTreeMap::new(),
             imports: vec![],
-            data_imports: std::collections::HashMap::new(),
+            data_imports: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),

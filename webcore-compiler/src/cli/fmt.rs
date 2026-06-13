@@ -23,10 +23,8 @@ impl Default for FmtOptions {
 
 /// Format a single .webc file in place. Returns (formatted_source, was_changed).
 pub fn format_file(path: &Path, opts: &FmtOptions) -> Result<(String, bool), String> {
-    let source =
-        std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let formatted = format_webc(&source, opts)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let source = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let formatted = format_webc(&source, opts).map_err(|e| format!("{}: {e}", path.display()))?;
     let changed = formatted != source;
     Ok((formatted, changed))
 }
@@ -75,8 +73,7 @@ pub fn run(paths: &[String], check: bool, indent: usize) -> Result<(), String> {
             if check {
                 eprintln!("would reformat: {}", path.display());
             } else {
-                std::fs::write(path, &formatted)
-                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                std::fs::write(path, &formatted).map_err(|e| format!("{}: {e}", path.display()))?;
                 println!("reformatted: {}", path.display());
             }
         }
@@ -125,8 +122,17 @@ pub fn format_webc(source: &str, opts: &FmtOptions) -> Result<String, String> {
             let mut routes: Vec<_> = app.routes.iter().collect();
             routes.sort_by_key(|(k, _)| k.len());
             for (route, component) in &routes {
-                let coll = app.collections.get(*route).map(|c| format!(" each {c}")).unwrap_or_default();
-                out.push_str(&format!("{}\"{}\":{}{component}{coll}\n", i(opts.indent * 2), route, col_pad(route)));
+                let coll = app
+                    .collections
+                    .get(*route)
+                    .map(|c| format!(" each {c}"))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "{}\"{}\":{}{component}{coll}\n",
+                    i(opts.indent * 2),
+                    route,
+                    col_pad(route)
+                ));
             }
             out.push_str(&format!("{}}}\n", i(opts.indent)));
         }
@@ -138,8 +144,18 @@ pub fn format_webc(source: &str, opts: &FmtOptions) -> Result<String, String> {
     if !doc.store.is_empty() {
         out.push_str("store {\n");
         for sv in &doc.store {
-            let default = sv.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
-            out.push_str(&format!("{}{}:{}{}{default}\n", i(opts.indent), sv.name, col_pad(&sv.name), sv.type_));
+            let default = sv
+                .default_value
+                .as_deref()
+                .map(|v| format!(" = {v}"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "{}{}:{}{}{default}\n",
+                i(opts.indent),
+                sv.name,
+                col_pad(&sv.name),
+                sv.type_
+            ));
         }
         out.push_str("}\n\n");
     }
@@ -203,8 +219,16 @@ fn format_component(comp: &Component, opts: &FmtOptions) -> String {
     if !comp.props.is_empty() {
         out.push_str(&format!("{}props {{\n", i(opts.indent)));
         for p in &comp.props {
-            let ty = p.type_.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
-            let def = p.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
+            let ty = p
+                .type_
+                .as_deref()
+                .map(|t| format!(": {t}"))
+                .unwrap_or_default();
+            let def = p
+                .default_value
+                .as_deref()
+                .map(|v| format!(" = {v}"))
+                .unwrap_or_default();
             out.push_str(&format!("{}{}{ty}{def}\n", i(opts.indent * 2), p.name));
         }
         out.push_str(&format!("{}}}\n", i(opts.indent)));
@@ -214,8 +238,17 @@ fn format_component(comp: &Component, opts: &FmtOptions) -> String {
     if !comp.state.is_empty() {
         out.push_str(&format!("{}state {{\n", i(opts.indent)));
         for sv in &comp.state {
-            let default = sv.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
-            out.push_str(&format!("{}{}: {}{default}\n", i(opts.indent * 2), sv.name, sv.type_));
+            let default = sv
+                .default_value
+                .as_deref()
+                .map(|v| format!(" = {v}"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "{}{}: {}{default}\n",
+                i(opts.indent * 2),
+                sv.name,
+                sv.type_
+            ));
         }
         out.push_str(&format!("{}}}\n", i(opts.indent)));
     }
@@ -224,7 +257,12 @@ fn format_component(comp: &Component, opts: &FmtOptions) -> String {
     if !comp.computed.is_empty() {
         out.push_str(&format!("{}computed {{\n", i(opts.indent)));
         for cv in &comp.computed {
-            out.push_str(&format!("{}{} = {}\n", i(opts.indent * 2), cv.name, cv.expr));
+            out.push_str(&format!(
+                "{}{} = {}\n",
+                i(opts.indent * 2),
+                cv.name,
+                cv.expr
+            ));
         }
         out.push_str(&format!("{}}}\n", i(opts.indent)));
     }
@@ -311,15 +349,34 @@ pub fn format_element(el: &Element, depth: usize, opts: &FmtOptions) -> String {
             out.push_str(&format!("{ind}}}\n"));
             out
         }
-        Element::Tag { name, attributes, content, .. } => {
-            format_tag(name, attributes, content, depth, opts)
-        }
-        Element::Component { name, attributes, content, .. } => {
-            format_tag(name, attributes, content, depth, opts)
-        }
-        Element::For { item, index, iterable, key, content, .. } => {
-            let index_part = index.as_deref().map(|i| format!(", {i}")).unwrap_or_default();
-            let key_part = key.as_deref().map(|k| format!(" key={k}")).unwrap_or_default();
+        Element::Tag {
+            name,
+            attributes,
+            content,
+            ..
+        } => format_tag(name, attributes, content, depth, opts),
+        Element::Component {
+            name,
+            attributes,
+            content,
+            ..
+        } => format_tag(name, attributes, content, depth, opts),
+        Element::For {
+            item,
+            index,
+            iterable,
+            key,
+            content,
+            ..
+        } => {
+            let index_part = index
+                .as_deref()
+                .map(|i| format!(", {i}"))
+                .unwrap_or_default();
+            let key_part = key
+                .as_deref()
+                .map(|k| format!(" key={k}"))
+                .unwrap_or_default();
             let mut out = format!("{ind}@for {item}{index_part}{key_part} in {iterable} {{\n");
             for child in content {
                 out.push_str(&format_element(child, depth + 1, opts));
@@ -327,7 +384,12 @@ pub fn format_element(el: &Element, depth: usize, opts: &FmtOptions) -> String {
             out.push_str(&format!("{ind}}}\n"));
             out
         }
-        Element::If { condition, then_branch, else_branch, .. } => {
+        Element::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
             let mut out = format!("{ind}@if {condition} {{\n");
             for child in then_branch {
                 out.push_str(&format_element(child, depth + 1, opts));

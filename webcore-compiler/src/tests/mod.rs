@@ -1,12 +1,12 @@
 //! Golden / integration tests: full parse → codegen pipeline.
 
-use crate::core::ast::{self, Component, Span, WebCoreDocument};
 use crate::codegen::attr_names;
 use crate::codegen::css::generate_combined_css;
 use crate::codegen::html::{generate_html, HtmlPageOptions};
 use crate::codegen::js::{generate_runtime_js, minify_js};
+use crate::core::ast::{self, Component, Span, WebCoreDocument};
 use crate::parser::parse_webc;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 /// Serialize tests that mutate NO_COLOR to prevent parallel race conditions.
@@ -132,14 +132,14 @@ fn golden_scoped_css_emits_data_v_selector() {
     let mut doc = WebCoreDocument {
         app: None,
         store: vec![],
-        locales: std::collections::HashMap::new(),
+        locales: std::collections::BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
-        layouts: std::collections::HashMap::new(),
-        pages: std::collections::HashMap::new(),
-        components: std::collections::HashMap::new(),
+        layouts: std::collections::BTreeMap::new(),
+        pages: std::collections::BTreeMap::new(),
+        components: std::collections::BTreeMap::new(),
         imports: vec![],
-        data_imports: std::collections::HashMap::new(),
+        data_imports: std::collections::BTreeMap::new(),
     };
     doc.components.insert(
         "Counter".into(),
@@ -153,16 +153,18 @@ fn golden_scoped_css_emits_data_v_selector() {
             watch_hooks: vec![],
             http: None,
             view: vec![],
-            style: vec![crate::core::ast::StyleItem::Rule(crate::core::ast::StyleRule {
-                selector: "button".into(),
-                properties: vec![crate::core::ast::StyleProperty {
-                    name: "color".into(),
-                    value: "red".into(),
+            style: vec![crate::core::ast::StyleItem::Rule(
+                crate::core::ast::StyleRule {
+                    selector: "button".into(),
+                    properties: vec![crate::core::ast::StyleProperty {
+                        name: "color".into(),
+                        value: "red".into(),
+                        span: Span::default(),
+                    }],
+                    nested: vec![],
                     span: Span::default(),
-                }],
-                nested: vec![],
-                span: Span::default(),
-            })],
+                },
+            )],
             span: Span::default(),
         },
     );
@@ -402,9 +404,16 @@ component Counter {
 page "home" { Counter {} }
 "#;
     let doc = parse_webc(src).expect("parse");
-    let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
     let initial = crate::core::ssg::build_initial_state(&doc);
-    let ssg = crate::core::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
+    let locales = BTreeMap::new();
+    let ssg_ctx = crate::core::ssg::SsgContext {
+        state: &initial,
+        locales: &locales,
+        locale: "",
+    };
+    let ssg = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
+        .expect("codegen")
+        .html;
     assert!(
         ssg.contains(&format!("{}=\"count\">7</span>", attr_names::INTERPOLATION)),
         "interpolation span not pre-rendered:\n{}",
@@ -429,9 +438,16 @@ component Widget {
 page "home" { Widget {} }
 "#;
     let doc = parse_webc(src).expect("parse");
-    let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
     let initial = crate::core::ssg::build_initial_state(&doc);
-    let ssg = crate::core::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
+    let locales = BTreeMap::new();
+    let ssg_ctx = crate::core::ssg::SsgContext {
+        state: &initial,
+        locales: &locales,
+        locale: "",
+    };
+    let ssg = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
+        .expect("codegen")
+        .html;
     assert!(
         ssg.contains(&format!("{}=\"show &gt; 0\"", attr_names::IF))
             && ssg.contains(r#"style="display:block""#),
@@ -455,7 +471,7 @@ layout MainLayout { main { slot content } }
 page "home" { h1 "hi" }
 "#;
     let mut doc = parse_webc(src).expect("parse");
-    let mut fr: HashMap<String, String> = HashMap::new();
+    let mut fr: BTreeMap<String, String> = BTreeMap::new();
     fr.insert("welcome".to_string(), "Bienvenue".to_string());
     fr.insert("counter".to_string(), "Compteur".to_string());
     doc.locales.insert("fr".to_string(), fr);
@@ -483,7 +499,7 @@ layout MainLayout { main { slot content } }
 page "home" { p "{t("welcome")}" }
 "##;
     let mut doc = parse_webc(src).expect("parse");
-    let mut fr: HashMap<String, String> = HashMap::new();
+    let mut fr: BTreeMap<String, String> = BTreeMap::new();
     fr.insert("welcome".to_string(), "Bienvenue".to_string());
     doc.locales.insert("fr".to_string(), fr);
     doc.default_locale = "fr".to_string();
@@ -496,7 +512,14 @@ page "home" { p "{t("welcome")}" }
         res.html
     );
     let state = crate::core::ssg::build_initial_state(&doc);
-    let ssg = crate::core::ssg::apply_ssg_with_locales(&res.html, &state, &doc.locales, "fr");
+    let ssg_ctx = crate::core::ssg::SsgContext {
+        state: &state,
+        locales: &doc.locales,
+        locale: "fr",
+    };
+    let ssg = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
+        .expect("codegen")
+        .html;
     assert!(
         ssg.contains("Bienvenue"),
         "translation not pre-rendered:\n{}",
@@ -962,7 +985,7 @@ layout MainLayout { main { slot content } }
 page "home" { p "{t(\"items\", 3)}" }
 "#;
     let mut doc = parse_webc(src).expect("parse");
-    let mut en_msgs = HashMap::new();
+    let mut en_msgs = BTreeMap::new();
     en_msgs.insert("items_one".into(), "{{count}} item".into());
     en_msgs.insert("items_other".into(), "{{count}} items".into());
     doc.locales.insert("en".into(), en_msgs);
@@ -2270,7 +2293,7 @@ app Blog {
         Some(&"posts".to_string())
     );
     assert!(
-        app.collections.get("/").is_none(),
+        !app.collections.contains_key("/"),
         "non-collection routes unaffected"
     );
 }
@@ -2330,11 +2353,22 @@ fn golden_expand_collection_requires_param_route() {
 
 #[test]
 fn golden_ssg_prerenders_route_param() {
-    use std::collections::HashMap;
-    let mut state: HashMap<String, String> = HashMap::new();
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { h1 "{$route.slug}" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let mut state: BTreeMap<String, String> = BTreeMap::new();
     state.insert("$route.slug".to_string(), "hello-world".to_string());
-    let html = r#"<h1><span data-webcore-interpolation="$route.slug"></span></h1>"#;
-    let out = crate::core::ssg::apply_ssg_with_locales(html, &state, &HashMap::new(), "fr");
+    let locales = BTreeMap::new();
+    let ssg_ctx = crate::core::ssg::SsgContext {
+        state: &state,
+        locales: &locales,
+        locale: "fr",
+    };
+    let out = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
+        .expect("codegen")
+        .html;
     assert!(
         out.contains(">hello-world</span>"),
         "route param should be pre-rendered: {out}"
@@ -2503,7 +2537,8 @@ page "home" { main { h1 "Static" } }
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
-        res.html.contains("<script defer src=\"/assets/webcore.js\">"),
+        res.html
+            .contains("<script defer src=\"/assets/webcore.js\">"),
         "webcore.js must be present when critical_css is set (defer swap needs it):\n{}",
         res.html
     );
@@ -2564,11 +2599,11 @@ page "home" { main { p "hi" } }
 #[test]
 fn golden_ssg_array_length_with_quoted_commas() {
     use crate::core::ssg::eval_expr_with_locale;
-    use std::collections::HashMap;
-    let mut state = HashMap::new();
+    use std::collections::BTreeMap;
+    let mut state = BTreeMap::new();
     // Value contains a comma inside a quoted string — naive split gives 3, correct is 2.
     state.insert("items".to_string(), r#"["a,b","c"]"#.to_string());
-    let result = eval_expr_with_locale("items.length", &state, &HashMap::new(), "en");
+    let result = eval_expr_with_locale("items.length", &state, &BTreeMap::new(), "en");
     assert_eq!(
         result,
         Some("2".to_string()),
@@ -2581,11 +2616,11 @@ fn golden_ssg_array_length_with_quoted_commas() {
 #[test]
 fn golden_ssg_string_length_unicode() {
     use crate::core::ssg::eval_expr_with_locale;
-    use std::collections::HashMap;
-    let mut state = HashMap::new();
+    use std::collections::BTreeMap;
+    let mut state = BTreeMap::new();
     // "café" = 4 chars, 5 UTF-8 bytes (é is 2 bytes).
     state.insert("name".to_string(), "café".to_string());
-    let result = eval_expr_with_locale("name.length", &state, &HashMap::new(), "en");
+    let result = eval_expr_with_locale("name.length", &state, &BTreeMap::new(), "en");
     assert_eq!(
         result,
         Some("4".to_string()),
@@ -2608,11 +2643,27 @@ page "home" {
 }
 "#,
     );
-    assert!(html.contains("<h1>Title"), "h1 missing in fragment output:\n{}", html);
-    assert!(html.contains("<p>Body"), "p missing in fragment output:\n{}", html);
+    assert!(
+        html.contains("<h1>Title"),
+        "h1 missing in fragment output:\n{}",
+        html
+    );
+    assert!(
+        html.contains("<p>Body"),
+        "p missing in fragment output:\n{}",
+        html
+    );
     // Fragment must NOT introduce a wrapper tag
-    assert!(!html.contains("<fragment"), "fragment wrapper tag must not appear:\n{}", html);
-    assert!(!html.contains("<>"), "raw <> must not appear in output:\n{}", html);
+    assert!(
+        !html.contains("<fragment"),
+        "fragment wrapper tag must not appear:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("<>"),
+        "raw <> must not appear in output:\n{}",
+        html
+    );
 }
 
 #[test]
@@ -2633,7 +2684,11 @@ page "home" { Pair {} }
     );
     assert!(html.contains(">A"), "span A missing:\n{}", html);
     assert!(html.contains(">B"), "span B missing:\n{}", html);
-    assert!(!html.contains("<fragment"), "no wrapper tag expected:\n{}", html);
+    assert!(
+        !html.contains("<fragment"),
+        "no wrapper tag expected:\n{}",
+        html
+    );
 }
 
 #[test]
@@ -2767,7 +2822,10 @@ page "home" {
     // Only one D('click') call should be emitted (not one per modifier combination)
     let js = generate_runtime_js(&res.handlers, &doc);
     let d_click_count = js.matches("D('click',").count();
-    assert_eq!(d_click_count, 1, "should emit exactly one D('click') call: {js}");
+    assert_eq!(
+        d_click_count, 1,
+        "should emit exactly one D('click') call: {js}"
+    );
 }
 
 // ── @for nested scope ─────────────────────────────────────────────────────
@@ -2867,7 +2925,7 @@ page "home" { NestedFor {} }
 
 #[test]
 fn fmt_roundtrip_simple_component() {
-    use crate::cli::fmt::{FmtOptions, format_webc};
+    use crate::cli::fmt::{format_webc, FmtOptions};
     let source = r#"layout MainLayout { main { slot content } }
 component Counter {
     state {
@@ -2895,7 +2953,7 @@ page "home" { Counter {} }
 
 #[test]
 fn fmt_roundtrip_page_with_for_and_if() {
-    use crate::cli::fmt::{FmtOptions, format_webc};
+    use crate::cli::fmt::{format_webc, FmtOptions};
     let source = r#"layout MainLayout { main { slot content } }
 component ListComp {
     state {
@@ -2924,7 +2982,7 @@ page "home" { ListComp {} }
 
 #[test]
 fn fmt_idempotent_already_formatted() {
-    use crate::cli::fmt::{FmtOptions, format_webc};
+    use crate::cli::fmt::{format_webc, FmtOptions};
     // A source that is already formatted; formatting it again must produce the same output.
     let source = r#"component Badge {
     props {
@@ -2942,4 +3000,112 @@ fn fmt_idempotent_already_formatted() {
     let first = format_webc(source, &opts).expect("first format failed");
     let second = format_webc(&first, &opts).expect("second format failed");
     assert_eq!(first, second, "formatter is not idempotent");
+}
+
+#[test]
+fn golden_void_elements_have_no_closing_tag() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    input type="text" placeholder="Nom"
+    img src="/a.png" alt="A"
+    br
+    hr
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    for tag in ["</input>", "</img>", "</br>", "</hr>"] {
+        assert!(
+            !res.html.contains(tag),
+            "void element closing tag {tag} emitted:\n{}",
+            res.html
+        );
+    }
+    assert!(res.html.contains("<input"), "input missing:\n{}", res.html);
+}
+
+#[test]
+fn golden_inline_text_has_no_trailing_newline() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    span "abc"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("<span>abc</span>"),
+        "trailing whitespace inside inline element:\n{}",
+        res.html
+    );
+}
+
+// ═══ i18n — comportement runtime de t() (exécuté via node) ══════════════════
+
+/// Execute the emitted `t()` against real locale data with Node.js and assert
+/// plural selection (_one/_other), fallbacks (missing plural form, missing
+/// key) and parameter substitution ({{count}}, {{0}}).
+#[test]
+fn golden_i18n_t_runtime_behaviour() {
+    if std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("note: node not found, skipping t() behaviour test");
+        return;
+    }
+
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { p "x" }
+"#;
+    let mut doc = parse_webc(src).expect("parse");
+    let mut fr: BTreeMap<String, String> = BTreeMap::new();
+    fr.insert("greeting".into(), "Bonjour {{0}}".into());
+    fr.insert("items_one".into(), "{{count}} objet".into());
+    fr.insert("items_other".into(), "{{count}} objets".into());
+    fr.insert("only_base".into(), "Total : {{count}}".into());
+    doc.locales.insert("fr".into(), fr);
+    doc.default_locale = "fr".into();
+
+    let js = generate_runtime_js(&[], &doc);
+    // Extract the three self-contained i18n statements from the runtime.
+    let mut script = String::new();
+    for needle in ["const LOCALES=", "let LOCALE=", "const t="] {
+        let line = js
+            .lines()
+            .find(|l| l.starts_with(needle))
+            .unwrap_or_else(|| panic!("{needle} not emitted:\n{js}"));
+        script.push_str(line);
+        script.push('\n');
+    }
+    script.push_str(
+        r#"
+const eq=(got,want,msg)=>{if(got!==want){console.error(msg+': got '+JSON.stringify(got)+', want '+JSON.stringify(want));process.exit(1);}};
+eq(t('greeting','Ana'),'Bonjour Ana','positional {{0}} substitution');
+eq(t('greeting'),'Bonjour {{0}}','no-arg returns raw template');
+eq(t('items',1),'1 objet','plural _one');
+eq(t('items',3),'3 objets','plural _other');
+eq(t('items',0),'0 objets','plural zero uses _other');
+eq(t('only_base',5),'Total : 5','plural falls back to base key');
+eq(t('noplural',2),'noplural','plural with no entry falls back to key');
+eq(t('missing'),'missing','missing key falls back to key');
+"#,
+    );
+
+    let path = std::env::temp_dir().join(format!("webcore-t-test-{}.js", std::process::id()));
+    std::fs::write(&path, &script).expect("write t() test script");
+    let out = std::process::Command::new("node")
+        .arg(&path)
+        .output()
+        .expect("run node");
+    std::fs::remove_file(&path).ok();
+    assert!(
+        out.status.success(),
+        "t() behaviour mismatch:\n{}\n--- script ---\n{script}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

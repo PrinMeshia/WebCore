@@ -64,7 +64,11 @@ pub(crate) fn print_dist_tree(dist_dir: &Path, minified: bool) {
     println!("\ndist/");
     let count = files.len();
     for (i, (name, size)) in files.iter().enumerate() {
-        let branch = if i + 1 == count { "└──" } else { "├──" };
+        let branch = if i + 1 == count {
+            "└──"
+        } else {
+            "├──"
+        };
         println!(
             "  {}  {:<width$}  {}",
             branch,

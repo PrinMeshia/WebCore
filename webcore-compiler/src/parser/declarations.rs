@@ -22,8 +22,8 @@ pub(super) fn parse_app(pair: Pair<Rule>) -> Result<App, ParseError> {
         name,
         theme: None,
         layout: None,
-        routes: std::collections::HashMap::new(),
-        collections: std::collections::HashMap::new(),
+        routes: std::collections::BTreeMap::new(),
+        collections: std::collections::BTreeMap::new(),
         span,
     };
 
@@ -340,17 +340,24 @@ pub(super) fn parse_props_block(pair: Pair<Rule>) -> Result<Vec<Prop>, ParseErro
                     Rule::value => {
                         // value wraps number | string_literal | boolean | identifier
                         let raw = token.as_str().trim();
-                        default_value = Some(if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
-                            raw[1..raw.len() - 1].to_string()
-                        } else {
-                            raw.to_string()
-                        });
+                        default_value = Some(
+                            if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+                                raw[1..raw.len() - 1].to_string()
+                            } else {
+                                raw.to_string()
+                            },
+                        );
                     }
                     _ => {}
                 }
             }
 
-            props.push(Prop { name, type_, default_value, span });
+            props.push(Prop {
+                name,
+                type_,
+                default_value,
+                span,
+            });
         }
     }
 

@@ -1,8 +1,8 @@
 //! Project validation: parse all sources and report issues without writing output.
 
-use crate::core::ast;
 use super::config::read_config;
 use super::loader::load_webc_document;
+use crate::core::ast;
 
 /// Validate the current project without generating any output files.
 ///

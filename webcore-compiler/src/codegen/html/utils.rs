@@ -1,3 +1,58 @@
+use crate::core::ast::{Attribute, AttributeValue};
+use std::fmt::Write as _;
+
+/// HTML void elements: they cannot have children and must not get a closing tag.
+/// <https://html.spec.whatwg.org/multipage/syntax.html#void-elements>
+const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr",
+];
+
+/// True if `name` is an HTML void element (no closing tag allowed).
+pub(super) fn is_void_element(name: &str) -> bool {
+    VOID_ELEMENTS.contains(&name)
+}
+
+/// Append the closing tag for `name`.
+///
+/// Single emission point for closing tags: void elements must never reach
+/// this function (callers skip them after checking [`is_void_element`]).
+pub(super) fn push_close_tag(result: &mut String, name: &str) {
+    debug_assert!(
+        !is_void_element(name),
+        "void element <{name}> must not get a closing tag"
+    );
+    write!(result, "</{name}>").expect("write! to String is infallible");
+}
+
+/// Append attributes that need no special handling: static strings, boolean
+/// flags, and dynamic expressions (emitted as `data-webcore-attr-*` for
+/// `bindAttrs`). Event/class/style/validation attributes are handled by the
+/// dedicated `attrs` module and must be filtered out by the caller.
+pub(super) fn push_plain_attributes(result: &mut String, attributes: &[Attribute]) {
+    for attr in attributes {
+        match &attr.value {
+            AttributeValue::String(value) => {
+                write!(result, " {}=\"{}\"", attr.name, html_escape(value))
+                    .expect("write! to String is infallible");
+            }
+            AttributeValue::Boolean(true) => {
+                write!(result, " {}", attr.name).expect("write! to String is infallible");
+            }
+            AttributeValue::Boolean(false) => {}
+            AttributeValue::Expression(expr) => {
+                write!(
+                    result,
+                    " data-webcore-attr-{}=\"{}\"",
+                    attr.name,
+                    html_escape(expr)
+                )
+                .expect("write! to String is infallible");
+            }
+        }
+    }
+}
+
 /// HTML-escape a string (& < > " ').
 pub(super) fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;")

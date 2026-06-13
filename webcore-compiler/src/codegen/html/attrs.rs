@@ -1,8 +1,8 @@
-use crate::core::ast::{Attribute, AttributeValue};
-use crate::codegen::attr_names;
 use super::utils::html_escape;
-use std::fmt::Write as _;
 use super::HandlerMapping;
+use crate::codegen::attr_names;
+use crate::core::ast::{Attribute, AttributeValue};
+use std::fmt::Write as _;
 
 /// Expand `bind:attr={expr}` into a value/checked attr + event handler pair.
 /// `bind:value={x}`   → `value={x}` + `on:input={x = event.target.value}`
@@ -87,7 +87,7 @@ pub(super) fn handle_validation_attr(attr: &Attribute) -> Option<String> {
                     validator,
                     html_escape(constraint.trim())
                 )
-                .unwrap();
+                .expect("write! to String is infallible");
                 if !msg.is_empty() {
                     write!(
                         out,
@@ -95,7 +95,7 @@ pub(super) fn handle_validation_attr(attr: &Attribute) -> Option<String> {
                         validator,
                         html_escape(msg.trim())
                     )
-                    .unwrap();
+                    .expect("write! to String is infallible");
                 }
             }
             "pattern" => {
@@ -106,14 +106,14 @@ pub(super) fn handle_validation_attr(attr: &Attribute) -> Option<String> {
                     " data-webcore-validate-pattern=\"{}\"",
                     html_escape(pat)
                 )
-                .unwrap();
+                .expect("write! to String is infallible");
                 if !msg.is_empty() {
                     write!(
                         out,
                         " data-webcore-validate-pattern-msg=\"{}\"",
                         html_escape(msg.trim())
                     )
-                    .unwrap();
+                    .expect("write! to String is infallible");
                 }
                 // Compile-time ReDoS warning: nested quantifiers can cause catastrophic backtracking in browsers
                 if pat.contains(")+") || pat.contains(")*") || pat.contains(")+?") {
@@ -127,11 +127,12 @@ pub(super) fn handle_validation_attr(attr: &Attribute) -> Option<String> {
                     validator,
                     html_escape(v)
                 )
-                .unwrap();
+                .expect("write! to String is infallible");
             }
         },
         AttributeValue::Boolean(true) => {
-            write!(out, " data-webcore-validate-{validator}=\"\"").unwrap();
+            write!(out, " data-webcore-validate-{validator}=\"\"")
+                .expect("write! to String is infallible");
         }
         _ => {}
     }
@@ -164,7 +165,8 @@ pub(super) fn handle_event_attr(
     let mut modifiers: Vec<&str> = Vec::new();
     for part in &parts[1..] {
         if part.starts_with("debounce") {
-            let ms = part.strip_prefix("debounce=")
+            let ms = part
+                .strip_prefix("debounce=")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(300u32);
             debounce_ms = Some(ms);

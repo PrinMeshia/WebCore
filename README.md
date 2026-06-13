@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 2.6.0 |
+| **Version** | 2.7.0 (dev) |
 | **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 147 tests unitaires |
+| **Tests** | 161 tests (unitaires, golden, intégration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -349,6 +349,15 @@ p "Page : {$query.page}"
 ---
 
 ## Installation
+
+### Binaires précompilés
+
+Chaque release publie des binaires `webc` pour Linux, macOS (Intel et
+Apple Silicon) et Windows : téléchargez l'archive de votre plateforme
+depuis la [page des releases](https://github.com/PrinMeshia/Webcore/releases),
+extrayez `webc` et placez-le dans votre `PATH`.
+
+### Depuis les sources
 
 **Prérequis :** Rust 1.70+ avec Cargo
 

@@ -20,7 +20,9 @@ fn strip_html_comments(html: &str) -> String {
             }
         } else {
             // Advance by a full UTF-8 character, not a byte.
-            let ch = html[i..].chars().next().unwrap();
+            let Some(ch) = html[i..].chars().next() else {
+                break;
+            };
             result.push(ch);
             i += ch.len_utf8();
         }
@@ -51,7 +53,9 @@ fn collapse_whitespace_between_tags(html: &str) -> String {
             }
         } else {
             // Advance by a full UTF-8 character, not a byte.
-            let ch = html[i..].chars().next().unwrap();
+            let Some(ch) = html[i..].chars().next() else {
+                break;
+            };
             result.push(ch);
             i += ch.len_utf8();
         }

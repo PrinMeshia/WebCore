@@ -7,10 +7,9 @@ use super::loader::{
 };
 use super::output::{print_bundle_analysis, print_dist_tree};
 
-
-use crate::core::{ast, css_processor, error, ssg, theme};
 use crate::codegen;
-use std::collections::HashMap;
+use crate::core::{ast, css_processor, error, ssg, theme};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -143,10 +142,9 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     // Pre-minified CSS parts for critical-CSS assembly (prod only):
     // global (theme vars + base) + one entry per styled component.
-    let critical_parts: Option<(String, HashMap<String, String>)> = if config.mode == "prod" {
-        let global =
-            css_processor::minify_css(&codegen::css::generate_global_css(theme.as_ref()))?;
-        let mut per_component = HashMap::new();
+    let critical_parts: Option<(String, BTreeMap<String, String>)> = if config.mode == "prod" {
+        let global = css_processor::minify_css(&codegen::css::generate_global_css(theme.as_ref()))?;
+        let mut per_component = BTreeMap::new();
         for (name, component) in &document.components {
             let scoped = codegen::css::generate_scoped_css(component);
             if !scoped.is_empty() {
@@ -182,6 +180,11 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     // Collect initial state once for SSG pre-rendering
     let initial_state = ssg::build_initial_state(&document);
+    let ssg_ctx = ssg::SsgContext {
+        state: &initial_state,
+        locales: &document.locales,
+        locale: &config.locale,
+    };
 
     // Helper to convert page name to clean-URL path (e.g. "syntax" → "syntax/index.html")
     fn page_to_filename(name: &str) -> String {
@@ -205,20 +208,19 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
             critical_css: critical_css_for(&document, page_name),
             ..options.clone()
         };
-        match codegen::html::generate_page_content_only(&document, page_name, &page_options)
-        {
+        match codegen::html::generate_page(
+            &document,
+            page_name,
+            &page_options,
+            Some(Path::new(".")),
+            Some(&ssg_ctx),
+        ) {
             Ok(html_result) => {
                 all_handlers.extend(html_result.handlers);
-                let ssg_html = ssg::apply_ssg_with_locales(
-                    &html_result.html,
-                    &initial_state,
-                    &document.locales,
-                    &config.locale,
-                );
                 let final_html = if config.mode == "prod" {
-                    codegen::html::minify_html(&ssg_html)
+                    codegen::html::minify_html(&html_result.html)
                 } else {
-                    ssg_html
+                    html_result.html
                 };
                 let output_path = dist_dir.join(&filename);
                 if let Some(parent) = output_path.parent() {
@@ -260,23 +262,19 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
                 critical_css: critical_css_for(&temp_doc, component_name),
                 ..options.clone()
             };
-            match codegen::html::generate_page_content_only(
+            match codegen::html::generate_page(
                 &temp_doc,
                 component_name,
                 &page_options,
+                Some(Path::new(".")),
+                Some(&ssg_ctx),
             ) {
                 Ok(html_result) => {
                     all_handlers.extend(html_result.handlers);
-                    let ssg_html = ssg::apply_ssg_with_locales(
-                        &html_result.html,
-                        &initial_state,
-                        &document.locales,
-                        &config.locale,
-                    );
                     let final_html = if config.mode == "prod" {
-                        codegen::html::minify_html(&ssg_html)
+                        codegen::html::minify_html(&html_result.html)
                     } else {
-                        ssg_html
+                        html_result.html
                     };
                     let output_path = dist_dir.join(&filename);
                     if let Some(parent) = output_path.parent() {
@@ -364,26 +362,27 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
             entries.len()
         );
         for (rel_path, param, value) in entries {
-            match codegen::html::generate_page_content_only(
+            // Pre-render `{$route.<param>}` with this item's value
+            let mut item_state = initial_state.clone();
+            item_state.insert(format!("$route.{param}"), value.clone());
+            let item_ssg_ctx = ssg::SsgContext {
+                state: &item_state,
+                locales: &document.locales,
+                locale: &config.locale,
+            };
+            match codegen::html::generate_page(
                 &temp_doc,
                 &component_name,
                 &page_options,
+                Some(Path::new(".")),
+                Some(&item_ssg_ctx),
             ) {
                 Ok(html_result) => {
                     all_handlers.extend(html_result.handlers);
-                    // Pre-render `{$route.<param>}` with this item's value
-                    let mut item_state = initial_state.clone();
-                    item_state.insert(format!("$route.{param}"), value.clone());
-                    let ssg_html = ssg::apply_ssg_with_locales(
-                        &html_result.html,
-                        &item_state,
-                        &document.locales,
-                        &config.locale,
-                    );
                     let final_html = if config.mode == "prod" {
-                        codegen::html::minify_html(&ssg_html)
+                        codegen::html::minify_html(&html_result.html)
                     } else {
-                        ssg_html
+                        html_result.html
                     };
                     let output_path = dist_dir.join(&rel_path);
                     if let Some(parent) = output_path.parent() {
@@ -479,8 +478,8 @@ pub(crate) fn watch_project() -> Result<(), String> {
     let dirty = Arc::new(Mutex::new(false));
     let dirty_watcher = dirty.clone();
 
-    let mut watcher: RecommendedWatcher = notify::recommended_watcher(
-        move |res: Result<notify::Event, notify::Error>| {
+    let mut watcher: RecommendedWatcher =
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
                 if matches!(
                     event.kind,
@@ -491,9 +490,8 @@ pub(crate) fn watch_project() -> Result<(), String> {
                     }
                 }
             }
-        },
-    )
-    .map_err(|e| format!("Watcher error: {e}"))?;
+        })
+        .map_err(|e| format!("Watcher error: {e}"))?;
 
     for dir in &["src", "theme.toml", "webc.toml", "locales"] {
         let p = std::path::Path::new(dir);
@@ -507,14 +505,17 @@ pub(crate) fn watch_project() -> Result<(), String> {
     let mut last_build = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(200));
-        let is_dirty = dirty.lock().map(|mut d| {
-            if *d {
-                *d = false;
-                true
-            } else {
-                false
-            }
-        }).unwrap_or(false);
+        let is_dirty = dirty
+            .lock()
+            .map(|mut d| {
+                if *d {
+                    *d = false;
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
 
         if is_dirty && last_build.elapsed() > Duration::from_millis(300) {
             last_build = Instant::now();

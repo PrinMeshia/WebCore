@@ -16,11 +16,27 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Corrections (v2.7.0)
 
 - **`@for` / `@if` imbriqués sans wrapper** — auparavant, placer un `@for` ou un `@if` directement à l'intérieur d'un `@for` (sans balise wrapper) provoquait une erreur de parse `expected EOI, import_decl` ; corrigé par la simplification de la règle `expression`
-- 5 nouveaux tests — 152 tests au total
+- **Build déterministe** — les maps du document, du thème et de l'état initial étaient des `HashMap` (ordre d'itération aléatoire) : l'ordre des règles dans `theme.css`, l'ordre des handlers dans `webcore.js` et les ids générés variaient d'un build à l'autre, rendant les hash de cache-busting (`?v=…`) instables ; toutes les maps passent en `BTreeMap` — deux builds identiques produisent désormais un `dist/` identique au byte près
+- **Éléments void valides** — les balises fermantes ne sont plus émises pour les éléments void HTML (`input`, `img`, `br`, `hr`, …) ; `</input>` était du HTML invalide ; règle verrouillée en un point unique (`push_close_tag` + `debug_assert`)
+- **Nœuds texte propres** — suppression du retour à la ligne parasite avant les balises fermantes (`<span>x\n</span>` → `<span>x</span>`) ; rendu inchangé, l'espacement inter-éléments étant déjà fourni après chaque élément
+- **`webc:img` réparé** — l'injection des dimensions `width`/`height` ne s'exécutait **jamais** lors d'un vrai `webc build` (la génération recevait toujours `project_root = None`) ; `build.rs` passe désormais la racine du projet ; test de régression avec un vrai PNG
+
+### Qualité & outillage (v2.7.0)
+
+- **CI GitHub Actions** — workflow `fmt --check` · `clippy -D warnings` · `cargo test`, en matrice Linux / Windows / macOS (le README annonçait une CI qui n'existait pas)
+- **Tests d'intégration full-build** — chaque projet de `examples/` est compilé de bout en bout dans un dossier temporaire : fichiers attendus, JS validé syntaxiquement via `node --check`, déterminisme byte-à-byte vérifié
+- **Test de performance** — projet synthétique (50 composants, 20 pages) compilé en ~70 ms ; garde-fou à 60 s contre les régressions de complexité
+- **Test prod de bout en bout** — minification, SRI, critical CSS inliné, stylesheet différée, meta CSP et déterminisme vérifiés sur un build `mode = "prod"`
+- **`t()` exécuté sous Node** — sélection de pluriel `_one`/`_other`, replis (forme plurielle absente, clé absente) et substitution `{{0}}`/`{{count}}` vérifiés en exécutant réellement le runtime émis
+- **SSG au niveau AST** — le pré-rendu (interpolations, `display` des `@if`/`@else`) se fait à l'émission du HTML via `SsgContext`, au lieu de trois regex appliquées au HTML généré ; sortie strictement identique, mécanisme nettement plus robuste
+- **`codegen/html` découpé** — `mod.rs` (1 483 lignes) éclaté en modules ciblés (`shell`, `slots`, `elements`, `tags`, `components`) ; les signatures à 8 paramètres remplacées par un `GenContext` partagé
+- **Zéro `unwrap()` hors tests** — lint `clippy::unwrap_used` actif au niveau du crate ; les écritures infaillibles documentées par `.expect()`, les vrais risques éliminés
+- **`docs/runtime.md`** — référence d'architecture du runtime JS : modèle de réactivité, contrat des `data-webcore-*`, `bindFor` détaillé, délégation d'événements
+- 161 tests au total (unitaires, golden, intégration, perf)
 
 ---
 
-## [2.6.0]
+## [2.6.0] 
 
 ### Ajouts (v2.6.0)
 
@@ -37,7 +53,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.2] 
+## [2.5.2]
 
 ### Améliorations DX (v2.5.2)
 
@@ -81,7 +97,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.1]
+## [2.5.1] 
 
 ### Corrections de sécurité (v2.5.1)
 
@@ -97,7 +113,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.0]
+## [2.5.0] 
 
 ### Ajouts (v2.5.0)
 
@@ -114,7 +130,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.4.0]
+## [2.4.0] 
 
 ### Ajouts (v2.4.0)
 
@@ -133,7 +149,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.3.0]
+## [2.3.0] 
 
 ### Ajouts (v2.3.0)
 
@@ -147,7 +163,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.0]
+## [2.1.0] 
 
 ### Ajouts
 
@@ -165,7 +181,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.2.0]
+## [2.2.0] 
 
 ### Ajouts
 
@@ -182,7 +198,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.0.0]
+## [2.0.0] 
 
 ### Rupture avec v1.x
 
@@ -214,7 +230,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.5.0]
+## [1.5.0] 
 
 ### Ajouts
 
@@ -227,7 +243,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.4.0]
+## [1.4.0] 
 
 ### Ajouts
 
@@ -242,7 +258,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.3.0]
+## [1.3.0] 
 
 ### Ajouts
 
@@ -262,7 +278,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.2.0]
+## [1.2.0] 
 
 ### Ajouts
 
@@ -281,7 +297,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.1]
+## [1.1.1] 
 
 ### Corrections
 
@@ -300,7 +316,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.0]
+## [1.1.0] 
 
 ### Ajouts
 
@@ -331,7 +347,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.0]
+## [1.0.0] 
 
 ### Ajouts
 
@@ -355,7 +371,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.9.0]
+## [0.9.0] 
 
 ### Ajouts
 
@@ -370,7 +386,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.8.0]
+## [0.8.0] 
 
 ### Ajouts
 
@@ -386,7 +402,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.7.0]
+## [0.7.0] 
 
 ### Ajouts
 
@@ -394,7 +410,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.6.0]
+## [0.6.0] 
 
 ### Ajouts
 
@@ -402,7 +418,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.5.0]
+## [0.5.0] 
 
 ### Ajouts
 
@@ -410,7 +426,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0]
+## [0.4.0] 
 
 ### Ajouts
 
@@ -424,7 +440,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0]
+## [0.3.0] 
 
 ### Ajouts
 
@@ -445,7 +461,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0]
+## [0.2.0] 
 
 ### Ajouts
 
