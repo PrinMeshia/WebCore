@@ -6,5 +6,6 @@ app WebCoreDocs {
         "/syntax": SyntaxPage
         "/components": ComponentsPage
         "/features": FeaturesPage
+        "/examples": ExamplesPage
     }
 }

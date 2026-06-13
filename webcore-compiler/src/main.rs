@@ -747,6 +747,7 @@ fn build_project() -> Result<(), String> {
             // Create a temporary page from the component
             let temp_page = ast::Page {
                 name: component_name.clone(),
+                head: None,
                 content: component.view.clone(),
                 span: component.span,
             };
@@ -809,10 +810,15 @@ fn build_project() -> Result<(), String> {
     };
     patch_html_files(dist_dir, &format!(r#"src="/assets/webcore.js?v={}""#, js_hash));
 
-    // Copy public assets
+    // Copy public assets, fingerprinting images along the way
     let public_dir = Path::new("public");
     if public_dir.exists() {
         copy_dir_recursive(public_dir, &assets_dir, config.mode == "prod")?;
+        // Build fingerprint map for images and apply to HTML/CSS
+        let fingerprint_map = fingerprint_images(public_dir, &assets_dir)?;
+        if !fingerprint_map.is_empty() {
+            rewrite_asset_refs(dist_dir, &fingerprint_map);
+        }
     }
 
     print_dist_tree(dist_dir, config.mode == "prod");
@@ -1242,6 +1248,118 @@ fn print_dist_tree(dist_dir: &Path, minified: bool) {
         fmt_size(total_bytes),
         mode_label,
     );
+}
+
+/// FNV-1a 32-bit hash — returns an 8 hex-char string.
+pub fn fnv1a_hash(data: &[u8]) -> String {
+    let mut h: u32 = 2_166_136_261;
+    for &b in data {
+        h ^= b as u32;
+        h = h.wrapping_mul(16_777_619);
+    }
+    format!("{:08x}", h)
+}
+
+/// Image file extensions that are subject to content-hash fingerprinting.
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "avif",
+];
+
+/// For every image file directly inside `public_dir`, compute a content hash,
+/// copy the file to `assets_dir/<stem>.<hash>.<ext>`, and return a mapping
+/// `"original.png"` → `"original.<hash>.png"`.
+///
+/// The un-hashed copy (written by `copy_dir_recursive`) is left in place; the
+/// post-processing step (`rewrite_asset_refs`) will rewrite all `/assets/` refs
+/// to point at the hashed name, so browsers will use the hashed file.
+fn fingerprint_images(
+    public_dir: &Path,
+    assets_dir: &Path,
+) -> Result<HashMap<String, String>, String> {
+    let mut map: HashMap<String, String> = HashMap::new();
+
+    fn walk(dir: &Path, assets_dir: &Path, map: &mut HashMap<String, String>) -> Result<(), String> {
+        let entries = fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read {:?}: {}", dir, e))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, assets_dir, map)?;
+                continue;
+            }
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+                continue;
+            }
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            let hash = fnv1a_hash(&bytes);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&file_name);
+            let hashed_name = format!("{}.{}.{}", stem, hash, ext);
+            let dst = assets_dir.join(&hashed_name);
+            fs::copy(&path, &dst)
+                .map_err(|e| format!("Failed to copy {:?} → {:?}: {}", path, dst, e))?;
+            map.insert(file_name, hashed_name);
+        }
+        Ok(())
+    }
+
+    walk(public_dir, assets_dir, &mut map)?;
+    Ok(map)
+}
+
+/// Post-process all `.html` files under `dist_dir` and all `.css` files under
+/// `dist_dir/assets/`, replacing `/assets/<original>` references with
+/// `/assets/<hashed>`.
+fn rewrite_asset_refs(dist_dir: &Path, map: &HashMap<String, String>) {
+    // Rewrite HTML files (any depth)
+    rewrite_in_dir(dist_dir, "html", map, false);
+    // Rewrite CSS files in dist/assets/
+    let assets_dir = dist_dir.join("assets");
+    if assets_dir.is_dir() {
+        rewrite_in_dir(&assets_dir, "css", map, true);
+    }
+}
+
+fn rewrite_in_dir(dir: &Path, ext: &str, map: &HashMap<String, String>, css_mode: bool) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() && !css_mode {
+                rewrite_in_dir(&p, ext, map, false);
+            } else if p.extension().and_then(|e| e.to_str()) == Some(ext) {
+                if let Ok(content) = fs::read_to_string(&p) {
+                    let mut updated = content.clone();
+                    for (orig, hashed) in map {
+                        if css_mode {
+                            // In CSS: url("/assets/orig") and url('/assets/orig')
+                            let dq = format!(r#"url("/assets/{}")"#, orig);
+                            let dq_new = format!(r#"url("/assets/{}")"#, hashed);
+                            let sq = format!("url('/assets/{}')", orig);
+                            let sq_new = format!("url('/assets/{}')", hashed);
+                            updated = updated.replace(&dq, &dq_new);
+                            updated = updated.replace(&sq, &sq_new);
+                        } else {
+                            // In HTML: /assets/orig (bare path)
+                            let old_ref = format!("/assets/{}", orig);
+                            let new_ref = format!("/assets/{}", hashed);
+                            updated = updated.replace(&old_ref, &new_ref);
+                        }
+                    }
+                    if updated != content {
+                        let _ = fs::write(&p, updated);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path, minify: bool) -> Result<(), String> {

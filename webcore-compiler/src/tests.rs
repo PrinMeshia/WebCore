@@ -124,6 +124,7 @@ fn golden_scoped_css_emits_data_v_selector() {
             computed: vec![],
             mount_body: None,
             destroy_body: None,
+            http: None,
             view: vec![],
             style: vec![crate::ast::StyleItem::Rule(crate::ast::StyleRule {
                 selector: "button".into(),
@@ -1153,4 +1154,342 @@ page "home" { Toggle {} }
         res.handlers.iter().any(|h| h.expression.contains("event.target.checked")),
         "checked binding missing:\n{}", res.html
     );
+}
+
+// ── v1.3.0 features ───────────────────────────────────────────────────────────
+
+#[test]
+fn golden_http_block_generates_fetch() {
+    // `loading` and `error` are NOT declared in state — they should be auto-injected.
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Posts {
+    state {
+        posts: List = null
+    }
+    http {
+        get:  "/api/posts"
+        into: posts
+    }
+    view {
+        @if loading { p "Loading..." }
+        @if error   { p "Error: {error}" }
+        @for post in posts { li "{post.title}" }
+    }
+}
+page "home" { Posts {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+
+    // Auto-injection: `loading` and `error` should appear in the component state
+    let comp = doc.components.get("Posts").expect("Posts component");
+    assert!(
+        comp.state.iter().any(|v| v.name == "loading"),
+        "loading not auto-injected into state"
+    );
+    assert!(
+        comp.state.iter().any(|v| v.name == "error"),
+        "error not auto-injected into state"
+    );
+    let loading_var = comp.state.iter().find(|v| v.name == "loading").unwrap();
+    assert_eq!(loading_var.default_value.as_deref(), Some("true"));
+
+    let js = generate_runtime_js(&[], &doc);
+    // State initialisation: auto-injected vars get S.set() calls
+    assert!(js.contains("S.set('loading',true)"), "loading init missing:\n{}", js);
+    assert!(js.contains("S.set('error',\"\")"), "error init missing:\n{}", js);
+    // Fetch call
+    assert!(js.contains("fetch(\"/api/posts\")"), "fetch call missing:\n{}", js);
+    assert!(js.contains("S.set('posts'"), "S.set for posts missing:\n{}", js);
+    assert!(js.contains("S.set('loading',false)"), "loading=false missing:\n{}", js);
+    assert!(js.contains("__r.json()"), "json() call missing:\n{}", js);
+}
+
+#[test]
+fn golden_head_block_generates_meta() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "article" {
+    head {
+        title "Mon Article"
+        meta description="Article de blog WebCore"
+        meta og:title="Mon Article"
+    }
+    h1 "Hello"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    // Verify head block was parsed
+    let page = doc.pages.get("article").expect("page exists");
+    let head = page.head.as_ref().expect("head block present");
+    assert_eq!(head.title.as_deref(), Some("Mon Article"), "title mismatch");
+    assert_eq!(head.metas.len(), 2, "expected 2 meta tags");
+    assert!(
+        head.metas.iter().any(|(k, v)| k == "description" && v == "Article de blog WebCore"),
+        "description meta missing: {:?}", head.metas
+    );
+    assert!(
+        head.metas.iter().any(|(k, v)| k == "og:title" && v == "Mon Article"),
+        "og:title meta missing: {:?}", head.metas
+    );
+}
+
+#[test]
+fn golden_query_params_generates_proxy() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "search" {
+    p "{$query.search}"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let js = generate_runtime_js(&[], &doc);
+    assert!(
+        js.contains("QUERY_PARAMS"),
+        "QUERY_PARAMS proxy missing:\n{}", js
+    );
+    assert!(
+        js.contains("URLSearchParams"),
+        "URLSearchParams missing:\n{}", js
+    );
+    // evalCond should replace $query.xxx with QUERY_PARAMS['xxx']
+    assert!(
+        js.contains("$query.") || js.contains("QUERY_PARAMS"),
+        "query param support missing:\n{}", js
+    );
+}
+
+#[test]
+fn golden_class_binding_emits_data_attr() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Toggle {
+    state { isActive: Boolean = false }
+    view {
+        div class:active={isActive} { "content" }
+    }
+}
+page "home" { Toggle {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // class:active={isActive} → data-webcore-class-active="isActive"
+    assert!(
+        res.html.contains("data-webcore-class-active=\"isActive\""),
+        "data-webcore-class-active attribute missing:\n{}", res.html
+    );
+    // Should NOT emit the raw class: attribute
+    assert!(
+        !res.html.contains("class:active"),
+        "raw class:active should not appear in output:\n{}", res.html
+    );
+    // JS should contain bindClassBindings
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("bindClassBindings"),
+        "bindClassBindings missing in JS:\n{}", js
+    );
+}
+
+#[test]
+fn golden_debounce_wraps_handler() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Search {
+    state { search: String = "" }
+    view {
+        input on:input|debounce={search = event.target.value}
+    }
+}
+page "home" { Search {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // Should have a handler registered with debounce
+    assert!(
+        res.handlers.iter().any(|h| h.event_type.contains("debounce")),
+        "no debounce handler registered: {:?}", res.handlers
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    // JS should contain setTimeout for debounce wrapping
+    assert!(
+        js.contains("setTimeout"),
+        "setTimeout missing — debounce not applied:\n{}", js
+    );
+    assert!(
+        js.contains("clearTimeout"),
+        "clearTimeout missing — debounce not applied:\n{}", js
+    );
+    // Should set state via S.set
+    assert!(
+        js.contains("S.set('search'"),
+        "state update missing in debounce handler:\n{}", js
+    );
+}
+
+// ── v1.4.0 features ───────────────────────────────────────────────────────────
+
+#[test]
+fn golden_ref_attr_emits_data_ref() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Search {
+    on:mount { refs.inp.focus(); }
+    view { input ref:searchInput=true }
+}
+page "home" { Search {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-ref=\"searchInput\""),
+        "data-webcore-ref missing:\n{}", res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("const refs={}"),
+        "refs object missing in JS:\n{}", js
+    );
+    assert!(
+        js.contains("data-webcore-ref"),
+        "refs population code missing in JS:\n{}", js
+    );
+}
+
+#[test]
+fn golden_style_binding_emits_data_style() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Styled {
+    state { color: String = "red" }
+    view { div style:color={color} { "Text" } }
+}
+page "home" { Styled {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-style-color=\"color\""),
+        "data-webcore-style-color missing:\n{}", res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("data-webcore-style-"),
+        "style binding JS code missing:\n{}", js
+    );
+}
+
+#[test]
+fn golden_slot_default_content_used_when_unfilled() {
+    let src = r#"
+app DashApp { layout: DashLayout }
+layout DashLayout {
+    aside { slot sidebar { p "Default nav" } }
+    main  { slot content }
+}
+component App { view { p "Main" } }
+page "dash" { App {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let opts_dash = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+    };
+    let res = generate_html(&doc, "dash", &opts_dash).expect("codegen");
+    assert!(
+        res.html.contains("Default nav"),
+        "slot default content missing:\n{}", res.html
+    );
+}
+
+#[test]
+fn golden_transition_attr_emits_data_transition() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Modal {
+    state { open: Boolean = false }
+    view {
+        button on:click={open = true} { "Open" }
+        @if open {
+            div webc:transition="fade" { "Modal content" }
+        }
+    }
+}
+page "home" { Modal {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-transition=\"fade\""),
+        "data-webcore-transition missing:\n{}", res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("webc-fade-enter"),
+        "transition CSS classes missing in JS:\n{}", js
+    );
+}
+
+// ── v1.5.0 features ───────────────────────────────────────────────────────────
+
+#[test]
+fn golden_webc_img_injects_lazy_decoding() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    img webc:img=true src="/photo.png" alt="Photo"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("loading=\"lazy\""),
+        "loading=lazy missing:\n{}", res.html
+    );
+    assert!(
+        res.html.contains("decoding=\"async\""),
+        "decoding=async missing:\n{}", res.html
+    );
+    // webc:img should not appear as a real attribute in the output
+    assert!(
+        !res.html.contains("webc:img"),
+        "webc:img directive leaked into output:\n{}", res.html
+    );
+}
+
+#[test]
+fn golden_webc_img_missing_alt_does_not_crash() {
+    // img with webc:img but no alt — should build without panic,
+    // a warning is emitted to stderr but HTML is still generated.
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    img webc:img=true src="/photo.png"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // The img tag must still be present in the output
+    assert!(
+        res.html.contains("<img"),
+        "img tag missing from output:\n{}", res.html
+    );
+    assert!(
+        res.html.contains("loading=\"lazy\""),
+        "loading=lazy missing in no-alt case:\n{}", res.html
+    );
+}
+
+#[test]
+fn unit_fnv1a_hash_stable() {
+    // FNV-1a of b"hello" must produce a known stable 8-char hex string.
+    // Manually computed: FNV-1a 32-bit of [104,101,108,108,111]
+    //   2166136261 ^ 104 = 2166136225  * 16777619 = ...
+    let hash = crate::fnv1a_hash(b"hello");
+    assert_eq!(hash.len(), 8, "hash must be 8 hex chars");
+    // Verify it's consistent (same input → same output)
+    assert_eq!(hash, crate::fnv1a_hash(b"hello"), "hash must be deterministic");
+    // Different inputs must differ
+    assert_ne!(hash, crate::fnv1a_hash(b"world"), "hash must depend on content");
 }

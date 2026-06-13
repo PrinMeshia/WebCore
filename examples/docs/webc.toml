@@ -1,4 +1,4 @@
 [app]
 title = "WebCore Docs"
 lang  = "en"
-mode  = "dev"
+mode  = "prod"

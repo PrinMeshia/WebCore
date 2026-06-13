@@ -403,22 +403,48 @@ struct RuntimeFeatures {
     has_validation: bool,
     has_navigation: bool,
     has_param_routes: bool,
+    /// Any component has an `http { }` block
+    has_http: bool,
+    /// Any expression contains `$query.`
+    has_query_params: bool,
+    /// Any element attribute starts with `class:`
+    has_class_binding: bool,
+    /// Any event attribute name contains `|debounce`
+    has_debounce: bool,
+    /// Any element attribute starts with `ref:`
+    has_refs: bool,
+    /// Any element attribute starts with `style:`
+    has_style_binding: bool,
+    /// Any element has a `webc:transition` attribute
+    has_transition: bool,
 }
 
 fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
     for elem in elements {
         match elem {
-            Element::Interpolation(..) => f.has_interpolation = true,
-            Element::For { content, .. } => {
+            Element::Interpolation(expr, _) => {
+                f.has_interpolation = true;
+                if expr.contains("$query.") {
+                    f.has_query_params = true;
+                }
+            }
+            Element::For { content, iterable, .. } => {
                 f.has_for = true;
+                if iterable.contains("$query.") {
+                    f.has_query_params = true;
+                }
                 detect_features_in_elements(content, f);
             }
             Element::If {
+                condition,
                 then_branch,
                 else_branch,
                 ..
             } => {
                 f.has_if = true;
+                if condition.contains("$query.") {
+                    f.has_query_params = true;
+                }
                 detect_features_in_elements(then_branch, f);
                 if let Some(eb) = else_branch {
                     detect_features_in_elements(eb, f);
@@ -437,13 +463,44 @@ fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
                     if attr.name.starts_with("validate:") {
                         f.has_validation = true;
                     }
-                    if let AttributeValue::Expression(expr) = &attr.value {
-                        if !attr.name.starts_with("on:") {
-                            f.has_dynamic_attrs = true;
+                    if attr.name.starts_with("class:") {
+                        f.has_class_binding = true;
+                    }
+                    if attr.name.contains("|debounce") {
+                        f.has_debounce = true;
+                    }
+                    if attr.name.starts_with("ref:") {
+                        f.has_refs = true;
+                    }
+                    if attr.name.starts_with("style:") {
+                        f.has_style_binding = true;
+                    }
+                    if attr.name == "webc:transition" {
+                        f.has_transition = true;
+                    }
+                    match &attr.value {
+                        AttributeValue::Expression(expr) => {
+                            if !attr.name.starts_with("on:")
+                                && !attr.name.starts_with("class:")
+                                && !attr.name.starts_with("ref:")
+                                && !attr.name.starts_with("style:")
+                                && attr.name != "webc:transition"
+                            {
+                                f.has_dynamic_attrs = true;
+                            }
+                            if expr.contains("webcore_navigate(") {
+                                f.has_navigation = true;
+                            }
+                            if expr.contains("$query.") {
+                                f.has_query_params = true;
+                            }
                         }
-                        if expr.contains("webcore_navigate(") {
-                            f.has_navigation = true;
+                        AttributeValue::String(s) => {
+                            if s.contains("$query.") {
+                                f.has_query_params = true;
+                            }
                         }
+                        _ => {}
                     }
                 }
                 detect_features_in_elements(content, f);
@@ -458,7 +515,12 @@ fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
             Element::SlotContent { content, .. } => {
                 detect_features_in_elements(content, f);
             }
-            Element::Text(..) | Element::Slot(..) => {}
+            Element::Text(t, _) => {
+                if t.contains("$query.") {
+                    f.has_query_params = true;
+                }
+            }
+            Element::Slot(..) => {}
         }
     }
 }
@@ -477,6 +539,9 @@ fn detect_features(document: &WebCoreDocument) -> RuntimeFeatures {
         detect_features_in_elements(&page.content, &mut f);
     }
     for component in document.components.values() {
+        if component.http.is_some() {
+            f.has_http = true;
+        }
         detect_features_in_elements(&component.view, &mut f);
     }
     for layout in document.layouts.values() {
@@ -497,8 +562,11 @@ fn rebind_seq(f: &RuntimeFeatures, needs_bind: bool) -> String {
     if f.has_for {
         parts.push("bindFor()");
     }
-    if f.has_dynamic_attrs {
+    if f.has_dynamic_attrs || f.has_style_binding {
         parts.push("bindAttrs()");
+    }
+    if f.has_class_binding {
+        parts.push("bindClassBindings()");
     }
     if f.has_validation {
         parts.push("bindValidation()");
@@ -609,7 +677,8 @@ pub fn generate_runtime_js_with_vars(
     let needs_eval_cond = features.has_interpolation
         || features.has_if
         || features.has_for
-        || features.has_dynamic_attrs;
+        || features.has_dynamic_attrs
+        || features.has_style_binding;
     // VARS/STORE_VARS needed whenever any reactive listener subscribes to them
     let needs_vars = needs_eval_cond || needs_bind;
 
@@ -629,7 +698,11 @@ pub fn generate_runtime_js_with_vars(
     js.push_str("get(k){return this.#d.get(k)}\n");
     js.push_str("on(k,f){(this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f)}}\n");
     js.push_str("const S=new State();\n");
-    js.push_str("const STORE=new State();\n\n");
+    js.push_str("const STORE=new State();\n");
+    if features.has_refs {
+        js.push_str("const refs={};\n");
+    }
+    js.push('\n');
 
     // ── State initialisation ─────────────────────────────────────────────────
     for component in document.components.values() {
@@ -724,6 +797,11 @@ pub fn generate_runtime_js_with_vars(
         ));
     }
 
+    // ── QUERY_PARAMS Proxy (tree-shaken: only when $query. used) ─────────────
+    if features.has_query_params {
+        js.push_str("const QUERY_PARAMS=new Proxy({},{get:(_,k)=>new URLSearchParams(location.search).get(String(k))??\"\"});\n");
+    }
+
     // ── evalCond (tree-shaken away when unused) ───────────────────────────────
     if needs_eval_cond {
         // Fast-path lookups for simple identifiers avoid new Function entirely, which
@@ -735,8 +813,18 @@ pub fn generate_runtime_js_with_vars(
         } else {
             ""
         };
+        let query_fast_path = if features.has_query_params {
+            "const qp=_c.match(/^\\$query\\.([a-zA-Z_]\\w*)$/);if(qp)return QUERY_PARAMS[qp[1]];"
+        } else {
+            ""
+        };
         let route_replace = if features.has_param_routes {
             "e=e.replace(/\\$route\\.([a-zA-Z_]\\w*)/g,\"ROUTE_PARAMS['$1']\");"
+        } else {
+            ""
+        };
+        let query_replace = if features.has_query_params {
+            "e=e.replace(/\\$query\\.([a-zA-Z_]\\w*)/g,\"QUERY_PARAMS['$1']\");"
         } else {
             ""
         };
@@ -744,44 +832,87 @@ pub fn generate_runtime_js_with_vars(
         // them explicitly as Function parameters so that the dynamically-created
         // function body can resolve them even though Function() runs in global scope.
         let has_locales = !document.locales.is_empty();
-        let fn_call = match (features.has_param_routes, has_locales) {
-            (true,  true)  => "new Function('S','STORE','U','ROUTE_PARAMS','t','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS,t)",
-            (true,  false) => "new Function('S','STORE','U','ROUTE_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS)",
-            (false, true)  => "new Function('S','STORE','U','t','\"use strict\";return('+e+')')(S,STORE,U,t)",
-            (false, false) => "new Function('S','STORE','U','\"use strict\";return('+e+')')(S,STORE,U)",
+        let has_query = features.has_query_params;
+        let fn_call = match (features.has_param_routes, has_locales, has_query) {
+            (true,  true,  true)  => "new Function('S','STORE','U','ROUTE_PARAMS','QUERY_PARAMS','t','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS,QUERY_PARAMS,t)",
+            (true,  true,  false) => "new Function('S','STORE','U','ROUTE_PARAMS','t','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS,t)",
+            (true,  false, true)  => "new Function('S','STORE','U','ROUTE_PARAMS','QUERY_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS,QUERY_PARAMS)",
+            (true,  false, false) => "new Function('S','STORE','U','ROUTE_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,ROUTE_PARAMS)",
+            (false, true,  true)  => "new Function('S','STORE','U','QUERY_PARAMS','t','\"use strict\";return('+e+')')(S,STORE,U,QUERY_PARAMS,t)",
+            (false, true,  false) => "new Function('S','STORE','U','t','\"use strict\";return('+e+')')(S,STORE,U,t)",
+            (false, false, true)  => "new Function('S','STORE','U','QUERY_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,QUERY_PARAMS)",
+            (false, false, false) => "new Function('S','STORE','U','\"use strict\";return('+e+')')(S,STORE,U)",
         };
         // Fast path: simple state-var → S.get(name); $store.x → STORE.get(x);
-        // optional $route.x → ROUTE_PARAMS[x].  Complex expressions fall through
-        // to new Function.  On error return undefined (not false) so interpolation
-        // spans show '' rather than the string "false".
+        // optional $route.x → ROUTE_PARAMS[x]; optional $query.x → QUERY_PARAMS[x].
+        // Complex expressions fall through to new Function.  On error return undefined
+        // (not false) so interpolation spans show '' rather than the string "false".
         // Note: local var named _c (not t) to avoid shadowing the i18n t() function.
         js.push_str(&format!(
-            "const evalCond=c=>{{const _c=c.trim();if(VARS.indexOf(_c)>=0)return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{}VARS.forEach(v=>{{e=e.replace(new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\")}});try{{return {}}}catch(_){{return undefined}}}};\n",
+            "const evalCond=c=>{{const _c=c.trim();if(VARS.indexOf(_c)>=0)return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{}{}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{}{}VARS.forEach(v=>{{e=e.replace(new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\")}});try{{return {}}}catch(_){{return undefined}}}};\n",
             route_fast_path,
+            query_fast_path,
             route_replace,
+            query_replace,
             fn_call
         ));
     }
 
     // ── Reactive binding functions (tree-shaken) ──────────────────────────────
     if features.has_if {
-        js.push_str(
-            "const bindIf=()=>{\n\
-             document.querySelectorAll('[data-webcore-if]').forEach(el=>{\n\
-               const cond=el.dataset.webcoreIf,\n\
-                     next=el.nextElementSibling,\n\
-                     hasElse=next?.dataset.webcoreElse===cond,\n\
-                     upd=()=>{\n\
-                       const v=evalCond(cond);\n\
-                       el.style.display=v?'':'none';\n\
-                       if(hasElse)next.style.display=v?'none':''\n\
-                     };\n\
-               upd();\n\
-               VARS.forEach(v=>S.on(v,upd));\n\
-               STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
-             })\n\
-             };\n"
-        );
+        // bindIf with optional webc:transition support
+        if features.has_transition {
+            js.push_str(
+                "const bindIf=()=>{\n\
+                 document.querySelectorAll('[data-webcore-if]').forEach(el=>{\n\
+                   const cond=el.dataset.webcoreIf,\n\
+                         next=el.nextElementSibling,\n\
+                         hasElse=next?.dataset.webcoreElse===cond,\n\
+                         upd=()=>{\n\
+                           const v=evalCond(cond),show=!!v;\n\
+                           const _tr=el.dataset.webcoreTransition;\n\
+                           if(_tr){\n\
+                             if(show){\n\
+                               el.style.display='';\n\
+                               el.classList.add('webc-'+_tr+'-enter');\n\
+                               requestAnimationFrame(()=>el.classList.replace('webc-'+_tr+'-enter','webc-'+_tr+'-enter-to'));\n\
+                             } else {\n\
+                               el.classList.add('webc-'+_tr+'-leave');\n\
+                               requestAnimationFrame(()=>{\n\
+                                 el.classList.replace('webc-'+_tr+'-leave','webc-'+_tr+'-leave-to');\n\
+                                 el.addEventListener('transitionend',()=>{el.style.display='none';el.classList.remove('webc-'+_tr+'-leave-to');},{once:true});\n\
+                               });\n\
+                             }\n\
+                           } else {\n\
+                             el.style.display=show?'':'none';\n\
+                           }\n\
+                           if(hasElse)next.style.display=show?'none':''\n\
+                         };\n\
+                   upd();\n\
+                   VARS.forEach(v=>S.on(v,upd));\n\
+                   STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+                 })\n\
+                 };\n"
+            );
+        } else {
+            js.push_str(
+                "const bindIf=()=>{\n\
+                 document.querySelectorAll('[data-webcore-if]').forEach(el=>{\n\
+                   const cond=el.dataset.webcoreIf,\n\
+                         next=el.nextElementSibling,\n\
+                         hasElse=next?.dataset.webcoreElse===cond,\n\
+                         upd=()=>{\n\
+                           const v=evalCond(cond);\n\
+                           el.style.display=v?'':'none';\n\
+                           if(hasElse)next.style.display=v?'none':''\n\
+                         };\n\
+                   upd();\n\
+                   VARS.forEach(v=>S.on(v,upd));\n\
+                   STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+                 })\n\
+                 };\n"
+            );
+        }
     }
     if features.has_for {
         // bindFor — renders @for loops; supports optional key-based DOM diffing when
@@ -792,21 +923,77 @@ pub fn generate_runtime_js_with_vars(
         js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{const items=state.get(itN)??[];if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};render();state.on(itN,render);STORE_VARS.forEach(v=>STORE.on(v,render))});};\n");
     }
     if features.has_dynamic_attrs {
+        if features.has_style_binding {
+            js.push_str(
+                "const bindAttrs=()=>{\n\
+                 document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
+                   [...el.attributes]\n\
+                     .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
+                     .forEach(a=>{\n\
+                       const name=a.name.slice(18),expr=a.value,\n\
+                             upd=()=>{\n\
+                               const val=String(evalCond(expr)??'');\n\
+                               name in el?el[name]=val:el.setAttribute(name,val)\n\
+                             };\n\
+                       upd();\n\
+                       VARS.forEach(v=>S.on(v,upd));\n\
+                       STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+                     });\n\
+                   for(const a of el.attributes){if(a.name.startsWith('data-webcore-style-')){const p=a.name.slice('data-webcore-style-'.length);const styleUpd=()=>el.style.setProperty(p,String(evalCond(a.value)??''));styleUpd();VARS.forEach(v=>S.on(v,styleUpd));STORE_VARS.forEach(v=>STORE.on(v,styleUpd));}}\n\
+                 })\n\
+                 };\n"
+            );
+        } else {
+            js.push_str(
+                "const bindAttrs=()=>{\n\
+                 document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
+                   [...el.attributes]\n\
+                     .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
+                     .forEach(a=>{\n\
+                       const name=a.name.slice(18),expr=a.value,\n\
+                             upd=()=>{\n\
+                               const val=String(evalCond(expr)??'');\n\
+                               name in el?el[name]=val:el.setAttribute(name,val)\n\
+                             };\n\
+                       upd();\n\
+                       VARS.forEach(v=>S.on(v,upd));\n\
+                       STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
+                     })\n\
+                 })\n\
+                 };\n"
+            );
+        }
+    } else if features.has_style_binding {
+        // Only style bindings, no regular dynamic attrs — emit a simpler bindAttrs
         js.push_str(
-            "const bindAttrs=()=>{\n\
-             document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
-               [...el.attributes]\n\
-                 .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
-                 .forEach(a=>{\n\
-                   const name=a.name.slice(18),expr=a.value,\n\
-                         upd=()=>{\n\
-                           const val=String(evalCond(expr)??'');\n\
-                           name in el?el[name]=val:el.setAttribute(name,val)\n\
-                         };\n\
+            "const bindAttrs=()=>{\
+document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\
+for(const a of Array.from(el.attributes)){\
+if(a.name.startsWith('data-webcore-style-')){\
+const p=a.name.slice('data-webcore-style-'.length);\
+const styleUpd=()=>el.style.setProperty(p,String(evalCond(a.value)??''));\
+styleUpd();\
+VARS.forEach(v=>S.on(v,styleUpd));\
+STORE_VARS.forEach(v=>STORE.on(v,styleUpd));\
+}\
+}\
+})\
+};\n"
+        );
+    }
+    if features.has_class_binding {
+        js.push_str(
+            "const bindClassBindings=()=>{\n\
+             document.querySelectorAll('*').forEach(el=>{\n\
+               for(const attr of Array.from(el.attributes)){\n\
+                 if(attr.name.startsWith('data-webcore-class-')){\n\
+                   const cls=attr.name.slice(19),expr=attr.value,\n\
+                         upd=()=>el.classList.toggle(cls,!!evalCond(expr));\n\
                    upd();\n\
                    VARS.forEach(v=>S.on(v,upd));\n\
                    STORE_VARS.forEach(v=>STORE.on(v,upd))\n\
-                 })\n\
+                 }\n\
+               }\n\
              })\n\
              };\n"
         );
@@ -860,10 +1047,15 @@ pub fn generate_runtime_js_with_vars(
     js.push('\n');
 
     // ── Handlers ─────────────────────────────────────────────────────────────
+    // Debounce handlers are wired up in DOMContentLoaded; regular handlers go in H.
     js.push_str("const H={\n");
     let mut sorted_handlers: Vec<_> = unique_handlers.values().collect();
     sorted_handlers.sort_by(|a, b| a.id.cmp(&b.id));
-    for handler in sorted_handlers {
+    for handler in &sorted_handlers {
+        // Skip debounce handlers — they get wired up in DOMContentLoaded instead
+        if handler.event_type.contains("|debounce") {
+            continue;
+        }
         let compiled = compile_expression_full(&handler.expression, state_vars);
         js.push_str(&format!("{}(){{{}}},\n", handler.id, compiled));
     }
@@ -987,10 +1179,22 @@ pub fn generate_runtime_js_with_vars(
     } else {
         ""
     };
+    let transition_css_inject = if features.has_transition {
+        ";document.head.insertAdjacentHTML('beforeend','<style>.webc-fade-enter{opacity:0;transition:opacity 250ms ease}.webc-fade-enter-to{opacity:1}.webc-fade-leave{opacity:1;transition:opacity 250ms ease}.webc-fade-leave-to{opacity:0}.webc-slide-enter{transform:translateY(-6px);opacity:0;transition:transform 200ms ease,opacity 200ms ease}.webc-slide-enter-to{transform:none;opacity:1}.webc-slide-leave{transition:transform 200ms ease,opacity 200ms ease}.webc-slide-leave-to{transform:translateY(-6px);opacity:0}</style>')"
+    } else {
+        ""
+    };
+    let refs_populate = if features.has_refs {
+        ";document.querySelectorAll('[data-webcore-ref]').forEach(el=>{refs[el.dataset.webcoreRef]=el;})"
+    } else {
+        ""
+    };
     js.push_str(&format!(
-        "document.addEventListener('DOMContentLoaded',()=>{{{init}{rebinds}",
+        "document.addEventListener('DOMContentLoaded',()=>{{{init}{transition_css}{rebinds}{refs_populate}",
         init = init_route_params,
+        transition_css = transition_css_inject,
         rebinds = all_rebinds,
+        refs_populate = refs_populate,
     ));
     for body in &mount_bodies {
         js.push_str(&format!(";(()=>{{{}}})()", body.trim()));
@@ -1001,6 +1205,60 @@ pub fn generate_runtime_js_with_vars(
             ";document.addEventListener('{}',e=>{{{}}})",
             listener.event_name, compiled
         ));
+    }
+    // ── Debounce event listeners ──────────────────────────────────────────────
+    // Wire up debounce handlers: find the element by id and attach a debounced listener.
+    {
+        let mut dbt_idx = 0usize;
+        let debounce_handlers: Vec<_> = sorted_handlers
+            .iter()
+            .filter(|h| h.event_type.contains("|debounce"))
+            .collect();
+        for handler in debounce_handlers {
+            // event_type is like "input|debounce=300"
+            let (event_name, delay_ms) = if let Some(pipe_pos) = handler.event_type.find("|debounce") {
+                let base = &handler.event_type[..pipe_pos];
+                let after = &handler.event_type[pipe_pos + "|debounce".len()..];
+                let ms: u32 = if let Some(stripped) = after.strip_prefix('=') {
+                    stripped.parse().unwrap_or(300)
+                } else {
+                    300
+                };
+                (base, ms)
+            } else {
+                (handler.event_type.as_str(), 300u32)
+            };
+            let compiled = compile_expression_full(&handler.expression, state_vars);
+            dbt_idx += 1;
+            js.push_str(&format!(
+                ";(()=>{{const __el=document.getElementById('{}');if(__el){{let __dbt{};__el.addEventListener('{}',e=>{{clearTimeout(__dbt{});__dbt{}=setTimeout(()=>{{{};}}{},{})}})}}}})()",
+                handler.id,
+                dbt_idx,
+                event_name,
+                dbt_idx,
+                dbt_idx,
+                compiled,
+                if all_rebinds.is_empty() { "".to_string() } else { format!(";{}", all_rebinds) },
+                delay_ms
+            ));
+        }
+    }
+    // ── HTTP fetch blocks ─────────────────────────────────────────────────────
+    if features.has_http {
+        for component in document.components.values() {
+            if let Some(http) = &component.http {
+                let into_var = &http.into;
+                let url = &http.url;
+                let rb = if all_rebinds.is_empty() { "".to_string() } else { format!("{};", all_rebinds) };
+                js.push_str(&format!(
+                    ";(async()=>{{try{{const __r=await fetch(\"{}\");if(!__r.ok)throw new Error(__r.statusText);const __d=await __r.json();S.set('{}',__d);S.set('loading',false);{}}}catch(__e){{S.set('error',__e.message);S.set('loading',false);{}}}}})()",
+                    escape_js_str(url),
+                    escape_js_str(into_var),
+                    rb,
+                    rb,
+                ));
+            }
+        }
     }
     if has_destroy {
         js.push_str(";window.addEventListener('beforeunload',runDestroyHooks)");

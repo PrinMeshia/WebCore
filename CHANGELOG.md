@@ -5,7 +5,55 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.2.0] — 2026-06-05
+## [1.5.0]
+
+### Ajouts
+
+- **`webc:img` — images optimisées** — directive `img webc:img src="/hero.png" alt="Hero"` compilée en `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">` ; `loading="lazy"` et `decoding="async"` injectés automatiquement ; dimensions (`width`/`height`) lues dans `public/` à la compilation (prévient le layout shift / CLS) ; avertissement `warning[a11y]: <img> with webc:img is missing alt attribute` si `alt` est absent ; `webc:img` n'apparaît pas dans le HTML généré ; aucun JS émis — transformation purement compile-time ; nécessite le crate `imagesize`
+- **Fingerprinting des images** — chaque image dans `public/` reçoit un hash de contenu à `webc build` : `logo.png` → `logo.a3f9c1b2.png` ; extensions concernées : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif` ; algorithme : FNV-1a 32 bits sur les octets du fichier → 8 caractères hex ; toutes les références dans les `.html` et `.css` générés sont mises à jour automatiquement ; toujours actif (aucune configuration nécessaire) ; avantage : cache-busting parfait — le navigateur met les images en cache indéfiniment, un nouveau contenu produit un nouveau nom de fichier
+
+### Améliorations
+
+- 3 nouveaux tests (fingerprinting, `webc:img`, avertissement `alt`) — 92 tests au total
+
+---
+
+## [1.4.0]
+
+### Ajouts
+
+- **`ref:name=true`** — références DOM directes : `input ref:name=true` émet `data-webcore-ref="name"` sur l'élément ; `const refs={}` déclaré à la portée du bloc ; `refs['name'] = document.querySelector('[data-webcore-ref="name"]')` enregistré dans `DOMContentLoaded` — accès direct sans `querySelector` ; utile pour la gestion du focus et les manipulations DOM impératives ; tree-shaké via le flag `has_refs`
+- **`style:prop={expr}`** — styles inline dynamiques : `div style:color={myColor}` émet `data-webcore-style-color="myColor"` ; `bindAttrs()` appelle `el.style.setProperty('color', evalCond(myColor, ...))` ; les tirets dans le nom de propriété sont préservés (`style:background-color`) ; peut coexister avec `style="..."` statique et `class:` sur le même élément ; tree-shaké via le flag `has_style_binding`
+- **Contenu par défaut des slots** — les layouts peuvent définir un contenu de repli pour les slots nommés : `slot sidebar { p "Contenu par défaut" }` ; si la page remplit le slot → contenu de la page utilisé ; si la page ne remplit pas le slot → contenu par défaut du layout utilisé ; les slots non remplis étaient précédemment supprimés silencieusement ; le slot `content` par défaut continue d'utiliser le corps de la page
+- **`webc:transition="name"`** — animations CSS sur les blocs conditionnels : `div webc:transition="fade" { ... }` ou `div webc:transition="slide" { ... }` ; transitions intégrées : `fade` (opacité 0→1) et `slide` (translateY -10px→0) ; fonctionne avec les blocs `@if` : entrée avec animation d'entrée, sortie avec animation de sortie ; attribut HTML `data-webcore-transition="name"` ; le JS injecte le CSS et utilise `requestAnimationFrame` + `transitionend` ; tree-shaké via le flag `has_transition`
+
+### Améliorations
+
+- 4 nouveaux golden tests (`ref:`, `style:`, slot default content, `webc:transition`) — 89 tests au total
+
+---
+
+## [1.3.0]
+
+### Ajouts
+
+- **`http { }` — requêtes HTTP déclaratives** — bloc `http` dans les composants : `get: "/url"  into: varName` déclenche un `fetch()` JSON dans `DOMContentLoaded` ; `loading: Boolean = true` et `error: String = ""` sont **auto-injectés** par le parser (pas besoin de les déclarer dans `state`) et deviennent pleinement réactifs ; le bloc `try/catch` généré pose `S.set('loading', false)` dans les deux branches et `S.set('error', __e.message)` en cas d'échec
+- **`head { }` — personnalisation du `<head>` par page** — bloc `head` dans une déclaration `page` : `title "Mon titre"` génère `<title>` ; `meta name="..."` et `meta og:title="..."` génèrent les balises `<meta name="..." content="...">` correspondantes ; override le titre global défini dans `webc.toml`
+- **`$query.` — paramètres query string** — accès aux paramètres d'URL avec `{$query.search}`, `{$query.page}`, etc. ; tree-shaké : n'émet `const QUERY_PARAMS = new Proxy({}, {get:(_,k)=>new URLSearchParams(location.search).get(String(k))??""})` que si au moins une référence `$query.` est présente dans le document
+- **`class:name={expr}` — classes CSS conditionnelles** — `class:active={isOpen}` émet `data-webcore-class-active="isOpen"` ; `bindAttrs()` active/désactive la classe selon l'expression booléenne ; plusieurs `class:` peuvent coexister sur le même élément ; tree-shaké avec la logique class-toggle
+- **`on:event|debounce` — handlers debouncés** — `on:input|debounce={expr}` enveloppe le handler dans `setTimeout(..., 300)` — le handler ne se déclenche qu'après 300 ms d'inactivité ; fonctionne avec tout type d'événement (`on:input|debounce`, `on:keyup|debounce`, etc.)
+
+### Corrections
+
+- **Auto-injection `loading` / `error`** — les variables `loading: Boolean = true` et `error: String = ""` sont désormais injectées automatiquement par le parser lorsqu'un composant possède un bloc `http {}` ; les développeurs n'ont plus besoin de les déclarer manuellement dans `state`
+
+### Améliorations
+
+- 5 nouveaux golden tests (`http {}`, `head {}`, `$query.`, `class:`, `|debounce`) — 85 tests au total
+
+---
+
+## [1.2.0]
 
 ### Ajouts
 
@@ -24,7 +72,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.1] — 2026-06-04 · [GitHub Release](https://github.com/PrinMeshia/Webcore/releases/tag/v1.1.1)
+## [1.1.1] · [GitHub Release](https://github.com/PrinMeshia/Webcore/releases/tag/v1.1.1)
 
 ### Corrections
 
@@ -43,7 +91,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.0] — 2026-06-03
+## [1.1.0]
 
 ### Ajouts
 
@@ -74,7 +122,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.0] — 2026-06-02
+## [1.0.0]
 
 ### Ajouts
 
@@ -98,7 +146,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.9.0] — 2026-06-02
+## [0.9.0]
 
 ### Ajouts
 
@@ -113,7 +161,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.8.0] — 2026-06-02
+## [0.8.0]
 
 ### Ajouts
 
@@ -129,7 +177,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.7.0] — 2026-06-02
+## [0.7.0]
 
 ### Ajouts
 
@@ -137,7 +185,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.6.0] — 2026-06-02
+## [0.6.0]
 
 ### Ajouts
 
@@ -145,7 +193,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.5.0] — 2026-06-02
+## [0.5.0]
 
 ### Ajouts
 
@@ -153,7 +201,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0] — 2026-06-02
+## [0.4.0]
 
 ### Ajouts
 
@@ -167,7 +215,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0] — 2026-06-02
+## [0.3.0]
 
 ### Ajouts
 
@@ -188,7 +236,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] — 2026-06-01
+## [0.2.0]
 
 ### Ajouts
 

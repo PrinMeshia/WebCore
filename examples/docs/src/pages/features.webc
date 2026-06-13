@@ -11,7 +11,7 @@ page "features" {
         p {
             "The "
             code { "store \{ \}" }
-            " block declares reactive state shared across all components."
+            " block declares reactive state shared across all components and pages."
         }
         pre class="code-block" {
 "// app.webc
@@ -21,7 +21,7 @@ store \{
     active: Boolean = false
 \}
 
-// Any component -- prefix with $store.
+// Any component — prefix with $store.
 component Display \{
     view \{
         p \"Global count: \{$store.count\}\"
@@ -38,6 +38,16 @@ component Badge \{
         \}
     \}
 \}"
+        }
+        div class="callout-tip" {
+            strong { "Scoped reactivity: " }
+            "Store vars use the same "
+            code { "S.set() / S.get()" }
+            " machinery as component state. Any binding that reads "
+            code { "$store.x" }
+            " automatically re-renders when "
+            code { "$store.x" }
+            " changes — no subscription boilerplate."
         }
     }
 
@@ -68,9 +78,13 @@ component Badge \{
 \}"
         }
         p {
-            "Validation fires on blur and submit. "
+            "Validation fires on "
+            code { "blur" }
+            " and "
+            code { "submit" }
+            ". "
             code { "@error" }
-            " blocks are hidden by default; shown on failure."
+            " blocks are hidden by default; shown when the corresponding field fails."
         }
         div class="table-wrap" {
             table {
@@ -88,6 +102,15 @@ component Badge \{
                 }
             }
         }
+        div class="callout" {
+            "Validation logic uses the browser's native "
+            code { "input.checkValidity()" }
+            " capture phase, so no custom regex engine is shipped. The "
+            code { "validateField()" }
+            " helper is tree-shaken out if no "
+            code { "validate:*" }
+            " attributes appear in the document."
+        }
     }
 
     section class="doc-section" {
@@ -97,7 +120,7 @@ component Badge \{
             "No flash of unstyled or wrong content on first paint."
         }
         pre class="code-block" {
-"// .webc source -- state: count = 0
+"// .webc source — state: count = 0
 p \"Counter: \{count\}\"
 @if count > 0 \{ p \"Positive\" \} @else \{ p \"Zero\" \}
 
@@ -106,16 +129,24 @@ p \"Counter: \{count\}\"
 <div data-webcore-if=\"count > 0\" style=\"display:none\">...</div>
 <div data-webcore-else=\"count > 0\" style=\"display:block\">...</div>"
         }
+        div class="callout-tip" {
+            strong { "Zero JS on first paint: " }
+            "The server sends fully populated HTML. The runtime attaches to existing DOM nodes via "
+            code { "data-webcore-*" }
+            " attributes rather than replacing them, so the initial render is instant and crawlable."
+        }
     }
 
     section class="doc-section" {
         h2 { "Internationalisation (i18n)" }
         p {
-            "Place .toml files in "
+            "Place "
+            code { ".toml" }
+            " files in "
             code { "locales/" }
             ". Use "
             code { "t(\"key\")" }
-            " in views. Switch with "
+            " in views. Switch locale at runtime with "
             code { "setLocale(code)" }
             "."
         }
@@ -137,7 +168,10 @@ button on:click=\{setLocale(\"en\")\} \{ \"EN\" \}"
     }
 
     section class="doc-section" {
-        h2 { "i18n: parameters and pluralization (v1.1.0)" }
+        h2 {
+            "i18n: parameters and pluralization "
+            span class="version-tag" { "v1.1.0" }
+        }
         p {
             "Pass a second argument to "
             code { "t()" }
@@ -148,7 +182,6 @@ button on:click=\{setLocale(\"en\")\} \{ \"EN\" \}"
 items_one   = \"{{count}} item\"
 items_other = \"{{count}} items\"
 greeting    = \"Hello, {{0}}!\"
-score       = \"Your score: {{0}} / {{1}}\"
 
 // locales/fr.toml
 items_one   = \"{{count}} element\"
@@ -156,12 +189,12 @@ items_other = \"{{count}} elements\"
 greeting    = \"Bonjour, {{0}} !\""
         }
         pre class="code-block" {
-"// Pluralization -- uses _one or _other key
-p \"\{t(\"items\", 1)\}\"       // \"1 item\"
-p \"\{t(\"items\", count)\}\"   // \"3 items\" (reactive)
+"// Pluralization — picks _one or _other key
+p \"\{t(\"items\", 1)\}\"       // → \"1 item\"
+p \"\{t(\"items\", count)\}\"   // → \"3 items\" (reactive)
 
 // Positional substitution
-p \"\{t(\"greeting\", username)\}\"  // \"Hello, Alice!\""
+p \"\{t(\"greeting\", username)\}\"  // → \"Hello, Alice!\""
         }
         div class="table-wrap" {
             table {
@@ -183,7 +216,9 @@ p \"\{t(\"greeting\", username)\}\"  // \"Hello, Alice!\""
         p {
             "Place a Rust crate in "
             code { "wasm/" }
-            ". The compiler detects it, runs wasm-pack, and injects an async loader."
+            ". The compiler detects it, runs "
+            code { "wasm-pack" }
+            ", and injects an async loader — no manual wiring."
         }
         pre class="code-block" {
 "// wasm/src/lib.rs
@@ -200,76 +235,27 @@ component WasmDemo \{
     \}
 \}"
         }
-        p {
+        div class="callout" {
             code { "globalThis.wasm" }
-            " is filled asynchronously after load. A full rebind fires on success."
-        }
-    }
-
-    section class="doc-section" {
-        h2 { "Forms example (examples/forms/)" }
-        p {
-            "The "
-            code { "examples/forms/" }
-            " project demonstrates full form validation with two components."
-        }
-        pre class="code-block" {
-"// SignupForm -- username, email, password (pattern), website (optional)
-component SignupForm \{
-    state \{ submitted: Boolean = false; username: String = \"\" \}
-    view \{
-        @if submitted \{
-            div class=\"success-banner\" \{ p \"Welcome, \{username\}!\" \}
-        \} @else \{
-            form on:submit=\{submitted = true\} \{
-                input type=\"text\" name=\"username\"
-                      validate:required=\"Username is required\"
-                      validate:minlength=\"3,At least 3 characters\"
-                      on:input=\{username = event.target.value\}
-                @error \"username\" \{ span class=\"err\" \{ \} \}
-                input type=\"password\" name=\"password\"
-                      validate:pattern=\"^(?=.*[A-Z])(?=.*\\\\d).+$,Must contain uppercase and digit\"
-                @error \"password\" \{ span class=\"err\" \{ \} \}
-                button type=\"submit\" \{ \"Create account\" \}
-            \}
-        \}
-    \}
-\}
-
-// ContactForm -- textarea with char counter (computed state)
-component ContactForm \{
-    state \{ charCount: Number = 0 \}
-    computed \{ remaining = 500 - charCount; overLimit = remaining < 0 \}
-    view \{
-        textarea name=\"message\" on:input=\{charCount = event.target.value.length\}
-        @if overLimit \{
-            span class=\"over\" \{ \"\{remaining\} characters over limit\" \}
-        \} @else \{
-            span \{ \"\{remaining\} characters remaining\" \}
-        \}
-    \}
-\}"
-        }
-        p {
-            "Key patterns: "
-            code { "validate:pattern" }
-            " for regex constraints, "
-            code { "computed" }
-            " for derived counters, "
-            code { "on:input" }
-            " to track live values, and "
-            code { "@if submitted" }
-            " success banners."
+            " is populated asynchronously after the module loads. "
+            "A full "
+            code { "bind()" }
+            " call fires on success so any interpolation using "
+            code { "wasm.*" }
+            " reflects the initial state immediately. The WASM loader is tree-shaken out when no "
+            code { "wasm/" }
+            " directory is present."
         }
     }
 
     section class="doc-section" {
         h2 { "Runtime tree-shaking" }
         p {
-            "The compiler emits only the runtime functions actually used by the document."
+            "The compiler emits only the runtime functions actually used by the document. "
+            "Unused helpers are never written to the output bundle."
         }
         pre class="code-block" {
-"// Minimal bundle -- no @for, @if, validation, routing, or WASM
+"// Minimal bundle — no @for, @if, validation, routing, or WASM
 class State \{
   #d=new Map(); #l=new Map();
   set(k,v)\{ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) \}
@@ -278,25 +264,32 @@ class State \{
   on(k,f)\{ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) \}
 \}
 const S = new State();
-// bindIf, bindFor, bindAttrs, nav, validateField -- absent"
+// bindIf, bindFor, bindAttrs, nav, validateField — absent"
         }
-        div class="feature-table" {
+        div class="table-wrap" {
             table {
                 thead { tr {
-                    th { "Feature" }
-                    th { "Emitted when..." }
+                    th { "Function / constant" }
+                    th { "Emitted when…" }
                 } }
                 tbody {
-                    tr { td { code { "bindFor()" } } td { "At least one " code { "@for" } } }
-                    tr { td { code { "bindIf()" } } td { "At least one " code { "@if" } } }
-                    tr { td { code { "bindAttrs()" } } td { "At least one " code { "attr=\{expr\}" } } }
+                    tr { td { code { "bindFor()" } } td { "At least one " code { "@for" } " loop" } }
+                    tr { td { code { "bindIf()" } } td { "At least one " code { "@if" } " / " code { "@else" } } }
+                    tr { td { code { "bindAttrs()" } } td { "At least one " code { "attr=\{expr\}" } " dynamic attribute" } }
                     tr { td { code { "validateField()" } } td { "At least one " code { "validate:*" } " or " code { "@error" } } }
                     tr { td { code { "nav() + popstate" } } td { "Routes declared or " code { "webcore_navigate()" } " used" } }
-                    tr { td { code { "DESTROY_HOOKS" } } td { "At least one " code { "on:destroy \{\}" } } }
-                    tr { td { code { "COMPUTED + rebindComputed()" } } td { "At least one " code { "computed \{\}" } } }
-                    tr { td { "WASM loader" } td { code { "wasm/Cargo.toml" } " exists" } }
+                    tr { td { code { "DESTROY_HOOKS" } } td { "At least one " code { "on:destroy \{\}" } " block" } }
+                    tr { td { code { "COMPUTED + rebindComputed()" } } td { "At least one " code { "computed \{\}" } " block" } }
+                    tr { td { "WASM loader" } td { code { "wasm/Cargo.toml" } " present at build time" } }
                 }
             }
+        }
+        div class="callout-tip" {
+            strong { "How it works: " }
+            code { "detect_features()" }
+            " in "
+            code { "codegen_js.rs" }
+            " walks the AST once before code generation and sets boolean flags per feature. Each emitter checks its flag before writing — unused helpers are never serialised to the output file."
         }
     }
 }

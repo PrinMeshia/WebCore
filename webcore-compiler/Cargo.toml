@@ -1,19 +1,20 @@
 [package]
 name = "webcore-compiler"
-version = "1.2.0"
+version = "1.5.0"
 edition = "2021"
 license = "MIT"
 
 [dependencies]
-toml = "0.9.6"
+toml = "1.1.2+spec-1.1.0"
 serde = { version = "1.0", features = ["derive"] }
-lightningcss = "1.0.0-alpha.67"
+lightningcss = "1.0.0-alpha.71"
 notify = "8.2.0"
 tiny_http = "0.12"
 open = "5"
 qrcode = "0.14"
-image = { version = "0.24", default-features = false, features = ["png", "ico"] }
+image = { version = "0.25.9", default-features = false, features = ["png", "ico"] }
 pest = "2.7"
 pest_derive = "2.7"
 regex = "1.10"
 tungstenite = "0.26"
+imagesize = "0.12"
