@@ -1,24 +1,57 @@
 name: Release
 
-# Builds the `webc` binary for Linux, macOS (Intel + Apple Silicon) and
-# Windows whenever a version tag (e.g. `2.7.0`) is pushed, and attaches the
-# archives to a GitHub release. Can also be run manually (workflow_dispatch)
-# to test the packaging without publishing.
+# The release is created AND published by this workflow — never draft a
+# release in the GitHub UI (with immutable releases on, a UI-published release
+# is frozen before the build can attach its binaries). Two ways to trigger:
+#
+#   1. Push a version tag (recommended):  git tag 2.8.0 && git push origin 2.8.0
+#   2. Actions ▸ Release ▸ Run workflow, entering an existing tag.
+#
+# Pipeline: verify (tag == crate version) → build (4 targets) + vsix →
+# release (create a DRAFT, attach every artifact, then publish — draft-first
+# is required by GitHub's immutable releases).
 
 on:
   push:
     tags: ["[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to release (e.g. 2.8.0)"
+        required: true
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  # The version being released: the dispatch input, or the pushed tag.
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # Git ref to check out so we build exactly the tagged commit.
+  RELEASE_REF: ${{ github.event.inputs.tag || github.ref }}
 
 jobs:
+  verify:
+    name: verify tag ↔ crate version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Tag must match webcore-compiler/Cargo.toml version
+        run: |
+          CRATE=$(grep -m1 '^version = ' webcore-compiler/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          if [ "$RELEASE_TAG" != "$CRATE" ]; then
+            echo "::error::Tag '$RELEASE_TAG' does not match crate version '$CRATE'" \
+                 "(webcore-compiler/Cargo.toml). Bump the version, commit, then re-tag."
+            exit 1
+          fi
+          echo "Tag '$RELEASE_TAG' matches crate version. Proceeding."
+
   build:
     name: build (${{ matrix.target }})
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -37,6 +70,8 @@ jobs:
         working-directory: webcore-compiler
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Install Rust toolchain
         run: |
@@ -78,9 +113,12 @@ jobs:
 
   vsix:
     name: package VS Code extension
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Package .vsix
         working-directory: editors/vscode
@@ -94,8 +132,7 @@ jobs:
 
   release:
     name: publish release
-    needs: [build, vsix]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [verify, build, vsix]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -109,22 +146,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
         run: |
           # Immutable releases reject asset uploads once a release is published.
           # Create the release as a *draft* (still mutable), attach every
           # artifact, then flip it to published — the canonical safe flow.
-          if gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null | grep -q true; then
+          if gh release view "$RELEASE_TAG" --json isDraft -q .isDraft 2>/dev/null | grep -q true; then
             # Leftover draft from a previous failed run: reuse and refresh assets.
-            gh release upload "$TAG" artifacts/* --clobber
-          elif gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::A published release for $TAG already exists. Immutable" \
-                 "releases can't receive new assets — delete that release and re-run."
+            gh release upload "$RELEASE_TAG" artifacts/* --clobber
+          elif gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::A published release for $RELEASE_TAG already exists." \
+                 "Immutable releases can't receive new assets — delete that release and re-run."
             exit 1
           else
-            gh release create "$TAG" artifacts/* \
-              --title "$TAG" \
+            gh release create "$RELEASE_TAG" artifacts/* \
+              --title "$RELEASE_TAG" \
               --generate-notes \
               --draft
           fi
-          gh release edit "$TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false
