@@ -1,0 +1,1 @@
+component Test { view { h1 "Test" } }

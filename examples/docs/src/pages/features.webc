@@ -2,7 +2,7 @@ page "features" {
     div class="page-header" {
         h1 { "Features" }
         p class="page-sub" {
-            "Store · Validation · SSG · i18n · WASM · Tree-shaking · Routes · Forms"
+            "Store · Validation · SSG · i18n · WASM · Tree-shaking"
         }
     }
 
@@ -288,7 +288,7 @@ const S = new State();
             strong { "How it works: " }
             code { "detect_features()" }
             " in "
-            code { "codegen_js.rs" }
+            code { "codegen/js/" }
             " walks the AST once before code generation and sets boolean flags per feature. Each emitter checks its flag before writing — unused helpers are never serialised to the output file."
         }
     }

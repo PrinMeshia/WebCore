@@ -1,7 +1,107 @@
 component DocsShell {
     on:mount {
+        // ── Announcement bar ─────────────────────────────────────────────────
+        const bar = document.querySelector('.announcement-bar');
+        const closeBtn = bar && bar.querySelector('.announcement-close');
+        if (bar && sessionStorage.getItem('ann-dismissed')) bar.style.display = 'none';
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                bar.style.display = 'none';
+                sessionStorage.setItem('ann-dismissed', '1');
+            });
+        }
+
+        // ── Scroll progress bar ───────────────────────────────────────────────
+        const progress = document.querySelector('.scroll-progress');
+        if (progress) {
+            const updateProgress = () => {
+                const total = document.body.scrollHeight - window.innerHeight;
+                const pct = total > 0 ? (window.scrollY / total) * 100 : 0;
+                progress.style.width = pct + '%';
+            };
+            window.addEventListener('scroll', updateProgress, { passive: true });
+            updateProgress();
+        }
+
+        // ── Mobile nav toggle ─────────────────────────────────────────────────
+        const mobileToggle = document.querySelector('.nav-mobile-toggle');
+        const siteNav = document.querySelector('.site-nav');
+        if (mobileToggle && siteNav) {
+            mobileToggle.addEventListener('click', () => {
+                siteNav.classList.toggle('mobile-open');
+            });
+        }
+
+        // ── Sidebar navigation ────────────────────────────────────────────────
+        const NAV_PAGES = [
+            { href: '/', icon: '🏠', label: 'Home' },
+            { href: '/syntax', icon: '📖', label: 'Syntax' },
+            { href: '/components', icon: '🧩', label: 'Components' },
+            { href: '/features', icon: '⚡', label: 'Features' },
+            { href: '/examples', icon: '🎯', label: 'Examples' }
+        ];
+
+        const sidebar = document.querySelector('.site-sidebar');
+        const body = document.querySelector('.site-body');
+
+        const buildSidebar = () => {
+            if (!sidebar) return;
+            const path = window.location.pathname;
+            const isHome = path === '/';
+            if (body) body.classList.toggle('has-sidebar', !isHome);
+            if (isHome) { sidebar.innerHTML = ''; return; }
+            const ul = document.createElement('ul');
+            ul.className = 'sidebar-nav';
+            NAV_PAGES.forEach(({ href, icon, label }) => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = href;
+                a.className = 'sidebar-link' + (path === href || (href !== '/' && path.startsWith(href)) ? ' active' : '');
+                a.innerHTML = `<span class="sidebar-icon">${icon}</span><span>${label}</span>`;
+                a.addEventListener('click', e => { e.preventDefault(); webcore_navigate(href); });
+                li.appendChild(a);
+                ul.appendChild(li);
+            });
+            // Section headings (TOC)
+            const headings = document.querySelectorAll('.doc-section h2');
+            if (headings.length > 0) {
+                const divider = document.createElement('div');
+                divider.className = 'sidebar-divider';
+                divider.textContent = 'On this page';
+                ul.appendChild(divider);
+                headings.forEach(h2 => {
+                    const id = h2.id || h2.textContent.trim().toLowerCase()
+                        .replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-').replace(/-+$/, '');
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '#' + id;
+                    a.className = 'sidebar-toc-link';
+                    a.textContent = h2.textContent.replace(/\s*#$/, '').trim();
+                    li.appendChild(a);
+                    ul.appendChild(li);
+                });
+                // Highlight active TOC item on scroll
+                const observer = new IntersectionObserver(entries => {
+                    entries.forEach(e => {
+                        if (e.isIntersecting) {
+                            document.querySelectorAll('.sidebar-toc-link').forEach(a => a.classList.remove('toc-active'));
+                            const id = e.target.closest('.doc-section')?.querySelector('h2')?.id;
+                            if (id) {
+                                const link = ul.querySelector(`.sidebar-toc-link[href="#${id}"]`);
+                                if (link) link.classList.add('toc-active');
+                            }
+                        }
+                    });
+                }, { rootMargin: '-20% 0px -70% 0px' });
+                document.querySelectorAll('.doc-section').forEach(s => observer.observe(s));
+            }
+            sidebar.innerHTML = '';
+            sidebar.appendChild(ul);
+        };
+
+        // ── Shared enhancement function ───────────────────────────────────────
         window.__docsEnhance = () => {
-            // ── Active nav link based on current path ────────────────────────
+            // Active nav link
             const path = window.location.pathname;
             document.querySelectorAll('.site-nav a').forEach(a => {
                 a.classList.remove('active');
@@ -10,9 +110,10 @@ component DocsShell {
                     (href !== '/' && path.startsWith(href)))
                     a.classList.add('active');
             });
+            // Close mobile nav
+            if (siteNav) siteNav.classList.remove('mobile-open');
 
-            // ── Copy-to-clipboard on code blocks ─────────────────────────────
-            // data-copy-done prevents duplicate buttons after SPA navigation
+            // Copy buttons on code blocks
             document.querySelectorAll('.code-block:not([data-copy-done])').forEach(block => {
                 block.setAttribute('data-copy-done', '1');
                 const wrap = document.createElement('div');
@@ -20,6 +121,12 @@ component DocsShell {
                 block.parentNode.insertBefore(wrap, block);
                 const header = document.createElement('div');
                 header.className = 'code-header';
+                // Language label
+                const lang = block.getAttribute('data-lang') || 'webc';
+                const langSpan = document.createElement('span');
+                langSpan.className = 'code-lang-label';
+                langSpan.textContent = lang;
+                header.appendChild(langSpan);
                 const btn = document.createElement('button');
                 btn.className = 'copy-btn';
                 btn.textContent = 'Copy';
@@ -27,21 +134,15 @@ component DocsShell {
                     navigator.clipboard.writeText(block.textContent).then(() => {
                         btn.textContent = '✓ Copied';
                         btn.classList.add('copied');
-                        setTimeout(() => {
-                            btn.textContent = 'Copy';
-                            btn.classList.remove('copied');
-                        }, 2000);
-                    }).catch(() => {
-                        btn.textContent = 'Error';
-                        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-                    });
+                        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+                    }).catch(() => { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = 'Copy'; }, 2000); });
                 });
                 header.appendChild(btn);
                 wrap.appendChild(header);
                 wrap.appendChild(block);
             });
 
-            // ── Anchor links on section headings ─────────────────────────────
+            // Anchor links on section headings
             document.querySelectorAll('.doc-section h2:not([data-anchor-done])').forEach(h2 => {
                 h2.setAttribute('data-anchor-done', '1');
                 const id = h2.textContent.trim().toLowerCase()
@@ -55,7 +156,7 @@ component DocsShell {
                 h2.appendChild(a);
             });
 
-            // ── Prev / Next page navigation ───────────────────────────────────
+            // Prev / Next page navigation
             document.querySelectorAll('.page-nav-dynamic').forEach(el => el.remove());
             const ORDER = ['/', '/syntax', '/components', '/features', '/examples'];
             const LABELS = { '/': 'Home', '/syntax': 'Syntax', '/components': 'Components', '/features': 'Features', '/examples': 'Examples' };
@@ -74,12 +175,14 @@ component DocsShell {
                 const main = document.querySelector('.site-main');
                 if (main) main.appendChild(nav);
             }
+
+            // Rebuild sidebar
+            buildSidebar();
         };
 
-        // Run immediately after DOMContentLoaded
         window.__docsEnhance();
 
-        // Re-run after every SPA navigation (nav() replaces <main> inside .docs-shell)
+        // Re-run after every SPA navigation
         const shell = document.querySelector('.docs-shell');
         if (shell) {
             new MutationObserver(() => {
@@ -87,7 +190,7 @@ component DocsShell {
             }).observe(shell, { childList: true });
         }
 
-        // ── Scroll-to-top button ──────────────────────────────────────────────
+        // Scroll-to-top button
         const topBtn = document.createElement('button');
         topBtn.className = 'scroll-top';
         topBtn.textContent = '↑';

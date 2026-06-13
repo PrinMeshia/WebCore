@@ -5,35 +5,73 @@ component Counter {
     }
 
     view {
-        div {
-            p "Valeur : {count}"
-
-            div {
-                button on:click={count -= step} { "−" }
-                button on:click={count += step} { "+" }
+        div class="counter" {
+            p class="value" { "{count}" }
+            div class="controls" {
+                button class="btn" on:click={count = max(0, count - step)} { "−" }
+                p class="step-label" { "pas : {step}" }
+                button class="btn" on:click={count += step} { "+" }
             }
-
+            div class="controls" {
+                button class="btn" on:click={step = max(1, step - 1)} { "−" }
+                span class="step-label" { "step" }
+                button class="btn" on:click={step += 1} { "+" }
+            }
             @if count > 10 {
-                p "Grand nombre !"
+                p class="hint positive" { "Grand nombre !" }
             } @else {
-                p "Continuez..."
-            }
-
-            div {
-                p "Pas :"
-                button on:click={step = max(1, step - 1)} { "−" }
-                p "{step}"
-                button on:click={step += 1} { "+" }
+                p class="hint" { "Continuez..." }
             }
         }
     }
 
     style {
-        div    { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-        p      { font-size: 2rem; font-weight: bold; margin: 0; }
-        button { padding: 0.5rem 1.5rem; font-size: 1.2rem; cursor: pointer;
-                 border-radius: 8px; border: 2px solid #4F46E5; background: #4F46E5;
-                 color: white; }
-        button:hover { background: #4338CA; }
+        .counter {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            max-width: 320px;
+            margin: 0 auto;
+        }
+        .value {
+            font-size: 4rem;
+            font-weight: 900;
+            letter-spacing: -0.04em;
+            color: #F1F5F9;
+            font-variant-numeric: tabular-nums;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .btn {
+            width: 2.5rem;
+            height: 2.5rem;
+            font-size: 1.4rem;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #4F46E5;
+            background: #4F46E5;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.1s, background 0.15s;
+            &:hover { background: #4338CA; transform: scale(1.1); }
+            &:active { transform: scale(0.95); }
+        }
+        .step-label { color: #94A3B8; font-size: 0.85rem; }
+        .hint {
+            color: #94A3B8;
+            font-size: 0.85rem;
+            text-align: center;
+            &.positive { color: #10B981; }
+        }
     }
 }

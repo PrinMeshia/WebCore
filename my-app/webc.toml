@@ -1,0 +1,17 @@
+[app]
+title = "My WebCore App"
+lang = "fr"
+mode = "dev"
+
+[global]
+# scripts that the compiler will inject in the head (before) or before </body> (after)
+before = []
+after = []
+
+[build]
+target = "es_latest"
+language = "fr"
+
+[theme]
+primary_color = "#007acc"
+font_family = "Inter, sans-serif"

@@ -7,15 +7,16 @@
 //! The JS runtime (`bindIf`, `bind`) overwrites these values reactively after
 //! `DOMContentLoaded`, so SSG is fully compatible with the existing runtime.
 
-use crate::ast::WebCoreDocument;
+use crate::core::ast::WebCoreDocument;
 use regex::Regex;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 /// Collect the initial default value of every state/store variable.
 ///
 /// Store vars are inserted first; component-state vars use `entry().or_insert`
 /// so the first-seen value wins when multiple components declare the same name.
-pub fn build_initial_state(document: &WebCoreDocument) -> HashMap<String, String> {
+pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String, String> {
     let mut state: HashMap<String, String> = HashMap::new();
 
     for var in &document.store {
@@ -35,20 +36,9 @@ pub fn build_initial_state(document: &WebCoreDocument) -> HashMap<String, String
     state
 }
 
-/// Undo HTML entity encoding so we can evaluate the raw expression/condition.
-fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-}
+use crate::core::utils::{html_escape, html_unescape};
 
-fn html_escape_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
+
 
 /// Resolve a single token (variable name or numeric literal) to f64.
 fn resolve_number(token: &str, state: &HashMap<String, String>) -> Option<f64> {
@@ -94,7 +84,7 @@ fn eval_number_expr(expr: &str, state: &HashMap<String, String>) -> Option<f64> 
 ///
 /// The `cond` argument must already be HTML-unescaped.
 /// Returns `None` when the condition is too complex to evaluate statically.
-pub fn eval_cond_initial(cond: &str, state: &HashMap<String, String>) -> Option<bool> {
+pub(crate) fn eval_cond_initial(cond: &str, state: &HashMap<String, String>) -> Option<bool> {
     let cond = cond.trim();
 
     // Check multi-char operators before single-char ones to avoid mis-parsing.
@@ -128,7 +118,7 @@ pub fn eval_cond_initial(cond: &str, state: &HashMap<String, String>) -> Option<
 ///
 /// Handles: direct variable, string literal, simple arithmetic, `t("key")` calls.
 /// `locales` and `locale` are used for `t()` resolution; pass empty values if not applicable.
-pub fn eval_expr_with_locale(
+pub(crate) fn eval_expr_with_locale(
     expr: &str,
     state: &HashMap<String, String>,
     locales: &HashMap<String, HashMap<String, String>>,
@@ -155,7 +145,7 @@ pub fn eval_expr_with_locale(
         if n == n.floor() && n.abs() < 1e15 {
             return Some(format!("{}", n as i64));
         }
-        return Some(format!("{}", n));
+        return Some(format!("{n}"));
     }
 
     None
@@ -169,7 +159,7 @@ pub fn eval_expr_with_locale(
 /// 2. Add `style="display:block/none"` to `<div data-webcore-if="...">` and
 ///    `<div data-webcore-else="...">` so the correct branch is shown before JS
 ///    runs `bindIf()` at `DOMContentLoaded`.
-pub fn apply_ssg_with_locales(
+pub(crate) fn apply_ssg_with_locales(
     html: &str,
     state: &HashMap<String, String>,
     locales: &HashMap<String, HashMap<String, String>>,
@@ -189,7 +179,7 @@ pub fn apply_ssg_with_locales(
         let raw_expr = &cap[2]; // the raw (HTML-escaped) expression
         let expr = html_unescape(raw_expr);
         if let Some(val) = eval_expr_with_locale(&expr, state, locales, default_locale) {
-            out.push_str(&format!("{}>{}</span>", full_attr, html_escape_text(&val)));
+            write!(out, "{}>{}</span>", full_attr, html_escape(&val)).unwrap();
         } else {
             out.push_str(m.as_str());
         }
@@ -213,10 +203,7 @@ pub fn apply_ssg_with_locales(
             Some(false) => " style=\"display:none\"",
             None => "",
         };
-        out.push_str(&format!(
-            r#"<div data-webcore-if="{}"{}{}>"#,
-            raw_cond, rest_attrs, style
-        ));
+        write!(out, r#"<div data-webcore-if="{raw_cond}"{rest_attrs}{style}>"#).unwrap();
         last = m.end();
     }
     out.push_str(&result[last..]);
@@ -237,10 +224,7 @@ pub fn apply_ssg_with_locales(
             Some(false) => " style=\"display:block\"", // condition false → else shown
             None => "",
         };
-        out.push_str(&format!(
-            r#"<div data-webcore-else="{}"{}{}>"#,
-            raw_cond, rest_attrs, style
-        ));
+        write!(out, r#"<div data-webcore-else="{raw_cond}"{rest_attrs}{style}>"#).unwrap();
         last = m.end();
     }
     out.push_str(&result[last..]);

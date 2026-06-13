@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 1.5.0 — Référence complète de la syntaxe `.webc`
+> Version : 2.0.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -47,12 +47,16 @@
 32. [`webc:transition` — Animations CSS](#webctransition--animations-css)
 33. [`webc:img` — Images optimisées](#webcimg--images-optimisées)
 34. [Fingerprinting des images](#fingerprinting-des-images)
-35. [Limites actuelles (v1.5.0)](#limites-actuelles-v150)
+35. [Limites actuelles (v2.0.0)](#limites-actuelles-v200)
 36. [Nouveautés v1.1.1](#nouveautés-v111)
 37. [Nouveautés v1.2.0](#nouveautés-v120)
 38. [Nouveautés v1.3.0](#nouveautés-v130)
 39. [Nouveautés v1.4.0](#nouveautés-v140)
 40. [Nouveautés v1.5.0](#nouveautés-v150)
+41. [Nouveautés v2.0.0](#nouveautés-v200)
+42. [Signaux réactifs fins](#signaux-réactifs-fins)
+43. [CSS nesting](#css-nesting)
+44. [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
 
 ---
 
@@ -425,7 +429,6 @@ component Timer {
     on:mount {
         const id = setInterval(() => {
             S.set("elapsed", S.get("elapsed") + 1);
-            bind();
         }, 1000);
         window.__timerId = id;
     }
@@ -436,7 +439,7 @@ component Timer {
 ```
 
 - L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
-- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+- Depuis la v2.0, `S.set("varName", value)` met à jour le DOM **automatiquement** : les signaux à grain fin re-exécutent uniquement les effets (`$effect`) qui lisent cette variable. Aucun appel manuel à `bind()` n'est nécessaire (le rappeler ré-enregistrerait des effets en double).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
 - Le corps `on:mount { }` supporte les accolades imbriquées à **profondeur arbitraire** — les callbacks JS complexes (`setTimeout`, `setInterval`, `addEventListener` avec corps multi-ligne, objets littéraux) sont entièrement supportés.
 
@@ -451,7 +454,6 @@ component Timer {
     on:mount {
         window.__timerId = setInterval(() => {
             S.set("elapsed", S.get("elapsed") + 1);
-            bind();
         }, 1000);
     }
     on:destroy {
@@ -538,76 +540,6 @@ page "home" {
 
 Les événements sont dispatché sur `document` — ils sont **globaux**. Si plusieurs instances
 d'un composant émettent le même événement, tous les listeners le reçoivent.
-
----
-
-## Lifecycle hooks
-
-Les hooks de cycle de vie permettent d'exécuter du code JS brut à des moments précis
-du cycle de vie du composant.
-
-### `on:mount`
-
-S'exécute une fois dans `DOMContentLoaded`, après l'initialisation complète du runtime.
-Le corps est wrappé dans un IIFE pour isoler les variables locales.
-
-```webc
-component Timer {
-    state {
-        elapsed: Number = 0
-    }
-    on:mount {
-        const id = setInterval(() => {
-            S.set("elapsed", S.get("elapsed") + 1);
-            bind();
-        }, 1000);
-        window.__timerId = id;
-    }
-    view {
-        p "Temps écoulé : {elapsed}s"
-    }
-}
-```
-
-- L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
-- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
-- Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
-
-### `on:destroy`
-
-S'exécute **avant chaque navigation SPA** (`nav()`) et sur l'événement `window.beforeunload`
-(fermeture ou rechargement de l'onglet).
-
-```webc
-component Timer {
-    state { elapsed: Number = 0 }
-    on:mount {
-        window.__timerId = setInterval(() => {
-            S.set("elapsed", S.get("elapsed") + 1);
-            bind();
-        }, 1000);
-    }
-    on:destroy {
-        clearInterval(window.__timerId);
-    }
-    view {
-        p "Temps : {elapsed}s"
-    }
-}
-```
-
-**Utilisation typique :** nettoyage de timers, annulation de requêtes, désenregistrement de listeners.
-
-Le runtime génère :
-```js
-const DESTROY_HOOKS = [
-    () => { clearInterval(window.__timerId); }
-];
-function runDestroyHooks() { DESTROY_HOOKS.forEach(h => h()); }
-```
-
-
-`runDestroyHooks()` est appelé en tête de `nav()` et dans `window.addEventListener('beforeunload', ...)`.
 
 ---
 
@@ -1077,7 +1009,7 @@ Le runtime généré contient uniquement les fonctions **réellement utilisées*
 
 | Fonction / Constante | Émise si… | Description |
 |---|---|---|
-| `class State` | Toujours | État réactif avec `S.get`, `S.set`, `S.setQ`, `S.on` |
+| `class State` + `$effect()` | Toujours | Signaux réactifs à grain fin — `S.get` track la dépendance, `S.set` ne re-exécute que les effets concernés (voir [Signaux réactifs fins](#signaux-réactifs-fins)) |
 | `COMPUTED` + `rebindComputed()` | `computed {}` présent | Variables dérivées |
 | `evalCond(expr)` | Interpolation, `@if`, `@for`, ou attributs dynamiques | Évaluation sécurisée des expressions |
 | `bind()` | Interpolation ou `computed {}` | Mise à jour des `data-webcore-interpolation` |
@@ -1094,13 +1026,16 @@ Le runtime généré contient uniquement les fonctions **réellement utilisées*
 **Exemple pour un composant simple sans `@for`, `@if`, ni validation :**
 
 ```js
-class State { #d=new Map(); #l=new Map();
-  set(k,v){ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) }
-  setQ(k,v){ this.#d.set(k,v) }
-  get(k){ return this.#d.get(k) }
+var __wcfx = null;                         // effet en cours (null hors d'un effet)
+class State {
+  #d = new Map(); #l = new Map(); #s = new Map();   // données · listeners · deps
+  get(k){ if(__wcfx){ if(!this.#s.has(k)) this.#s.set(k,new Set()); this.#s.get(k).add(__wcfx); } return this.#d.get(k); }
+  set(k,v){ if(Object.is(this.#d.get(k),v)) return; this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)); const e=[...(this.#s.get(k)??[])]; this.#s.get(k)?.clear(); e.forEach(f=>f()); }
+  setQ(k,v){ this.#d.set(k,v) }              // setter silencieux (computed)
   on(k,f){ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) }
 }
 const S = new State();
+function $effect(fn){ const r=()=>{ const p=__wcfx; __wcfx=r; try{fn();}finally{__wcfx=p;} }; r(); }
 // evalCond, bind — puis DOMContentLoaded
 ```
 
@@ -1561,7 +1496,7 @@ input on:keyup|debounce={query = event.target.value}
 el.addEventListener('input', (event) => {
     clearTimeout(el.__debounce);
     el.__debounce = setTimeout(() => {
-        S.set('search', event.target.value); bind(); ...
+        S.set('search', event.target.value);
     }, 300);
 });
 ```
@@ -1920,7 +1855,7 @@ Le fingerprinting est activé **par défaut**, quelle que soit la valeur de `mod
 
 ---
 
-## Limites actuelles (v1.5.0)
+## Limites actuelles (v2.0.0)
 
 | Limite | Contournement |
 |---|---|
@@ -2131,3 +2066,78 @@ Voir [`webc:img`](#webcimg--images-optimisées).
 
 À chaque `webc build`, toutes les images dans `public/` reçoivent un hash de contenu FNV-1a 32 bits intégré dans leur nom : `logo.png` → `logo.a3f9c1b2.png`. Extensions concernées : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif`. Toutes les références dans les `.html` et `.css` générés sont mises à jour automatiquement. Toujours actif — aucune configuration nécessaire. Avantage : cache-busting parfait, le navigateur peut mettre les images en cache indéfiniment.
 Voir [Fingerprinting des images](#fingerprinting-des-images).
+
+---
+
+## Nouveautés v2.0.0
+
+- **Signaux réactifs fins** — voir section [Signaux réactifs fins](#signaux-réactifs-fins)
+- **HMR** — `webc serve` surveille et recharge automatiquement
+- **Path traversal corrigé** — `webc serve` retourne 403 pour les URLs hors `dist/`
+- **Détection de cycles** — `webc check` signale les références circulaires
+- **Agrégation des erreurs** — toutes les erreurs de build sont reportées ensemble
+- **CSS nesting** — voir section [CSS nesting](#css-nesting)
+- **Rapport bundle** — voir section [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
+- **Réorganisation interne du compilateur** — `src/` regroupé en `core/`, `parser/`, `codegen/{html,js}/`, `cli/` et `tests/` par domaine
+
+## Signaux réactifs fins
+
+`$effect(fn)` remplace le pattern v1.x `VARS.forEach(v=>S.on(v,fn))`.
+
+```webc
+component Counter {
+    state { count: Number = 0 }
+    view {
+        button on:click={count++} { "+" }
+        p "{count}"
+    }
+}
+```
+
+À la compilation, le JS généré utilise `$effect` :
+```js
+$effect(() => {
+    el.textContent = S.get('count');
+});
+```
+
+Le tracking est automatique : l'effet est ré-exécuté uniquement quand `count` change.
+Aucune liste manuelle de dépendances nécessaire.
+
+## CSS nesting
+
+Les règles imbriquées sont supportées dans les blocs `style {}` :
+
+```webc
+component Card {
+    view { div class="card" { p "content" } }
+    style {
+        .card {
+            padding: 1rem;
+            &:hover { background: #f5f5f5; }
+            & > p { color: #333; }
+        }
+    }
+}
+```
+
+Le sélecteur `&` est remplacé par le sélecteur parent scopé à la compilation.
+La sortie CSS générée est du CSS valide aplati.
+
+## Rapport d'analyse du bundle
+
+Après `webc build`, le compilateur affiche un tableau récapitulatif :
+
+```
+Bundle Analysis:
+  ✓ state            312 b
+  ✓ signals ($effect) 428 b
+  ✓ dom init          89 b
+  ✓ bindFor          512 b
+  - bindIf           (tree-shaken)
+  - http             (tree-shaken)
+  ✓ router           634 b
+Total JS: 1.98 KB
+```
+
+Les fonctionnalités non utilisées sont tree-shaquées automatiquement : `http`, `bindIf`, `bindFor`, etc. n'apparaissent dans le bundle que si le projet les utilise.

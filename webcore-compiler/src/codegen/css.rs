@@ -1,7 +1,8 @@
 //! CSS Code Generator with Scoped Styles
 
-use crate::ast::{Component, StyleItem, StyleRule, WebCoreDocument};
-use crate::theme::Theme;
+use crate::core::ast::{Component, StyleItem, StyleRule, WebCoreDocument};
+use crate::core::theme::Theme;
+use std::fmt::Write as _;
 
 // FNV-1a 32-bit constants (https://tools.ietf.org/html/draft-eastlake-fnv)
 const FNV_OFFSET_BASIS: u32 = 2_166_136_261;
@@ -9,28 +10,83 @@ const FNV_PRIME: u32 = 16_777_619;
 
 /// Generate a unique scope ID for a component based on its name.
 /// Uses FNV-1a 32-bit hash — deterministic across compilations and Rust versions.
-pub fn generate_scope_id(component_name: &str) -> String {
+#[must_use]
+pub(crate) fn generate_scope_id(component_name: &str) -> String {
     let mut hash: u32 = FNV_OFFSET_BASIS;
     for byte in component_name.bytes() {
-        hash ^= byte as u32;
+        hash ^= u32::from(byte);
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     format!("wc-{:06x}", hash & 0xFFFFFF)
 }
 
+/// Known standard CSS property names. Custom properties (`--var`) are always allowed.
+const KNOWN_CSS_PROPS: &[&str] = &[
+    "color","background","background-color","background-image","background-size",
+    "background-position","background-repeat","background-attachment",
+    "margin","margin-top","margin-right","margin-bottom","margin-left",
+    "padding","padding-top","padding-right","padding-bottom","padding-left",
+    "border","border-top","border-right","border-bottom","border-left",
+    "border-radius","border-color","border-width","border-style",
+    "width","height","min-width","max-width","min-height","max-height",
+    "display","flex","flex-direction","flex-wrap","flex-grow","flex-shrink",
+    "justify-content","align-items","align-self","align-content",
+    "grid","grid-template-columns","grid-template-rows","grid-column","grid-row","gap",
+    "column-gap","row-gap","grid-area","grid-template-areas",
+    "position","top","right","bottom","left","z-index","float","clear",
+    "font-size","font-weight","font-family","font-style","font-variant","line-height",
+    "text-align","text-decoration","text-transform","text-overflow","letter-spacing",
+    "overflow","overflow-x","overflow-y","cursor","opacity","visibility","pointer-events",
+    "transition","transform","animation","animation-name","animation-duration",
+    "box-shadow","text-shadow","outline","list-style","content",
+    "white-space","word-break","word-wrap","vertical-align",
+    "object-fit","object-position","aspect-ratio","resize",
+];
+
+/// Emit a warning to stderr if `prop_name` is not a known CSS property.
+/// Custom properties (starting with `--`) are always allowed without warning.
+fn warn_unknown_css_prop(prop_name: &str, context: &str) {
+    if !prop_name.starts_with("--") && !KNOWN_CSS_PROPS.contains(&prop_name) {
+        eprintln!("warning[css]: unknown property '{prop_name}' in {context}");
+    }
+}
+
 fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
     let mut css = String::new();
     let scoped_selector = scope_selector(&rule.selector, scope_id);
-    css.push_str(&format!("{}{} {{\n", indent, scoped_selector));
-    for prop in &rule.properties {
-        css.push_str(&format!("{}  {}: {};\n", indent, prop.name, prop.value));
+
+    // Only emit parent block when it has direct properties
+    if !rule.properties.is_empty() {
+        writeln!(css, "{indent}{scoped_selector} {{").unwrap();
+        for prop in &rule.properties {
+            warn_unknown_css_prop(&prop.name, &format!("[{}]", scope_id));
+            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value).unwrap();
+        }
+        writeln!(css, "{indent}}}").unwrap();
     }
-    css.push_str(&format!("{}}}\n", indent));
+
+    // Flatten nested rules: `&:hover` → `<scoped_selector>:hover`
+    for nested in &rule.nested {
+        let flat_selector = if nested.selector.starts_with('&') {
+            // Replace leading `&` with the already-scoped parent selector
+            format!("{}{}", scoped_selector, &nested.selector[1..])
+        } else {
+            format!("{} {}", scoped_selector, nested.selector)
+        };
+        writeln!(css, "{indent}{flat_selector} {{").unwrap();
+        for prop in &nested.properties {
+            warn_unknown_css_prop(&prop.name, &format!("[{}]", scope_id));
+            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value).unwrap();
+        }
+        writeln!(css, "{indent}}}").unwrap();
+    }
+
     css
 }
 
 /// Generate scoped CSS for a single component
-pub fn generate_scoped_css(component: &Component) -> String {
+#[must_use]
+pub(crate) fn generate_scoped_css(component: &Component) -> String {
     if component.style.is_empty() {
         return String::new();
     }
@@ -38,7 +94,7 @@ pub fn generate_scoped_css(component: &Component) -> String {
     let scope_id = generate_scope_id(&component.name);
     let mut css = String::new();
 
-    css.push_str(&format!("/* Component: {} */\n", component.name));
+    writeln!(css, "/* Component: {} */", component.name).unwrap();
 
     for item in &component.style {
         match item {
@@ -46,7 +102,7 @@ pub fn generate_scoped_css(component: &Component) -> String {
                 css.push_str(&emit_scoped_rule(rule, &scope_id, ""));
             }
             StyleItem::Media { query, rules, .. } => {
-                css.push_str(&format!("@media {} {{\n", query));
+                writeln!(css, "@media {query} {{").unwrap();
                 for rule in rules {
                     css.push_str(&emit_scoped_rule(rule, &scope_id, "  "));
                 }
@@ -80,11 +136,11 @@ fn scope_single_selector(selector: &str, scope_id: &str) -> String {
 
     // Handle :host for web components style
     if selector.starts_with(":host") {
-        return format!("[data-v=\"{}\"]", scope_id);
+        return format!("[data-v=\"{scope_id}\"]");
     }
 
     // Handle :global() escape hatch
-    if selector.starts_with(":global(") && selector.ends_with(")") {
+    if selector.starts_with(":global(") && selector.ends_with(')') {
         return selector[8..selector.len() - 1].to_string();
     }
 
@@ -92,22 +148,23 @@ fn scope_single_selector(selector: &str, scope_id: &str) -> String {
     // e.g., "button::before" -> "[data-v=xxx] button::before"
     if let Some(pos) = selector.find("::") {
         let (base, pseudo) = selector.split_at(pos);
-        return format!("[data-v=\"{}\"] {}{}", scope_id, base, pseudo);
+        return format!("[data-v=\"{scope_id}\"] {base}{pseudo}");
     }
 
     // Handle pseudo-classes that should stay attached
     // e.g., "button:hover" -> "[data-v=xxx] button:hover"
     // But ":first-child" at start means scope the container
     if selector.starts_with(':') && !selector.starts_with("::") {
-        return format!("[data-v=\"{}\"]{}", scope_id, selector);
+        return format!("[data-v=\"{scope_id}\"]{selector}");
     }
 
     // Standard case: prepend scope
-    format!("[data-v=\"{}\"] {}", scope_id, selector)
+    format!("[data-v=\"{scope_id}\"] {selector}")
 }
 
 /// Generate all scoped CSS for a document
-pub fn generate_all_scoped_css(document: &WebCoreDocument) -> String {
+#[must_use]
+pub(crate) fn generate_all_scoped_css(document: &WebCoreDocument) -> String {
     let mut css = String::new();
 
     css.push_str("/* WebCore Scoped Styles */\n\n");
@@ -120,7 +177,8 @@ pub fn generate_all_scoped_css(document: &WebCoreDocument) -> String {
 }
 
 /// Generate combined CSS: theme variables + scoped component styles
-pub fn generate_combined_css(theme: Option<&Theme>, document: &WebCoreDocument) -> String {
+#[must_use]
+pub(crate) fn generate_combined_css(theme: Option<&Theme>, document: &WebCoreDocument) -> String {
     let mut css = String::new();
 
     // Theme variables
@@ -131,7 +189,7 @@ pub fn generate_combined_css(theme: Option<&Theme>, document: &WebCoreDocument) 
 
     // Modern minimal base styles
     css.push_str(
-        r#"/* WebCore Base */
+        r"/* WebCore Base */
 *, *::before, *::after { box-sizing: border-box; }
 body {
   margin: 0;
@@ -172,7 +230,7 @@ footer {
 }
 h1, h2, h3 { font-family: var(--font-heading, inherit); margin: 0 0 0.5em; }
 p { margin: 0 0 1em; }
-"#,
+",
     );
     css.push('\n');
 
@@ -182,37 +240,34 @@ p { margin: 0 0 1em; }
     css
 }
 
-pub fn generate_css() -> String {
-    "/* CSS output placeholder */".to_string()
-}
-
-pub fn generate_theme_css(theme: &Theme) -> String {
+#[must_use]
+pub(crate) fn generate_theme_css(theme: &Theme) -> String {
     let mut css = String::new();
     css.push_str(":root {\n");
 
     // Generate color variables
     for (key, value) in &theme.colors {
-        css.push_str(&format!("  --color-{}: {};\n", key, value));
+        writeln!(css, "  --color-{key}: {value};").unwrap();
     }
 
     // Generate font variables
     for (key, value) in &theme.fonts {
-        css.push_str(&format!("  --font-{}: {};\n", key, value));
+        writeln!(css, "  --font-{key}: {value};").unwrap();
     }
 
     // Generate spacing variables
     for (key, value) in &theme.spacing {
-        css.push_str(&format!("  --space-{}: {};\n", key, value));
+        writeln!(css, "  --space-{key}: {value};").unwrap();
     }
 
     // Generate radius variables
     for (key, value) in &theme.radius {
-        css.push_str(&format!("  --radius-{}: {};\n", key, value));
+        writeln!(css, "  --radius-{key}: {value};").unwrap();
     }
 
     // Generate breakpoint variables
     for (key, value) in &theme.breakpoints {
-        css.push_str(&format!("  --breakpoint-{}: {};\n", key, value));
+        writeln!(css, "  --breakpoint-{key}: {value};").unwrap();
     }
 
     css.push_str("}\n");
