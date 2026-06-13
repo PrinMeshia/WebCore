@@ -1,3 +1,18 @@
+//! WebCore compiler — CLI entry point.
+//!
+//! Commands:
+//! - `webc new <name>` — scaffold a new project
+//! - `webc build`      — compile `.webc` files to `dist/` (HTML + CSS + JS)
+//! - `webc dev [port]` — build + serve with hot-reload via WebSocket
+//!
+//! Build pipeline (see `build_project`):
+//! 1. Parse `webc.toml` for project config
+//! 2. Load and parse all `.webc` source files into a `WebCoreDocument`
+//! 3. For each page: generate HTML (with SSG pre-rendering), collect JS handlers
+//! 4. Generate a single `webcore.js` runtime (tree-shaken per document)
+//! 5. Generate `theme.css` + scoped component CSS
+//! 6. Write everything to `dist/`
+
 mod ast;
 mod parser;
 pub mod codegen {
@@ -90,6 +105,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "check" => {
+            match check_project() {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => {
             eprintln!("Commande inconnue : {}", args[1]);
             print_help();
@@ -107,6 +131,7 @@ fn print_help() {
     println!("COMMANDES:");
     println!("  new <nom>    Créer un nouveau projet WebCore");
     println!("  build        Compiler le projet (dist/)");
+    println!("  check        Valider le projet sans générer de fichiers");
     println!("  dev [port]   Démarrer le serveur de développement (défaut : 3000)");
     println!();
     println!("OPTIONS (dev) :");
@@ -312,35 +337,16 @@ fn pascal_case(s: &str) -> String {
         .collect()
 }
 
-fn build_project() -> Result<(), String> {
-    println!("🔨 Building WebCore project...");
-
-    // Read project config
-    let config = read_config()?;
-    println!("📁 Project: {}", config.app_title);
-
-    // Create dist directory
-    let dist_dir = Path::new("dist");
-    if dist_dir.exists() {
-        fs::remove_dir_all(dist_dir).map_err(|e| format!("Failed to clean dist: {}", e))?;
-    }
-    fs::create_dir_all(dist_dir).map_err(|e| format!("Failed to create dist: {}", e))?;
-
-    // Load theme
-    let theme = if Path::new("theme.toml").exists() {
-        println!("🎨 Loading theme...");
-        Some(theme::load_theme("theme.toml")?)
-    } else {
-        println!("⚠️  No theme.toml found, using default theme");
-        None
-    };
-
-    // Load and parse all WebCore files
+/// Load and parse all `.webc` source files and locale translations into a single document.
+///
+/// Scans `src/app.webc`, `src/layouts/`, `src/components/`, `src/pages/`, and `locales/`.
+/// Does not touch `dist/` or run any build tools — pure parsing.
+fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDocument, String> {
     let mut document = ast::WebCoreDocument {
         app: None,
         store: Vec::new(),
         locales: HashMap::new(),
-        default_locale: config.locale.clone(),
+        default_locale: default_locale.to_string(),
         wasm_module: None,
         layouts: HashMap::new(),
         pages: HashMap::new(),
@@ -446,6 +452,186 @@ fn build_project() -> Result<(), String> {
         }
     }
 
+    Ok(document)
+}
+
+/// Validate the current project without generating any output files.
+///
+/// Parses all `.webc` sources, checks component references, route targets,
+/// and prop type mismatches. Reports issues and exits cleanly.
+fn check_project() -> Result<(), String> {
+    println!("🔍 Checking WebCore project...");
+
+    let config = read_config()?;
+    let document = load_webc_document(&config.locale)?;
+
+    let mut issues: Vec<String> = Vec::new();
+
+    // 1. Route targets exist as pages or components
+    // Mirrors page_name_to_file(): HomePage → strips "Page" suffix → lowercase → checks page
+    if let Some(app) = &document.app {
+        for (route, target) in &app.routes {
+            let normalized = if target.ends_with("Page") {
+                target[..target.len() - 4].to_lowercase()
+            } else {
+                target.to_lowercase()
+            };
+            let exists = document.pages.contains_key(target)
+                || document.pages.contains_key(&normalized)
+                || document.components.contains_key(target);
+            if !exists {
+                issues.push(format!(
+                    "  route \"{}\" → {} : page/component not found",
+                    route, target
+                ));
+            }
+        }
+    }
+
+    // 2. Component references in pages/layouts/components exist
+    fn check_elements(
+        elements: &[ast::Element],
+        document: &ast::WebCoreDocument,
+        issues: &mut Vec<String>,
+    ) {
+        for elem in elements {
+            match elem {
+                ast::Element::Component { name, content, .. } => {
+                    if !document.components.contains_key(name) {
+                        issues.push(format!("  component <{}> used but not declared", name));
+                    }
+                    check_elements(content, document, issues);
+                }
+                ast::Element::Tag { content, .. } => check_elements(content, document, issues),
+                ast::Element::For { content, .. } => check_elements(content, document, issues),
+                ast::Element::If { then_branch, else_branch, .. } => {
+                    check_elements(then_branch, document, issues);
+                    if let Some(eb) = else_branch { check_elements(eb, document, issues); }
+                }
+                ast::Element::SlotContent { content, .. } => check_elements(content, document, issues),
+                ast::Element::ErrorBlock { content, .. } => check_elements(content, document, issues),
+                _ => {}
+            }
+        }
+    }
+    for page in document.pages.values() {
+        check_elements(&page.content, &document, &mut issues);
+    }
+    for layout in document.layouts.values() {
+        check_elements(&layout.content, &document, &mut issues);
+    }
+    for component in document.components.values() {
+        check_elements(&component.view, &document, &mut issues);
+    }
+
+    // 3. Prop type mismatches (static props vs declared type)
+    fn check_props(
+        elements: &[ast::Element],
+        document: &ast::WebCoreDocument,
+        issues: &mut Vec<String>,
+    ) {
+        for elem in elements {
+            if let ast::Element::Component { name, attributes, content, .. } = elem {
+                if let Some(comp) = document.components.get(name) {
+                    for attr in attributes {
+                        if let ast::AttributeValue::String(val) = &attr.value {
+                            if let Some(prop) = comp.props.iter().find(|p| p.name == attr.name) {
+                                if let Some(t) = &prop.type_ {
+                                    match t.as_str() {
+                                        "Number" if val.parse::<f64>().is_err() => {
+                                            issues.push(format!(
+                                                "  {}:{} — prop \"{}\" expects Number, got \"{}\"",
+                                                name, attr.name, attr.name, val
+                                            ));
+                                        }
+                                        "Boolean" if val != "true" && val != "false" => {
+                                            issues.push(format!(
+                                                "  {}:{} — prop \"{}\" expects Boolean, got \"{}\"",
+                                                name, attr.name, attr.name, val
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                check_props(content, document, issues);
+            } else {
+                match elem {
+                    ast::Element::Tag { content, .. } => check_props(content, document, issues),
+                    ast::Element::For { content, .. } => check_props(content, document, issues),
+                    ast::Element::If { then_branch, else_branch, .. } => {
+                        check_props(then_branch, document, issues);
+                        if let Some(eb) = else_branch { check_props(eb, document, issues); }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for page in document.pages.values() {
+        check_props(&page.content, &document, &mut issues);
+    }
+
+    // Summary
+    let pages = document.pages.len();
+    let components = document.components.len();
+    let layouts = document.layouts.len();
+
+    if issues.is_empty() {
+        println!(
+            "✅  {} page{}, {} component{}, {} layout{} — no issues found",
+            pages, if pages == 1 { "" } else { "s" },
+            components, if components == 1 { "" } else { "s" },
+            layouts, if layouts == 1 { "" } else { "s" },
+        );
+        Ok(())
+    } else {
+        println!(
+            "❌  {} issue{} found:\n",
+            issues.len(),
+            if issues.len() == 1 { "" } else { "s" }
+        );
+        for issue in &issues {
+            println!("{}", issue);
+        }
+        Err(format!("\n{} issue{} — fix before building", issues.len(), if issues.len() == 1 { "" } else { "s" }))
+    }
+}
+
+/// Compile the current project (reads from `src/`, writes to `dist/`).
+///
+/// Reads `webc.toml` for configuration, parses all `.webc` files, generates
+/// HTML pages, CSS, and the reactive JS runtime, then writes them to `dist/`.
+fn build_project() -> Result<(), String> {
+    println!("🔨 Building WebCore project...");
+
+    // Read project config
+    let config = read_config()?;
+    println!("📁 Project: {}", config.app_title);
+
+    // Create dist/ and dist/assets/
+    let dist_dir = Path::new("dist");
+    if dist_dir.exists() {
+        fs::remove_dir_all(dist_dir).map_err(|e| format!("Failed to clean dist: {}", e))?;
+    }
+    fs::create_dir_all(dist_dir).map_err(|e| format!("Failed to create dist: {}", e))?;
+    let assets_dir = dist_dir.join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|e| format!("Failed to create dist/assets: {}", e))?;
+
+    // Load theme
+    let theme = if Path::new("theme.toml").exists() {
+        Some(theme::load_theme("theme.toml")?)
+    } else {
+        println!("⚠️  No theme.toml found, using default theme");
+        None
+    };
+
+    // Load and parse all WebCore files
+    let mut document = load_webc_document(&config.locale)?;
+
     // Detect and compile WASM module (wasm/Cargo.toml → dist/wasm/)
     let wasm_cargo = Path::new("wasm/Cargo.toml");
     if wasm_cargo.exists() {
@@ -454,7 +640,7 @@ fn build_project() -> Result<(), String> {
                 println!("🦀 WASM module detected: {}", module_name);
                 document.wasm_module = Some(module_name.clone());
 
-                let wasm_out = dist_dir.join("wasm");
+                let wasm_out = assets_dir.join("wasm");
                 let status = std::process::Command::new("wasm-pack")
                     .args([
                         "build",
@@ -487,7 +673,6 @@ fn build_project() -> Result<(), String> {
     }
 
     // Generate hybrid routing: separate HTML files + main index with router
-    println!("🌐 Generating hybrid routing system...");
     // Collect any CSS files from public/ to include in <head>
     let extra_css_files: Vec<String> = {
         let public_dir = Path::new("public");
@@ -521,7 +706,7 @@ fn build_project() -> Result<(), String> {
     // Collect initial state once for SSG pre-rendering
     let initial_state = ssg::build_initial_state(&document);
 
-    // Helper to convert page name to route-based filename
+    // Helper to convert page name to clean-URL path (e.g. "syntax" → "syntax/index.html")
     fn page_to_filename(name: &str) -> String {
         let route = name
             .to_lowercase()
@@ -530,14 +715,13 @@ fn build_project() -> Result<(), String> {
         if route.is_empty() || route == "index" {
             "index.html".to_string()
         } else {
-            format!("{}.html", route)
+            format!("{}/index.html", route)
         }
     }
 
     // Generate HTML for each page
     for page_name in document.pages.keys() {
         let filename = page_to_filename(page_name);
-        println!("📄 Generating: {} → {}", page_name, filename);
         let html_result =
             codegen::codegen_html::generate_page_content_only(&document, page_name, &options)?;
         all_handlers.extend(html_result.handlers);
@@ -548,6 +732,9 @@ fn build_project() -> Result<(), String> {
             &config.locale,
         );
         let output_path = dist_dir.join(&filename);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir {:?}: {}", parent, e))?;
+        }
         fs::write(&output_path, ssg_html)
             .map_err(|e| format!("Failed to write {:?}: {}", output_path, e))?;
     }
@@ -579,43 +766,35 @@ fn build_project() -> Result<(), String> {
                 &config.locale,
             );
             let output_path = dist_dir.join(&filename);
+            if let Some(parent) = output_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir {:?}: {}", parent, e))?;
+            }
             fs::write(&output_path, ssg_html)
                 .map_err(|e| format!("Failed to write {:?}: {}", output_path, e))?;
         }
     }
 
-    println!("✅ Generated static pages with clean URLs");
-
-    // SPA generation handles all pages, no need for default page logic
-
     // Generate CSS (theme + scoped component styles)
-    println!("🎨 Generating CSS (theme + scoped styles)...");
-
-    // Generate combined CSS: theme variables + scoped component styles
     let combined_css = codegen::codegen_css::generate_combined_css(theme.as_ref(), &document);
-
-    // Post-process CSS with LightningCSS
     let processed_css = if config.mode == "prod" {
-        println!("🔧 Minifying CSS with LightningCSS...");
         css_processor::minify_css(&combined_css)?
     } else {
         css_processor::format_css(&combined_css)?
     };
 
-    let css_path = dist_dir.join("theme.css");
+    let css_path = assets_dir.join("theme.css");
     fs::write(&css_path, &processed_css)
         .map_err(|e| format!("Failed to write theme.css: {}", e))?;
 
     // Generate WebCore runtime JS with compiled handlers and state variables
     let runtime_js = codegen::codegen_js::generate_runtime_js(&all_handlers, &document);
     let final_js = if config.mode == "prod" {
-        println!("🔧 Minifying JS...");
         codegen::codegen_js::minify_js(&runtime_js)
     } else {
         runtime_js
     };
 
-    let js_path = dist_dir.join("webcore.js");
+    let js_path = assets_dir.join("webcore.js");
     fs::write(&js_path, &final_js).map_err(|e| format!("Failed to write webcore.js: {}", e))?;
 
     // Add a content-hash query param to <script src="webcore.js"> in every HTML file
@@ -628,33 +807,15 @@ fn build_project() -> Result<(), String> {
         }
         format!("{:08x}", h)
     };
-    if let Ok(entries) = fs::read_dir(dist_dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.extension().and_then(|e| e.to_str()) == Some("html") {
-                if let Ok(html) = fs::read_to_string(&p) {
-                    let patched = html.replace(
-                        r#"src="webcore.js""#,
-                        &format!(r#"src="webcore.js?v={}""#, js_hash),
-                    );
-                    if patched != html {
-                        let _ = fs::write(&p, patched);
-                    }
-                }
-            }
-        }
-    }
+    patch_html_files(dist_dir, &format!(r#"src="/assets/webcore.js?v={}""#, js_hash));
 
     // Copy public assets
     let public_dir = Path::new("public");
     if public_dir.exists() {
-        println!("📁 Copying public assets...");
-        copy_dir_recursive(public_dir, dist_dir)?;
+        copy_dir_recursive(public_dir, &assets_dir, config.mode == "prod")?;
     }
 
-    // SPA generation already handles index.html, no need for additional generation
-
-    println!("✅ Build completed successfully!");
+    print_dist_tree(dist_dir, config.mode == "prod");
     Ok(())
 }
 
@@ -911,8 +1072,8 @@ fn handle_request(request: Request, ws_port: u16) -> Result<(), String> {
         // Has extension, serve as-is
         PathBuf::from(format!("dist{}", url))
     } else {
-        // Clean URL: try .html extension
-        let html_path = PathBuf::from(format!("dist{}.html", url));
+        // Clean URL: /syntax → dist/syntax/index.html
+        let html_path = PathBuf::from(format!("dist{}/index.html", url));
         if html_path.exists() {
             html_path
         } else {
@@ -1009,7 +1170,81 @@ fn get_primary_ipv4() -> Option<String> {
     None
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+fn patch_html_files(dir: &Path, js_src: &str) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                patch_html_files(&p, js_src);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("html") {
+                if let Ok(html) = fs::read_to_string(&p) {
+                    let patched = html.replace(r#"src="/assets/webcore.js""#, js_src);
+                    if patched != html {
+                        let _ = fs::write(&p, patched);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn fmt_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else {
+        format!("{:.1} kB", bytes as f64 / 1024.0)
+    }
+}
+
+fn print_dist_tree(dist_dir: &Path, minified: bool) {
+    // Collect all files recursively
+    let mut files: Vec<(String, u64)> = Vec::new();
+    fn collect(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                let rel = if prefix.is_empty() { name.clone() } else { format!("{}/{}", prefix, name) };
+                if path.is_dir() {
+                    collect(&path, &rel, out);
+                } else if let Ok(meta) = fs::metadata(&path) {
+                    out.push((rel, meta.len()));
+                }
+            }
+        }
+    }
+    collect(dist_dir, "", &mut files);
+
+    // Sort: html first (alpha), then js, then css, then rest
+    files.sort_by(|(a, _), (b, _)| {
+        fn rank(s: &str) -> u8 {
+            if s.ends_with(".html") { 0 }
+            else if s.ends_with(".js") { 1 }
+            else if s.ends_with(".css") { 2 }
+            else { 3 }
+        }
+        rank(a).cmp(&rank(b)).then(a.cmp(b))
+    });
+
+    let total_bytes: u64 = files.iter().map(|(_, s)| s).sum();
+    let max_name = files.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
+
+    println!("\ndist/");
+    let count = files.len();
+    for (i, (name, size)) in files.iter().enumerate() {
+        let branch = if i + 1 == count { "└──" } else { "├──" };
+        println!("  {}  {:<width$}  {}", branch, name, fmt_size(*size), width = max_name);
+    }
+    let mode_label = if minified { "minified" } else { "dev" };
+    println!("\n  {} file{}  {}  ({})\n",
+        count,
+        if count == 1 { "" } else { "s" },
+        fmt_size(total_bytes),
+        mode_label,
+    );
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path, minify: bool) -> Result<(), String> {
     if src.is_dir() {
         fs::create_dir_all(dst).map_err(|e| format!("Failed to create dir {:?}: {}", dst, e))?;
         for entry in
@@ -1018,8 +1253,14 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
             let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
-            copy_dir_recursive(&src_path, &dst_path)?;
+            copy_dir_recursive(&src_path, &dst_path, minify)?;
         }
+    } else if minify && src.extension().and_then(|e| e.to_str()) == Some("css") {
+        let raw = fs::read_to_string(src)
+            .map_err(|e| format!("Failed to read {:?}: {}", src, e))?;
+        let minified = css_processor::minify_css(&raw)?;
+        fs::write(dst, minified)
+            .map_err(|e| format!("Failed to write {:?}: {}", dst, e))?;
     } else {
         fs::copy(src, dst).map_err(|e| format!("Failed to copy {:?} to {:?}: {}", src, dst, e))?;
     }

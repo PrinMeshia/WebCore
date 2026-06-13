@@ -69,15 +69,23 @@ property_value = @{ (!(";" | "}") ~ ANY)+ }
 // ============ ELEMENTS (VIEW CONTENT) ============
 element = { control_flow | slot_element | tag_element | text_element }
 
-// Control flow: @for, @if, @error
-control_flow = { for_loop | if_statement | error_block }
+// Control flow: @for, @if, @switch, @error
+control_flow = { for_loop | if_statement | switch_statement | error_block }
 
-for_loop = { "@for" ~ identifier ~ for_key_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
+for_loop = { "@for" ~ identifier ~ ("," ~ identifier)? ~ for_key_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
 for_key_decl = { "key" ~ "=" ~ for_key_expr }
 for_key_expr = @{ (ASCII_ALPHANUMERIC | "_" | "." | "[" | "]" | "$")+ }
 
 if_statement = { "@if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
 else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
+
+// Switch: @switch expr { @case val { ... } @default { ... } }
+// switch_expr stops at { or newline (avoids lookahead ambiguity with @case inside the body)
+switch_statement = { "@switch" ~ switch_expr ~ "{" ~ (case_clause | default_clause)* ~ "}" }
+switch_expr      = @{ (!("{" | "\n") ~ ANY)+ }
+case_clause      = { "@case" ~ case_value ~ "{" ~ element* ~ "}" }
+default_clause   = { "@default" ~ "{" ~ element* ~ "}" }
+case_value       = @{ (!("{" | "}") ~ ANY)+ }
 
 // Form validation error display: @error "fieldname" { ... }
 error_block = { "@error" ~ string_literal ~ "{" ~ element* ~ "}" }

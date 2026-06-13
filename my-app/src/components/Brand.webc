@@ -1,8 +1,0 @@
-component Brand {
-  view {
-    div {
-      img {}
-      h1 "My WebCore App"
-    }
-  }
-}
