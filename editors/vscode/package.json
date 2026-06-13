@@ -1,8 +1,8 @@
 {
   "name": "webcore-language",
   "displayName": "WebCore Language Support",
-  "description": "Syntax highlighting and language support for .webc files (WebCore DSL) — v2.0.0",
-  "version": "2.0.0",
+  "description": "Syntax highlighting and language support for .webc files (WebCore DSL) — v2.5.2",
+  "version": "2.5.2",
   "publisher": "webcore",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],

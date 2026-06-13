@@ -7,10 +7,15 @@
 //! The JS runtime (`bindIf`, `bind`) overwrites these values reactively after
 //! `DOMContentLoaded`, so SSG is fully compatible with the existing runtime.
 
-use crate::ast::WebCoreDocument;
+use crate::core::ast::WebCoreDocument;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::OnceLock;
+
+static RE_INTERP: OnceLock<Regex> = OnceLock::new();
+static RE_IF: OnceLock<Regex> = OnceLock::new();
+static RE_ELSE: OnceLock<Regex> = OnceLock::new();
 
 /// Collect the initial default value of every state/store variable.
 ///
@@ -37,18 +42,55 @@ pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String,
 }
 
 /// Undo HTML entity encoding so we can evaluate the raw expression/condition.
+/// Single-pass scanner: finds `&` then checks the following bytes in-place.
 fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut result = String::with_capacity(s.len());
+    let mut remaining = s;
+    while let Some(pos) = remaining.find('&') {
+        result.push_str(&remaining[..pos]);
+        remaining = &remaining[pos..];
+        if remaining.starts_with("&amp;") {
+            result.push('&');
+            remaining = &remaining[5..];
+        } else if remaining.starts_with("&lt;") {
+            result.push('<');
+            remaining = &remaining[4..];
+        } else if remaining.starts_with("&gt;") {
+            result.push('>');
+            remaining = &remaining[4..];
+        } else if remaining.starts_with("&quot;") {
+            result.push('"');
+            remaining = &remaining[6..];
+        } else if remaining.starts_with("&#x27;") {
+            result.push('\'');
+            remaining = &remaining[6..];
+        } else {
+            result.push('&');
+            remaining = &remaining[1..];
+        }
+    }
+    result.push_str(remaining);
+    result
 }
 
+/// Single-pass HTML escape for plain text (handles `&`, `<`, `>`).
 fn html_escape_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    if !text.contains(['&', '<', '>']) {
+        return text.to_string();
+    }
+    let mut result = String::with_capacity(text.len() + 16);
+    for c in text.chars() {
+        match c {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            _ => result.push(c),
+        }
+    }
+    result
 }
 
 /// Resolve a single token (variable name or numeric literal) to f64.
@@ -164,14 +206,19 @@ pub(crate) fn eval_expr_with_locale(
         if let Some(val) = state.get(var_name.trim()) {
             let trimmed = val.trim();
             if trimmed.starts_with('[') {
-                // Count comma-separated elements (simple heuristic)
                 if trimmed == "[]" {
                     return Some("0".to_string());
                 }
+                // Parse as JSON so quoted commas don't inflate the count.
+                if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str(trimmed) {
+                    return Some(arr.len().to_string());
+                }
+                // Fallback: naive comma-split (only reached for non-JSON arrays).
                 let count = trimmed[1..trimmed.len() - 1].split(',').count();
                 return Some(count.to_string());
             }
-            return Some(val.len().to_string());
+            // chars().count() for Unicode-correct length (byte len is wrong for multibyte).
+            return Some(val.chars().count().to_string());
         }
     }
 
@@ -217,7 +264,9 @@ pub(crate) fn apply_ssg_with_locales(
 
     // ── 1. Interpolation spans ───────────────────────────────────────────────
     // Pattern matches the attribute + the closing ></span> of an empty span.
-    let interp_re = Regex::new(r#"(data-webcore-interpolation="([^"]+)")></span>"#).unwrap();
+    let interp_re = RE_INTERP.get_or_init(|| {
+        Regex::new(r#"(data-webcore-interpolation="([^"]+)")></span>"#).expect("hardcoded regex")
+    });
     let mut out = String::new();
     let mut last = 0usize;
     for cap in interp_re.captures_iter(&result) {
@@ -237,7 +286,9 @@ pub(crate) fn apply_ssg_with_locales(
     result = out;
 
     // ── 2. @if divs ─────────────────────────────────────────────────────────
-    let if_re = Regex::new(r#"<div data-webcore-if="([^"]+)"([^>]*)>"#).unwrap();
+    let if_re = RE_IF.get_or_init(|| {
+        Regex::new(r#"<div data-webcore-if="([^"]+)"([^>]*)>"#).expect("hardcoded regex")
+    });
     let mut out = String::new();
     let mut last = 0usize;
     for cap in if_re.captures_iter(&result) {
@@ -262,7 +313,9 @@ pub(crate) fn apply_ssg_with_locales(
     result = out;
 
     // ── 3. @else divs (inverted condition) ──────────────────────────────────
-    let else_re = Regex::new(r#"<div data-webcore-else="([^"]+)"([^>]*)>"#).unwrap();
+    let else_re = RE_ELSE.get_or_init(|| {
+        Regex::new(r#"<div data-webcore-else="([^"]+)"([^>]*)>"#).expect("hardcoded regex")
+    });
     let mut out = String::new();
     let mut last = 0usize;
     for cap in else_re.captures_iter(&result) {

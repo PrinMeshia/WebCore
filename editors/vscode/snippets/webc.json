@@ -257,5 +257,34 @@
       "\\$query.${1:param}"
     ],
     "description": "Access URL query string parameter"
+  },
+  "bind:value": {
+    "prefix": "bind:",
+    "body": [
+      "bind:value={${1:myVar}}"
+    ],
+    "description": "WebCore two-way value binding (input, select, textarea)"
+  },
+  "webc.toml config": {
+    "prefix": "webc-config",
+    "body": [
+      "[app]",
+      "title = \"${1:Mon App}\"",
+      "lang = \"${2:fr}\"",
+      "mode = \"${3|dev,prod|}\"",
+      "# csp = false"
+    ],
+    "description": "webc.toml base config (CSP disabled by default)"
+  },
+  "webc.toml with CSP": {
+    "prefix": "webc-config-csp",
+    "body": [
+      "[app]",
+      "title = \"${1:Mon App}\"",
+      "lang = \"${2:fr}\"",
+      "mode = \"prod\"",
+      "csp = true"
+    ],
+    "description": "webc.toml config with strict CSP enabled (prod mode)"
   }
 }

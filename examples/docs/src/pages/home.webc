@@ -1,6 +1,6 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v2.0.0 — Stable" }
+        div class="hero-badge" { "v2.5.2 — Stable" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }
@@ -44,7 +44,7 @@ page "home" {
             span class="stat-desc" { "PEG compiler" }
         }
         div class="stat-item" {
-            span class="stat-num" { "105" }
+            span class="stat-num" { "139" }
             span class="stat-desc" { "unit tests" }
         }
         div class="stat-item" {
@@ -118,6 +118,18 @@ page "home" {
                 title="HMR — Hot reload"
                 desc="webc serve surveille vos fichiers et recharge le navigateur automatiquement via WebSocket. Aucune configuration."
                 tag="v2.0.0"
+            {}
+            FeatureCard
+                icon="🛡️"
+                title="Strict CSP"
+                desc="Event delegation replaces inline onclick/onsubmit. csp=true in webc.toml emits a Content-Security-Policy meta tag. SRI hashes on all assets in prod mode."
+                tag="v2.5.0"
+            {}
+            FeatureCard
+                icon="🎨"
+                title="Critical CSS inline"
+                desc="In prod mode, page CSS is inlined in <style> and theme.css loads deferred — zero render-blocking CSS. HTML minification removes comments and inter-tag whitespace."
+                tag="v2.4.0"
             {}
         }
     }

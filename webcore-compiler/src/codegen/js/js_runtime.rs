@@ -97,13 +97,18 @@ pub(super) fn emit_evalcond(f: &RuntimeFeatures, has_locales: bool) -> String {
         (false, false, true)  => "new Function('S','STORE','U','QUERY_PARAMS','\"use strict\";return('+e+')')(S,STORE,U,QUERY_PARAMS)",
         (false, false, false) => "new Function('S','STORE','U','\"use strict\";return('+e+')')(S,STORE,U)",
     };
+    // Pre-compile per-variable regexes once (at page load) instead of inside evalCond.
+    // _VR: array of [RegExp, replacement] pairs, longest-var-first to avoid partial matches.
+    // VARS_SET: Set<string> for O(1) fast-path lookup instead of Array.indexOf O(n).
     // Fast path: simple state-var → S.get(name); $store.x → STORE.get(x);
     // optional $route.x → ROUTE_PARAMS[x]; optional $query.x → QUERY_PARAMS[x].
     // Complex expressions fall through to new Function.  On error return undefined
     // (not false) so interpolation spans show '' rather than the string "false".
     // Note: local var named _c (not t) to avoid shadowing the i18n t() function.
     format!(
-        "const evalCond=c=>{{const _c=c.trim();if(VARS.indexOf(_c)>=0)return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{route_fast_path}{query_fast_path}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{route_replace}{query_replace}VARS.forEach(v=>{{e=e.replace(new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\")}});try{{return {fn_call}}}catch(_){{return undefined}}}};\n"
+        "const _VR=[...VARS].sort((a,b)=>b.length-a.length).map(v=>[new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\"]);\n\
+         const VARS_SET=new Set(VARS);\n\
+         const evalCond=c=>{{const _c=c.trim();if(VARS_SET.has(_c))return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{route_fast_path}{query_fast_path}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{route_replace}{query_replace}_VR.forEach(([re,r])=>{{e=e.replace(re,r)}});try{{return {fn_call}}}catch(_){{return undefined}}}};\n"
     )
 }
 
@@ -170,7 +175,7 @@ pub(super) fn emit_bind_fns(f: &RuntimeFeatures) -> String {
         // fillItem(el, val, i): sets text for interpolation spans (supports "item.prop" paths),
         // writes data-webcore-idx, and mirrors object properties as data-* attributes for CSS.
         // Keyed diffing: webcoreKey stored on firstElementChild (no extra wrapper div).
-        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,rangeStr=tmpl.dataset.webcoreForRange,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{let items;if(rangeStr){const[from,to]=rangeStr.split('..').map(Number);items=Array.from({length:to-from},(_,i)=>String(from+i));}else{items=state.get(itN)??[];}if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};$effect(render)});};\n");
+        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,rangeStr=tmpl.dataset.webcoreForRange,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{let items;if(rangeStr){const[from,to]=rangeStr.split('..').map(Number);items=Array.from({length:to-from},(_,i)=>String(from+i));}else{items=state.get(itN)??[];}if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{const frag=document.createDocumentFragment();items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);frag.appendChild(cl);});cont.replaceChildren(frag);}};$effect(render)});};\n");
     }
     if f.has_dynamic_attrs {
         if f.has_style_binding {
@@ -228,9 +233,9 @@ $effect(styleUpd);\
     if f.has_class_binding {
         js.push_str(
             "const bindClassBindings=()=>{\n\
-             document.querySelectorAll('*').forEach(el=>{\n\
+             document.querySelectorAll('[data-webcore-class-bound]').forEach(el=>{\n\
                for(const attr of Array.from(el.attributes)){\n\
-                 if(attr.name.startsWith('data-webcore-class-')){\n\
+                 if(attr.name.startsWith('data-webcore-class-')&&attr.name!=='data-webcore-class-bound'){\n\
                    const cls=attr.name.slice(19),expr=attr.value,\n\
                          upd=()=>el.classList.toggle(cls,!!evalCond(expr));\n\
                    $effect(upd);\n\

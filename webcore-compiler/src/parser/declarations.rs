@@ -1,6 +1,6 @@
 //! Top-level declaration parsing: component, page, layout, app, store.
 
-use crate::ast::{
+use crate::core::ast::{
     App, Component, ComputedVar, HeadBlock, HttpBlock, KeyframeStep, Layout, Page, Prop, Span,
     StateVar, StyleItem, StyleProperty, StyleRule,
 };
@@ -264,7 +264,7 @@ pub(super) fn parse_component(pair: Pair<Rule>) -> Result<Component, ParseError>
                     };
                     component
                         .watch_hooks
-                        .push(crate::ast::WatchHook { var, body });
+                        .push(crate::core::ast::WatchHook { var, body });
                 }
                 Rule::http_block => {
                     component.http = Some(parse_http_block(section)?);

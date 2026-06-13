@@ -15,4 +15,5 @@ pub const TRANSITION: &str = "data-webcore-transition";
 pub const SCOPE: &str = "data-v";
 // CSS class prefix constants (used in bindAttrs)
 pub const CLASS_PREFIX: &str = "data-webcore-class-";
+pub const CLASS_BOUND: &str = "data-webcore-class-bound";
 pub const STYLE_PREFIX: &str = "data-webcore-style-";

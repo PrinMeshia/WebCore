@@ -1,6 +1,8 @@
 //! Project validation: parse all sources and report issues without writing output.
 
-use crate::{ast, build};
+use crate::core::ast;
+use super::config::read_config;
+use super::loader::load_webc_document;
 
 /// Validate the current project without generating any output files.
 ///
@@ -9,8 +11,8 @@ use crate::{ast, build};
 pub(crate) fn check_project() -> Result<(), String> {
     println!("🔍 Checking WebCore project...");
 
-    let config = build::read_config()?;
-    let document = build::load_webc_document(&config.locale)?;
+    let config = read_config()?;
+    let document = load_webc_document(&config.locale)?;
 
     let mut issues: Vec<String> = Vec::new();
 

@@ -1,12 +1,16 @@
 //! Golden / integration tests: full parse → codegen pipeline.
 
-use crate::ast::{self, Component, Span, WebCoreDocument};
+use crate::core::ast::{self, Component, Span, WebCoreDocument};
 use crate::codegen::attr_names;
-use crate::codegen::codegen_css::generate_combined_css;
-use crate::codegen::codegen_html::{generate_html, HtmlPageOptions};
-use crate::codegen::codegen_js::{generate_runtime_js, minify_js};
+use crate::codegen::css::generate_combined_css;
+use crate::codegen::html::{generate_html, HtmlPageOptions};
+use crate::codegen::js::{generate_runtime_js, minify_js};
 use crate::parser::parse_webc;
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Serialize tests that mutate NO_COLOR to prevent parallel race conditions.
+static NO_COLOR_LOCK: Mutex<()> = Mutex::new(());
 
 fn opts() -> HtmlPageOptions {
     HtmlPageOptions {
@@ -14,6 +18,7 @@ fn opts() -> HtmlPageOptions {
         title: "Test".into(),
         extra_css_files: vec![],
         critical_css: None,
+        csp_meta: None,
     }
 }
 
@@ -84,10 +89,10 @@ page "home" {
 "#;
     let doc = parse_webc(src).expect("parse");
     let res = generate_html(&doc, "home", &opts()).expect("codegen");
-    // HTML should have an onclick attribute
+    // HTML should use data-webcore-e delegation (CSP-safe, no inline onclick=)
     assert!(
-        res.html.contains("onclick="),
-        "onclick missing:\n{}",
+        res.html.contains("data-webcore-e="),
+        "data-webcore-e delegation attribute missing:\n{}",
         res.html
     );
     // Handler must be registered
@@ -148,9 +153,9 @@ fn golden_scoped_css_emits_data_v_selector() {
             watch_hooks: vec![],
             http: None,
             view: vec![],
-            style: vec![crate::ast::StyleItem::Rule(crate::ast::StyleRule {
+            style: vec![crate::core::ast::StyleItem::Rule(crate::core::ast::StyleRule {
                 selector: "button".into(),
-                properties: vec![crate::ast::StyleProperty {
+                properties: vec![crate::core::ast::StyleProperty {
                     name: "color".into(),
                     value: "red".into(),
                     span: Span::default(),
@@ -398,8 +403,8 @@ page "home" { Counter {} }
 "#;
     let doc = parse_webc(src).expect("parse");
     let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
-    let initial = crate::ssg::build_initial_state(&doc);
-    let ssg = crate::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
+    let initial = crate::core::ssg::build_initial_state(&doc);
+    let ssg = crate::core::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
     assert!(
         ssg.contains(&format!("{}=\"count\">7</span>", attr_names::INTERPOLATION)),
         "interpolation span not pre-rendered:\n{}",
@@ -425,8 +430,8 @@ page "home" { Widget {} }
 "#;
     let doc = parse_webc(src).expect("parse");
     let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
-    let initial = crate::ssg::build_initial_state(&doc);
-    let ssg = crate::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
+    let initial = crate::core::ssg::build_initial_state(&doc);
+    let ssg = crate::core::ssg::apply_ssg_with_locales(&html, &initial, &HashMap::new(), "");
     assert!(
         ssg.contains(&format!("{}=\"show &gt; 0\"", attr_names::IF))
             && ssg.contains(r#"style="display:block""#),
@@ -490,8 +495,8 @@ page "home" { p "{t("welcome")}" }
         "no interpolation span:\n{}",
         res.html
     );
-    let state = crate::ssg::build_initial_state(&doc);
-    let ssg = crate::ssg::apply_ssg_with_locales(&res.html, &state, &doc.locales, "fr");
+    let state = crate::core::ssg::build_initial_state(&doc);
+    let ssg = crate::core::ssg::apply_ssg_with_locales(&res.html, &state, &doc.locales, "fr");
     assert!(
         ssg.contains("Bienvenue"),
         "translation not pre-rendered:\n{}",
@@ -897,7 +902,7 @@ component Card {
 page "home" { Card {} }
 "#;
     let doc = parse_webc(src).expect("parse");
-    let css = crate::codegen::codegen_css::generate_combined_css(None, &doc);
+    let css = crate::codegen::css::generate_combined_css(None, &doc);
     assert!(
         css.contains("@media (max-width: 768px)"),
         "@media block missing in output:\n{}",
@@ -1043,6 +1048,44 @@ fn golden_error_message_has_caret() {
     let display = format!("{}", err);
     // Should contain a caret line
     assert!(display.contains('^'), "caret missing in error: {display}");
+}
+
+#[test]
+fn golden_error_message_no_color_format() {
+    let _guard = NO_COLOR_LOCK.lock().unwrap();
+    // With NO_COLOR set, output is plain ASCII but still structured.
+    std::env::set_var("NO_COLOR", "1");
+    let src = "page \"home\" { p \"hello {}\" }";
+    let err = crate::parser::parse_webc(src).unwrap_err();
+    let display = format!("{err}");
+    std::env::remove_var("NO_COLOR");
+
+    assert!(
+        !display.contains('\x1b'),
+        "ANSI escape found despite NO_COLOR: {display}"
+    );
+    assert!(
+        display.contains("error[parse]"),
+        "structured prefix missing: {display}"
+    );
+    assert!(display.contains('^'), "caret missing: {display}");
+}
+
+#[test]
+fn golden_error_message_file_path_included() {
+    let _guard = NO_COLOR_LOCK.lock().unwrap();
+    // When file is set on ParseError, the location string includes the path.
+    let src = "page \"home\" { p \"hello {}\" }";
+    let mut err = crate::parser::parse_webc(src).unwrap_err();
+    err.file = Some(std::path::PathBuf::from("src/pages/home.webc"));
+    std::env::set_var("NO_COLOR", "1");
+    let display = format!("{err}");
+    std::env::remove_var("NO_COLOR");
+
+    assert!(
+        display.contains("src/pages/home.webc"),
+        "file path missing in error: {display}"
+    );
 }
 
 // ── @switch (v1.2.0) ─────────────────────────────────────────────────────────
@@ -1297,6 +1340,11 @@ page "home" { Toggle {} }
         html
     );
     assert!(
+        html.contains(attr_names::CLASS_BOUND),
+        "data-webcore-class-bound marker missing:\n{}",
+        html
+    );
+    assert!(
         !html.contains("class:active"),
         "raw class:active should not appear in output:\n{}",
         html
@@ -1304,6 +1352,11 @@ page "home" { Toggle {} }
     assert!(
         js.contains("bindClassBindings"),
         "bindClassBindings missing in JS:\n{}",
+        js
+    );
+    assert!(
+        js.contains("[data-webcore-class-bound]"),
+        "bindClassBindings should use targeted selector, not querySelectorAll('*'):\n{}",
         js
     );
 }
@@ -1423,6 +1476,7 @@ page "dash" { App {} }
         title: "Test".into(),
         extra_css_files: vec![],
         critical_css: None,
+        csp_meta: None,
     };
     let res = generate_html(&doc, "dash", &opts_dash).expect("codegen");
     assert!(
@@ -1523,18 +1577,18 @@ fn unit_fnv1a_hash_stable() {
     // FNV-1a of b"hello" must produce a known stable 8-char hex string.
     // Manually computed: FNV-1a 32-bit of [104,101,108,108,111]
     //   2166136261 ^ 104 = 2166136225  * 16777619 = ...
-    let hash = crate::build::fnv1a_hash(b"hello");
+    let hash = crate::cli::assets::fnv1a_hash(b"hello");
     assert_eq!(hash.len(), 8, "hash must be 8 hex chars");
     // Verify it's consistent (same input → same output)
     assert_eq!(
         hash,
-        crate::build::fnv1a_hash(b"hello"),
+        crate::cli::assets::fnv1a_hash(b"hello"),
         "hash must be deterministic"
     );
     // Different inputs must differ
     assert_ne!(
         hash,
-        crate::build::fnv1a_hash(b"world"),
+        crate::cli::assets::fnv1a_hash(b"world"),
         "hash must depend on content"
     );
 }
@@ -1742,7 +1796,7 @@ fn bundle_analysis_tree_shaken_when_unused() {
 
 #[test]
 fn compile_errors_display_shows_count() {
-    use crate::error::{CompileError, CompileErrors};
+    use crate::core::error::{CompileError, CompileErrors};
     let errors = CompileErrors(vec![
         CompileError::MissingPage {
             name: "home".into(),
@@ -1760,7 +1814,7 @@ fn compile_errors_display_shows_count() {
 
 #[test]
 fn compile_errors_from_single_error() {
-    use crate::error::{CompileError, CompileErrors};
+    use crate::core::error::{CompileError, CompileErrors};
     let single = CompileError::MissingLayout {
         name: "Main".into(),
         available: vec![],
@@ -1834,7 +1888,7 @@ fn golden_css_nesting_parse_and_roundtrip() {
     // There should be exactly one component with one style rule containing 2 nested rules.
     let comp = doc.components.values().next().expect("component");
     let rule = match comp.style.first().expect("style item") {
-        crate::ast::StyleItem::Rule(r) => r,
+        crate::core::ast::StyleItem::Rule(r) => r,
         _ => panic!("expected Rule"),
     };
     assert_eq!(
@@ -2124,6 +2178,7 @@ page "home" { main { Card {} } }
         title: "Test".into(),
         extra_css_files: vec![],
         critical_css: Some(".card{padding:1rem}".into()),
+        csp_meta: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2132,9 +2187,8 @@ page "home" { main { Card {} } }
         res.html
     );
     assert!(
-        res.html
-            .contains(r#"media="print" onload="this.media='all'""#),
-        "full stylesheet should load deferred: {}",
+        res.html.contains(r#"media="print" data-webcore-defer"#),
+        "full stylesheet should load deferred via data-webcore-defer: {}",
         res.html
     );
     assert!(
@@ -2184,7 +2238,7 @@ layout MainLayout { main { slot content } }
 page "home" { main { Outer {} } }
 "#;
     let doc = parse_webc(src).expect("parse");
-    let used = crate::codegen::codegen_html::collect_page_components(&doc, "home");
+    let used = crate::codegen::html::collect_page_components(&doc, "home");
     assert!(
         used.contains("Outer"),
         "Outer should be collected: {used:?}"
@@ -2224,7 +2278,7 @@ app Blog {
 #[test]
 fn golden_expand_collection_basic() {
     let items = r#"[{"slug":"hello-world","title":"Hello"},{"slug":"second-post","title":"Two"}]"#;
-    let entries = crate::build::expand_collection("/post/:slug", items).expect("expand");
+    let entries = crate::cli::loader::expand_collection("/post/:slug", items).expect("expand");
     assert_eq!(entries.len(), 2);
     assert_eq!(
         entries[0],
@@ -2240,7 +2294,7 @@ fn golden_expand_collection_basic() {
 #[test]
 fn golden_expand_collection_numeric_param() {
     let items = r#"[{"id":1},{"id":42}]"#;
-    let entries = crate::build::expand_collection("/user/:id", items).expect("expand");
+    let entries = crate::cli::loader::expand_collection("/user/:id", items).expect("expand");
     assert_eq!(entries[0].0, "user/1/index.html");
     assert_eq!(entries[1].0, "user/42/index.html");
 }
@@ -2248,29 +2302,29 @@ fn golden_expand_collection_numeric_param() {
 #[test]
 fn golden_expand_collection_rejects_traversal() {
     let items = r#"[{"slug":"../../etc"}]"#;
-    let err = crate::build::expand_collection("/post/:slug", items).unwrap_err();
+    let err = crate::cli::loader::expand_collection("/post/:slug", items).unwrap_err();
     assert!(
         err.contains("unsafe"),
         "traversal value must be rejected: {err}"
     );
 
     let items = r#"[{"slug":"a/b"}]"#;
-    assert!(crate::build::expand_collection("/post/:slug", items).is_err());
+    assert!(crate::cli::loader::expand_collection("/post/:slug", items).is_err());
 
     let items = r#"[{"slug":""}]"#;
-    assert!(crate::build::expand_collection("/post/:slug", items).is_err());
+    assert!(crate::cli::loader::expand_collection("/post/:slug", items).is_err());
 }
 
 #[test]
 fn golden_expand_collection_missing_field() {
     let items = r#"[{"title":"no slug here"}]"#;
-    let err = crate::build::expand_collection("/post/:slug", items).unwrap_err();
+    let err = crate::cli::loader::expand_collection("/post/:slug", items).unwrap_err();
     assert!(err.contains("missing field 'slug'"), "{err}");
 }
 
 #[test]
 fn golden_expand_collection_requires_param_route() {
-    let err = crate::build::expand_collection("/posts", "[]").unwrap_err();
+    let err = crate::cli::loader::expand_collection("/posts", "[]").unwrap_err();
     assert!(err.contains("no ':param'"), "{err}");
 }
 
@@ -2280,9 +2334,261 @@ fn golden_ssg_prerenders_route_param() {
     let mut state: HashMap<String, String> = HashMap::new();
     state.insert("$route.slug".to_string(), "hello-world".to_string());
     let html = r#"<h1><span data-webcore-interpolation="$route.slug"></span></h1>"#;
-    let out = crate::ssg::apply_ssg_with_locales(html, &state, &HashMap::new(), "fr");
+    let out = crate::core::ssg::apply_ssg_with_locales(html, &state, &HashMap::new(), "fr");
     assert!(
         out.contains(">hello-world</span>"),
         "route param should be pre-rendered: {out}"
+    );
+}
+
+// ═══ v2.5.0 — CSP stricte & event delegation ═════════════════════════════════
+
+#[test]
+fn golden_csp_meta_emitted_when_set() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { p "hello" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: None,
+        csp_meta: Some("default-src 'self'; script-src 'self'".into()),
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        res.html.contains(r#"http-equiv="Content-Security-Policy""#),
+        "CSP meta tag missing:\n{}",
+        res.html
+    );
+    assert!(
+        res.html.contains("script-src &#x27;self&#x27;"),
+        "CSP value missing (should be HTML-escaped):\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_event_delegation_no_inline_onclick() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button on:click={count += 1} { "+" }
+    form on:submit={doSubmit()} { input type="text" name="q" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // No inline event handlers
+    assert!(
+        !res.html.contains("onclick="),
+        "onclick= should be absent (using delegation):\n{}",
+        res.html
+    );
+    assert!(
+        !res.html.contains("onsubmit="),
+        "onsubmit= should be absent (using delegation):\n{}",
+        res.html
+    );
+    // data-webcore-e attributes present
+    assert!(
+        res.html.contains("data-webcore-e=\"click\""),
+        "data-webcore-e click attribute missing:\n{}",
+        res.html
+    );
+    assert!(
+        res.html.contains("data-webcore-e=\"submit\""),
+        "data-webcore-e submit attribute missing:\n{}",
+        res.html
+    );
+    // JS should emit D() delegation setup
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("const D="),
+        "delegation function D() missing in JS:\n{}",
+        js
+    );
+    assert!(
+        js.contains("D('click',1)"),
+        "D('click') delegation call missing:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_spa_link_uses_data_webcore_nav() {
+    let src = r#"
+app MyApp {
+    routes { "/": HomePage "/about": AboutPage }
+}
+layout MainLayout { main { slot content } }
+page "home" { link to="/about" { "About" } }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-nav"),
+        "data-webcore-nav attribute missing on SPA link:\n{}",
+        res.html
+    );
+    assert!(
+        !res.html.contains("onclick=\"webcore_navigate"),
+        "inline onclick navigation should be absent:\n{}",
+        res.html
+    );
+    // JS should set up delegation for data-webcore-nav links
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("a[data-webcore-nav]"),
+        "data-webcore-nav delegation missing in JS:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_css_defer_swap_in_domcontentloaded() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { p "hi" }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: Some(".p{color:red}".into()),
+        csp_meta: None,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    // Deferred link uses data-webcore-defer (not onload=)
+    assert!(
+        res.html.contains("data-webcore-defer"),
+        "data-webcore-defer attribute missing on deferred CSS link:\n{}",
+        res.html
+    );
+    assert!(
+        !res.html.contains("onload="),
+        "onload= should be absent (CSP-unsafe):\n{}",
+        res.html
+    );
+    // JS should swap media to 'all' in DOMContentLoaded
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("data-webcore-defer"),
+        "css defer swap missing in JS DOMContentLoaded:\n{}",
+        js
+    );
+}
+
+// ── Fix 1: zero-JS page with critical_css must still include webcore.js ─────
+
+#[test]
+fn golden_critical_css_on_static_page_includes_script() {
+    // A page with no handlers/state would normally skip webcore.js.
+    // But critical_css injects a deferred <link> whose media swap needs JS,
+    // so webcore.js must be present even on otherwise zero-JS pages.
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { main { h1 "Static" } }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: Some("h1{color:red}".into()),
+        csp_meta: None,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        res.html.contains("<script defer src=\"/assets/webcore.js\">"),
+        "webcore.js must be present when critical_css is set (defer swap needs it):\n{}",
+        res.html
+    );
+}
+
+// ── Fix 2: component with only event handlers triggers needs_js ───────────
+
+#[test]
+fn golden_component_with_only_event_handler_includes_script() {
+    // A component that has no state/computed but does have an on:click handler
+    // must still pull in webcore.js. Previously document_needs_js() would miss this.
+    let src = r#"
+component Button {
+    view { button on:click="doThing" "Click" }
+}
+layout MainLayout { main { slot content } }
+page "home" { main { Button {} } }
+"#;
+    let html = compile_to_html(src);
+    assert!(
+        html.contains("<script"),
+        "page using a component with on:click must include webcore.js:\n{html}"
+    );
+}
+
+// ── Fix 3: CSS injection via </style> in critical CSS is escaped ──────────
+
+#[test]
+fn golden_critical_css_style_tag_injection_escaped() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { main { p "hi" } }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        // Adversarial CSS that attempts to break out of the <style> block.
+        critical_css: Some("a{content:\"</style><script>alert(1)</script>\"}".into()),
+        csp_meta: None,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        !res.html.contains("</style><script>"),
+        "</style> must be escaped in inlined critical CSS:\n{}",
+        res.html
+    );
+    assert!(
+        res.html.contains("<\\/style>"),
+        "escaped form <\\/style> should be present:\n{}",
+        res.html
+    );
+}
+
+// ── Fix 5: .length on array with quoted commas uses JSON parser ────────────
+
+#[test]
+fn golden_ssg_array_length_with_quoted_commas() {
+    use crate::core::ssg::eval_expr_with_locale;
+    use std::collections::HashMap;
+    let mut state = HashMap::new();
+    // Value contains a comma inside a quoted string — naive split gives 3, correct is 2.
+    state.insert("items".to_string(), r#"["a,b","c"]"#.to_string());
+    let result = eval_expr_with_locale("items.length", &state, &HashMap::new(), "en");
+    assert_eq!(
+        result,
+        Some("2".to_string()),
+        "array length should be 2 (quoted comma must not be counted as separator)"
+    );
+}
+
+// ── Fix 6: .length on a Unicode string counts chars not bytes ─────────────
+
+#[test]
+fn golden_ssg_string_length_unicode() {
+    use crate::core::ssg::eval_expr_with_locale;
+    use std::collections::HashMap;
+    let mut state = HashMap::new();
+    // "café" = 4 chars, 5 UTF-8 bytes (é is 2 bytes).
+    state.insert("name".to_string(), "café".to_string());
+    let result = eval_expr_with_locale("name.length", &state, &HashMap::new(), "en");
+    assert_eq!(
+        result,
+        Some("4".to_string()),
+        "string .length should be char count (4), not byte count (5)"
     );
 }

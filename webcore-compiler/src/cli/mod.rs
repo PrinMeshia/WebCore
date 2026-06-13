@@ -1,6 +1,12 @@
 //! CLI argument parsing and command dispatch.
 
-use crate::{build, check, serve};
+pub(crate) mod assets;
+pub(crate) mod build;
+pub(crate) mod check;
+pub(crate) mod config;
+pub(crate) mod loader;
+pub(crate) mod output;
+pub(crate) mod serve;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -28,7 +34,7 @@ pub(crate) fn run() {
         }
         "build" => {
             if let Err(e) = build::build_project() {
-                eprintln!("Build failed: {e}");
+                eprintln!("{e}");
                 std::process::exit(1);
             }
         }

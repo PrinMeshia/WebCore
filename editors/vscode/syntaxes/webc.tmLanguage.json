@@ -13,6 +13,7 @@
     { "include": "#lifecycle-event-attrs" },
     { "include": "#event-attrs" },
     { "include": "#class-binding-attrs" },
+    { "include": "#bind-attrs" },
     { "include": "#dynamic-attrs" },
     { "include": "#static-attrs" },
     { "include": "#query-vars" },
@@ -317,6 +318,7 @@
         { "include": "#lifecycle-event-attrs" },
         { "include": "#event-attrs" },
         { "include": "#class-binding-attrs" },
+        { "include": "#bind-attrs" },
         { "include": "#dynamic-attrs" },
         { "include": "#static-attrs" },
         { "include": "#query-vars" },
@@ -548,6 +550,16 @@
       "match": "(class:[a-zA-Z_-]+)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
         "1": { "name": "entity.other.attribute-name.class-binding.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
+    "bind-attrs": {
+      "name": "meta.attribute.bind.webc",
+      "match": "(bind:[a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.bind.webc" },
         "2": { "name": "punctuation.separator.webc" },
         "3": { "name": "meta.embedded.expression.webc" }
       }

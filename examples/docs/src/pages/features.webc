@@ -2,7 +2,7 @@ page "features" {
     div class="page-header" {
         h1 { "Features" }
         p class="page-sub" {
-            "Store · Validation · SSG · i18n · WASM · Tree-shaking"
+            "Store · Validation · SSG · i18n · WASM · Tree-shaking · CSP · Critical CSS · HMR"
         }
     }
 
@@ -288,8 +288,190 @@ const S = new State();
             strong { "How it works: " }
             code { "detect_features()" }
             " in "
-            code { "codegen_js.rs" }
+            code { "codegen/js/mod.rs" }
             " walks the AST once before code generation and sets boolean flags per feature. Each emitter checks its flag before writing — unused helpers are never serialised to the output file."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Fine-grained signals ("
+            code { "$effect" }
+            ") + HMR "
+            span class="version-tag" { "v2.0.0" }
+        }
+        p {
+            code { "$effect(fn)" }
+            " replaces manually subscribing to every state variable. The runtime tracks which variables "
+            code { "fn" }
+            " reads on its first execution and re-runs it only when those specific variables change."
+        }
+        pre class="code-block" {
+"component Search \{
+    state \{ query: String = \"\" results: List = [] \}
+
+    // Automatically re-runs whenever query changes
+    $effect(\{
+        results = filterItems(S.get('query'))
+    \})
+
+    view \{
+        input bind:value=\{query\} placeholder=\"Search…\"
+        @for r in results \{ li \"\{r\}\" \}
+    \}
+\}"
+        }
+        p {
+            "HMR: "
+            code { "webc serve" }
+            " opens a WebSocket connection between the dev server and the browser. On any source change the compiler rebuilds the affected file and sends a reload signal — no configuration needed."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Security — CSP + SRI + path traversal "
+            span class="version-tag" { "v2.3.0 – v2.5.0" }
+        }
+        p { "WebCore ships three independent security layers." }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Feature" }
+                    th { "Since" }
+                    th { "What it does" }
+                } }
+                tbody {
+                    tr {
+                        td { strong { "Path traversal guard" } }
+                        td { "v2.0.0" }
+                        td { code { "resolve_safe_path()" } " canonicalises every URL served by " code { "webc serve" } "; requests outside " code { "dist/" } " return 403." }
+                    }
+                    tr {
+                        td { strong { "SRI" } }
+                        td { "v2.3.0" }
+                        td { "In " code { "prod" } " mode, " code { "<script>" } " and " code { "<link>" } " tags receive " code { "integrity=\"sha256-…\"" } " + " code { "crossorigin=\"anonymous\"" } ". Hash computed by the Rust compiler." }
+                    }
+                    tr {
+                        td { strong { "Navigation URL escaping" } }
+                        td { "v2.3.0" }
+                        td { "Apostrophes and backslashes in " code { "webcore_navigate()" } " calls are escaped — prevents JS injection via crafted route paths." }
+                    }
+                    tr {
+                        td { strong { "Strict CSP — event delegation" } }
+                        td { "v2.5.0" }
+                        td { "All inline " code { "onclick=" } "/" code { "onsubmit=" } " replaced by " code { "data-webcore-e" } " + delegated listener. Set " code { "csp = true" } " in " code { "webc.toml" } " to also emit the " code { "Content-Security-Policy" } " meta tag." }
+                    }
+                    tr {
+                        td { strong { "ReDoS warning" } }
+                        td { "v2.2.0" }
+                        td { code { "validate:pattern" } " with nested quantifiers (" code { ")+" } ", " code { ")*" } ") emits " code { "warning[security]" } " at compile time." }
+                    }
+                }
+            }
+        }
+        div class="callout" {
+            strong { "CSP in webc.toml: " }
+            pre class="inline-code" {
+"[app]
+title = \"My App\"
+csp   = true      # emits Content-Security-Policy meta"
+            }
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Critical CSS + HTML minification "
+            span class="version-tag" { "v2.2.0 – v2.4.0" }
+        }
+        p {
+            "In "
+            code { "mode = \"prod\"" }
+            " the compiler applies several output optimisations automatically."
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Optimisation" }
+                    th { "Since" }
+                    th { "Effect" }
+                } }
+                tbody {
+                    tr {
+                        td { strong { "HTML minification" } }
+                        td { "v2.2.0" }
+                        td { "Comments and inter-tag whitespace stripped — reduces page size." }
+                    }
+                    tr {
+                        td { strong { "CSS scope elision" } }
+                        td { "v2.2.0" }
+                        td { "Components without a " code { "style {}" } " block don't emit " code { "data-v" } " — cleaner HTML." }
+                    }
+                    tr {
+                        td { strong { "script defer + preload" } }
+                        td { "v2.2.0" }
+                        td { code { "<script defer>" } " + " code { "<link rel=\"preload\">" } " in " code { "<head>" } " — JS never blocks HTML parsing." }
+                    }
+                    tr {
+                        td { strong { "Zero-JS elision" } }
+                        td { "v2.3.0" }
+                        td { "Pages with no state, loops, or events emit no " code { "<script>" } " at all." }
+                    }
+                    tr {
+                        td { strong { "Critical CSS inline" } }
+                        td { "v2.4.0" }
+                        td { "Each page's CSS (global + used components) is inlined in " code { "<style>" } ". " code { "theme.css" } " loads deferred — zero render-blocking CSS." }
+                    }
+                    tr {
+                        td { strong { "Image fingerprinting" } }
+                        td { "v2.4.0" }
+                        td { "Every image in " code { "public/" } " receives a FNV-1a content hash (" code { "logo.a3f9c1b2.png" } "). All HTML/CSS references updated — perfect cache busting." }
+                    }
+                }
+            }
+        }
+        div class="callout-tip" {
+            strong { "Enable prod mode: " }
+            "Set "
+            code { "mode = \"prod\"" }
+            " in your "
+            code { "webc.toml" }
+            ". Dev mode keeps full whitespace, no minification, no SRI — faster incremental rebuilds."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "SSG collections "
+            span class="version-tag" { "v2.4.0" }
+        }
+        p {
+            "Generate one static page per entry in a data file — no server needed for content-driven sites."
+        }
+        pre class="code-block" {
+"// app.webc — import posts.json, generate one page per entry
+import posts from \"data/posts.json\"
+
+app MyBlog \{
+    routes \{
+        \"/\":            HomePage
+        \"/post/:slug\":  PostPage each posts
+    \}
+\}
+
+// PostPage.webc — $route.slug is pre-rendered at build time
+page \"post\" \{
+    h1 \"\{$route.slug\}\"
+    p \"\{$route.date\}\"
+\}"
+        }
+        div class="callout" {
+            "Output paths are validated with "
+            code { "canonicalize()" }
+            " — a crafted slug cannot escape "
+            code { "dist/" }
+            "."
         }
     }
 }

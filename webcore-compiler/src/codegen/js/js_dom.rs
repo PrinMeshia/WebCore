@@ -4,7 +4,7 @@
 //! (`RuntimeFeatures`), collects lifecycle hook bodies, and gathers
 //! component-level event-listener registrations.
 
-use crate::ast::{AttributeValue, Element, WebCoreDocument};
+use crate::core::ast::{AttributeValue, Element, WebCoreDocument};
 
 /// Component-level event listener: emitted by `on:eventName={expr}` on a component call.
 pub struct EventListenerMapping {

@@ -1,13 +1,30 @@
 //! HTML Code Generator
 
+mod analysis;
+mod attrs;
+mod minify;
+mod props;
+mod utils;
+
 #[cfg(test)]
-use crate::ast::Component;
-use crate::ast::{Attribute, AttributeValue, Element, Layout, Page, WebCoreDocument};
+use crate::core::ast::Component;
+use crate::core::ast::{Attribute, AttributeValue, Element, Layout, Page, WebCoreDocument};
 use crate::codegen::attr_names;
-use crate::codegen::codegen_css::generate_scope_id;
-use crate::error::CompileError;
+use crate::codegen::css::generate_scope_id;
+use crate::core::error::CompileError;
 use std::fmt::Write as _;
 use std::path::Path;
+
+use analysis::{document_needs_js, find_layout};
+use attrs::{
+    expand_bind_attrs, handle_class_binding, handle_event_attr, handle_ref_attr,
+    handle_style_binding, handle_validation_attr,
+};
+use props::substitute_props;
+use utils::{html_escape, safe_id_prefix};
+
+pub(crate) use analysis::collect_page_components;
+pub(crate) use minify::minify_html;
 
 // Options passed from the build to influence the page shell
 #[derive(Debug, Clone)]
@@ -18,6 +35,9 @@ pub struct HtmlPageOptions {
     /// When set (prod mode), this CSS is inlined in a `<style>` tag in `<head>`
     /// and the full stylesheet is loaded deferred (non render-blocking).
     pub critical_css: Option<String>,
+    /// When set (prod mode with CSP enabled), emitted as a
+    /// `<meta http-equiv="Content-Security-Policy" content="...">` tag.
+    pub csp_meta: Option<String>,
 }
 
 /// Tracks a compiled event handler so the JS runtime can wire it up.
@@ -52,17 +72,29 @@ fn emit_html_shell(
     extra_css_files: &[String],
     needs_js: bool,
     critical_css: Option<&str>,
+    csp_meta: Option<&str>,
 ) -> String {
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n");
     write!(html, "<html lang=\"{}\">\n<head>\n", html_escape(lang)).unwrap();
     html.push_str("  <meta charset=\"UTF-8\">\n");
     html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+    if let Some(csp) = csp_meta {
+        writeln!(
+            html,
+            "  <meta http-equiv=\"Content-Security-Policy\" content=\"{}\">",
+            html_escape(csp)
+        )
+        .unwrap();
+    }
     writeln!(html, "  <title>{}</title>", html_escape(title)).unwrap();
     if let Some(css) = critical_css {
         // Critical CSS: inline the page's own styles, defer the full stylesheet.
-        writeln!(html, "  <style>{css}</style>").unwrap();
-        html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\" media=\"print\" onload=\"this.media='all'\">\n");
+        // `data-webcore-defer` is swapped to media="all" by DOMContentLoaded (CSP-safe).
+        // Escape </style> sequences so injected CSS can't break out of the tag.
+        let safe_css = css.replace("</", "<\\/");
+        writeln!(html, "  <style>{safe_css}</style>").unwrap();
+        html.push_str("  <link rel=\"stylesheet\" href=\"/assets/theme.css\" media=\"print\" data-webcore-defer>\n");
         html.push_str(
             "  <noscript><link rel=\"stylesheet\" href=\"/assets/theme.css\"></noscript>\n",
         );
@@ -84,212 +116,6 @@ fn emit_html_shell(
     html
 }
 
-/// Extract path from `webcore_navigate(path)` expression
-fn extract_navigate_path(expr: &str) -> Option<String> {
-    // Match webcore_navigate(/path) or webcore_navigate(root) or webcore_navigate("/path")
-    let expr = expr.trim();
-
-    if let Some(start) = expr.find("webcore_navigate(") {
-        let after_paren = &expr[start + 17..]; // After "webcore_navigate("
-        if let Some(end) = after_paren.find(')') {
-            let path = after_paren[..end].trim();
-
-            // Handle different path formats
-            let clean_path = if path == "root" {
-                "/".to_string()
-            } else if path.starts_with('"') && path.ends_with('"') {
-                // Quoted path: "/about"
-                path[1..path.len() - 1].to_string()
-            } else if path.starts_with('/') {
-                // Unquoted path: /about
-                path.to_string()
-            } else {
-                // Fallback
-                format!("/{path}")
-            };
-
-            return Some(clean_path);
-        }
-    }
-    None
-}
-
-fn find_layout(document: &WebCoreDocument) -> Result<&Layout, CompileError> {
-    // Prefer the layout declared in the app block, then fall back to MainLayout / default
-    if let Some(name) = document.app.as_ref().and_then(|a| a.layout.as_deref()) {
-        if let Some(layout) = document.layouts.get(name) {
-            return Ok(layout);
-        }
-        return Err(CompileError::MissingLayout {
-            name: name.to_string(),
-            available: document.layouts.keys().cloned().collect(),
-        });
-    }
-    document
-        .layouts
-        .get("MainLayout")
-        .or_else(|| document.layouts.get("default"))
-        .ok_or_else(|| CompileError::MissingLayout {
-            name: "MainLayout".to_string(),
-            available: document.layouts.keys().cloned().collect(),
-        })
-}
-
-/// Collect the names of all components reachable from `elements`,
-/// following component references recursively (a component used by
-/// another component is also collected).
-fn collect_components_in(
-    elements: &[Element],
-    document: &WebCoreDocument,
-    out: &mut std::collections::HashSet<String>,
-) {
-    for elem in elements {
-        match elem {
-            Element::Component { name, content, .. } => {
-                if out.insert(name.clone()) {
-                    if let Some(comp) = document.components.get(name) {
-                        collect_components_in(&comp.view, document, out);
-                    }
-                }
-                collect_components_in(content, document, out);
-            }
-            Element::Tag { content, .. }
-            | Element::SlotContent { content, .. }
-            | Element::For { content, .. }
-            | Element::ErrorBlock { content, .. } => {
-                collect_components_in(content, document, out);
-            }
-            Element::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                collect_components_in(then_branch, document, out);
-                if let Some(else_b) = else_branch {
-                    collect_components_in(else_b, document, out);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Return the set of component names used by `page_name` (page content +
-/// layout), following nested component references. Used by the build to
-/// assemble per-page critical CSS.
-pub(crate) fn collect_page_components(
-    document: &WebCoreDocument,
-    page_name: &str,
-) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
-    // A component rendered as a page (e.g. `PostPage`) carries its own style
-    // block but never appears as an Element::Component — include it directly.
-    if document.components.contains_key(page_name) {
-        out.insert(page_name.to_string());
-    }
-    if let Some(page) = document.pages.get(page_name) {
-        collect_components_in(&page.content, document, &mut out);
-    }
-    if let Ok(layout) = find_layout(document) {
-        collect_components_in(&layout.content, document, &mut out);
-    }
-    out
-}
-
-fn elements_need_js(elements: &[crate::ast::Element]) -> bool {
-    use crate::ast::Element;
-    for elem in elements {
-        match elem {
-            Element::Interpolation(..) => return true,
-            Element::If { .. } => return true,
-            Element::For { .. } => return true,
-            Element::Tag {
-                attributes,
-                content,
-                ..
-            } => {
-                for attr in attributes {
-                    if matches!(attr.value, AttributeValue::Expression(_)) {
-                        return true;
-                    }
-                    if attr.name.starts_with("on:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("class:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("style:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("validate:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("ref:") {
-                        return true;
-                    }
-                    if attr.name == "bind:value" || attr.name == "bind:checked" {
-                        return true;
-                    }
-                }
-                if elements_need_js(content) {
-                    return true;
-                }
-            }
-            Element::Component {
-                attributes,
-                content,
-                ..
-            } => {
-                if elements_need_js(content) {
-                    return true;
-                }
-                for attr in attributes {
-                    if matches!(attr.value, AttributeValue::Expression(_)) {
-                        return true;
-                    }
-                }
-            }
-            Element::SlotContent { content, .. } => {
-                if elements_need_js(content) {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn document_needs_js(document: &WebCoreDocument, page_name: &str) -> bool {
-    if !document.store.is_empty() {
-        return true;
-    }
-    if document
-        .app
-        .as_ref()
-        .map(|a| !a.routes.is_empty())
-        .unwrap_or(false)
-    {
-        return true;
-    }
-    for comp in document.components.values() {
-        if !comp.state.is_empty()
-            || !comp.computed.is_empty()
-            || comp.http.is_some()
-            || comp.mount_body.is_some()
-            || comp.destroy_body.is_some()
-        {
-            return true;
-        }
-    }
-    if let Some(page) = document.pages.get(page_name) {
-        if elements_need_js(&page.content) {
-            return true;
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 pub(crate) fn generate_spa_html(
     document: &WebCoreDocument,
@@ -305,6 +131,7 @@ pub(crate) fn generate_spa_html(
         &options.extra_css_files,
         needs_js,
         options.critical_css.as_deref(),
+        options.csp_meta.as_deref(),
     );
 
     // Generate layout shell (without page content, just the structure)
@@ -380,13 +207,17 @@ pub(crate) fn generate_page_content_only_with_root(
 
     let layout = find_layout(document)?;
 
-    let needs_js = document_needs_js(document, page_name);
+    // critical_css injects a deferred <link> whose media swap requires JS;
+    // force needs_js=true so webcore.js is included even on otherwise static pages.
+    let needs_js =
+        document_needs_js(document, page_name) || options.critical_css.is_some();
     let mut html = emit_html_shell(
         &options.title,
         &options.lang,
         &options.extra_css_files,
         needs_js,
         options.critical_css.as_deref(),
+        options.csp_meta.as_deref(),
     );
 
     // Generate layout content, replacing slots with page content
@@ -418,13 +249,15 @@ pub(crate) fn generate_html(
 
     let layout = find_layout(document)?;
 
-    let needs_js = document_needs_js(document, page_name);
+    let needs_js =
+        document_needs_js(document, page_name) || options.critical_css.is_some();
     let mut html = emit_html_shell(
         &options.title,
         &options.lang,
         &options.extra_css_files,
         needs_js,
         options.critical_css.as_deref(),
+        options.csp_meta.as_deref(),
     );
 
     // Generate layout content, replacing slots with page content
@@ -440,12 +273,37 @@ pub(crate) fn generate_html(
     Ok(HtmlGenerationResult { html, handlers })
 }
 
+/// Returns `true` if any element in the slice (or its descendants) is a `Slot`
+/// or `SlotContent`. Used to short-circuit `resolve_slots` on subtrees that
+/// need no substitution.
+fn contains_slot(elements: &[Element]) -> bool {
+    elements.iter().any(|e| match e {
+        Element::Slot(..) | Element::SlotContent { .. } => true,
+        Element::Tag { content, .. }
+        | Element::Component { content, .. }
+        | Element::For { content, .. }
+        | Element::ErrorBlock { content, .. } => contains_slot(content),
+        Element::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            contains_slot(then_branch)
+                || else_branch.as_ref().is_some_and(|eb| contains_slot(eb))
+        }
+        _ => false,
+    })
+}
+
 /// Recursively replace Slot placeholders in a layout tree with provided page content.
 fn resolve_slots(
     elements: &[Element],
     slot_map: &std::collections::HashMap<String, Vec<Element>>,
     default_content: &[Element],
 ) -> Vec<Element> {
+    if !contains_slot(elements) {
+        return elements.to_vec();
+    }
     let mut resolved = Vec::new();
     for element in elements {
         match element {
@@ -622,198 +480,6 @@ fn generate_elements_with_scope_and_counter(
     Ok((result, all_handlers))
 }
 
-/// Expand `bind:attr={expr}` into a value/checked attr + event handler pair.
-/// `bind:value={x}`   → `value={x}` + `on:input={x = event.target.value}`
-/// `bind:checked={x}` → `checked={x}` + `on:change={x = event.target.checked}`
-fn expand_bind_attrs(attributes: &[Attribute]) -> Vec<Attribute> {
-    if !attributes.iter().any(|a| a.name.starts_with("bind:")) {
-        return attributes.to_vec();
-    }
-    let mut result = Vec::with_capacity(attributes.len() + 2);
-    for attr in attributes {
-        if let Some(target) = attr.name.strip_prefix("bind:") {
-            if let AttributeValue::Expression(expr) = &attr.value {
-                result.push(Attribute {
-                    name: target.to_string(),
-                    value: AttributeValue::Expression(expr.clone()),
-                    span: attr.span,
-                });
-                let (event, prop) = if target == "checked" || target == "selected" {
-                    ("on:change", "event.target.checked")
-                } else {
-                    ("on:input", "event.target.value")
-                };
-                result.push(Attribute {
-                    name: event.to_string(),
-                    value: AttributeValue::Expression(format!("{} = {}", expr.trim(), prop)),
-                    span: attr.span,
-                });
-            }
-        } else {
-            result.push(attr.clone());
-        }
-    }
-    result
-}
-
-// ── Attribute sub-handlers ────────────────────────────────────────────────────
-
-/// `ref:name=true` → `Some(" data-webcore-ref=\"name\"")`; returns `None` for other attrs.
-fn handle_ref_attr(attr_name: &str) -> Option<String> {
-    let ref_name = attr_name.strip_prefix("ref:")?;
-    Some(format!(
-        " {}=\"{}\"",
-        attr_names::REF,
-        html_escape(ref_name)
-    ))
-}
-
-/// `class:name={expr}` → `Some(" data-webcore-class-name=\"expr\"")`; returns `None` otherwise.
-fn handle_class_binding(attr_name: &str, expr: &str) -> Option<String> {
-    let class_name = attr_name.strip_prefix("class:")?;
-    Some(format!(
-        " {}{}=\"{}\"",
-        attr_names::CLASS_PREFIX,
-        class_name,
-        html_escape(expr)
-    ))
-}
-
-/// `style:prop={expr}` → `Some(" data-webcore-style-prop=\"expr\"")`; returns `None` otherwise.
-fn handle_style_binding(attr_name: &str, expr: &str) -> Option<String> {
-    let prop_name = attr_name.strip_prefix("style:")?;
-    Some(format!(
-        " {}{}=\"{}\"",
-        attr_names::STYLE_PREFIX,
-        prop_name,
-        html_escape(expr)
-    ))
-}
-
-/// Emit HTML for a validate:* attribute.
-/// Returns the one or two data-* attribute strings, or `None` if not a validate: attr.
-fn handle_validation_attr(attr: &Attribute) -> Option<String> {
-    let validator = attr.name.strip_prefix("validate:")?;
-    let mut out = String::new();
-    match &attr.value {
-        AttributeValue::String(v) => match validator {
-            "minlength" | "maxlength" => {
-                let (constraint, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
-                write!(
-                    out,
-                    " data-webcore-validate-{}=\"{}\"",
-                    validator,
-                    html_escape(constraint.trim())
-                )
-                .unwrap();
-                if !msg.is_empty() {
-                    write!(
-                        out,
-                        " data-webcore-validate-{}-msg=\"{}\"",
-                        validator,
-                        html_escape(msg.trim())
-                    )
-                    .unwrap();
-                }
-            }
-            "pattern" => {
-                let (pat, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
-                let pat = pat.trim();
-                write!(
-                    out,
-                    " data-webcore-validate-pattern=\"{}\"",
-                    html_escape(pat)
-                )
-                .unwrap();
-                if !msg.is_empty() {
-                    write!(
-                        out,
-                        " data-webcore-validate-pattern-msg=\"{}\"",
-                        html_escape(msg.trim())
-                    )
-                    .unwrap();
-                }
-                // Compile-time ReDoS warning: nested quantifiers can cause catastrophic backtracking in browsers
-                if pat.contains(")+") || pat.contains(")*") || pat.contains(")+?") {
-                    eprintln!("warning[security]: validate:pattern=\"{pat}\" may contain nested quantifiers — potential ReDoS in browser");
-                }
-            }
-            _ => {
-                write!(
-                    out,
-                    " data-webcore-validate-{}=\"{}\"",
-                    validator,
-                    html_escape(v)
-                )
-                .unwrap();
-            }
-        },
-        AttributeValue::Boolean(true) => {
-            write!(out, " data-webcore-validate-{validator}=\"\"").unwrap();
-        }
-        _ => {}
-    }
-    Some(out)
-}
-
-/// Returns the HTML attribute string for an `on:event={expr}` attribute, and (via out-params)
-/// the handler mapping to register and the resolved href for link navigation.
-/// Returns `None` when `attr_name` does not start with `on:`.
-#[allow(clippy::too_many_arguments)]
-fn handle_event_attr(
-    attr_name: &str,
-    expr: &str,
-    is_link: bool,
-    prefix: &str,
-    counter: &mut usize,
-    handlers: &mut Vec<HandlerMapping>,
-    resolved_href: &mut Option<String>,
-) -> Option<String> {
-    if !attr_name.starts_with("on:") {
-        return None;
-    }
-    let raw_event_type = attr_name.strip_prefix("on:").unwrap_or("click");
-    let (event_type, debounce_ms) = if let Some(pos) = raw_event_type.find("|debounce") {
-        (&raw_event_type[..pos], Some(300u32))
-    } else {
-        (raw_event_type, None)
-    };
-
-    *counter += 1;
-    let handler_id = format!("{prefix}btn{counter}");
-
-    // Extract href from webcore_navigate() for links
-    if is_link && expr.contains("webcore_navigate") {
-        if let Some(path) = extract_navigate_path(expr) {
-            *resolved_href = Some(path);
-        }
-    }
-
-    let mapped_event_type = if let Some(ms) = debounce_ms {
-        format!("{event_type}|debounce={ms}")
-    } else {
-        event_type.to_string()
-    };
-    handlers.push(HandlerMapping {
-        id: handler_id.clone(),
-        event_type: mapped_event_type,
-        expression: expr.to_string(),
-    });
-
-    let html_attr = if debounce_ms.is_some() {
-        format!(" id=\"{handler_id}\"")
-    } else {
-        match event_type {
-            "click" => format!(" id=\"{handler_id}\" onclick=\"webcore_handle_click('{handler_id}'); return false;\""),
-            "submit" => format!(" id=\"{handler_id}\" onsubmit=\"webcore_handle_submit('{handler_id}'); return false;\""),
-            "change" => format!(" id=\"{handler_id}\" onchange=\"webcore_handle_change('{handler_id}')\""),
-            "input" => format!(" id=\"{handler_id}\" oninput=\"webcore_handle_input('{handler_id}')\""),
-            _ => format!(" id=\"{handler_id}\" on{event_type}=\"webcore_handle_event('{event_type}', '{handler_id}')\""),
-        }
-    };
-    Some(html_attr)
-}
-
 /// Generate HTML for a single `<tag>` element, including:
 /// - CSS scope attribute (`data-v`)
 /// - Static, boolean, and expression attributes
@@ -860,13 +526,20 @@ fn generate_tag_element(
     }
 
     // Mark elements that have dynamic (expression) attribute bindings via data-webcore-attr-*
-    // (class: bindings use data-webcore-class-* and are NOT marked with data-webcore-bound)
     if attributes.iter().any(|a| {
         !a.name.starts_with("on:")
             && !a.name.starts_with("class:")
             && matches!(&a.value, AttributeValue::Expression(_))
     }) {
         write!(result, " {}", attr_names::BOUND).unwrap();
+    }
+    // Mark elements with class: bindings separately so bindClassBindings can use a targeted
+    // selector instead of querySelectorAll('*') which scans the entire DOM.
+    if attributes
+        .iter()
+        .any(|a| a.name.starts_with("class:") && matches!(&a.value, AttributeValue::Expression(_)))
+    {
+        write!(result, " {}", attr_names::CLASS_BOUND).unwrap();
     }
 
     // Detect validate:* attributes and add data-webcore-field
@@ -1052,17 +725,10 @@ fn generate_tag_element(
     if is_link {
         if let Some(h) = resolved_href {
             let has_nav = document.app.as_ref().is_some_and(|a| !a.routes.is_empty());
-            // Internal paths get an onclick for SPA navigation so clicking
-            // never triggers a full page reload.  href is kept as fallback.
+            // Internal paths use data-webcore-nav for CSP-safe SPA navigation.
+            // The JS runtime delegates via document.addEventListener('click', ...).
             if has_nav && h.starts_with('/') {
-                let js_safe_h = h.replace('\\', "\\\\").replace('\'', "\\'");
-                write!(
-                    result,
-                    " href=\"{}\" onclick=\"webcore_navigate('{}'); return false;\"",
-                    html_escape(&h),
-                    js_safe_h
-                )
-                .unwrap();
+                write!(result, " href=\"{}\" data-webcore-nav", html_escape(&h)).unwrap();
             } else {
                 write!(result, " href=\"{}\"", html_escape(&h)).unwrap();
             }
@@ -1468,246 +1134,6 @@ fn render_if_element(
     Ok((result, all_handlers))
 }
 
-fn html_escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-/// Substitute prop values into a component view before rendering.
-///
-/// Static props: `Interpolation(propName)` → `Text(value)`.
-/// Dynamic props: `Interpolation(propName)` → `Interpolation(expr)` (stays reactive).
-/// Word-boundary-aware identifier substitution within an expression string.
-/// Replaces `name` with `replacement` only when it is not adjacent to `[a-zA-Z0-9_$]`.
-fn replace_identifier(src: &str, name: &str, replacement: &str) -> String {
-    let mut result = String::new();
-    let mut remaining = src;
-    loop {
-        match remaining.find(name) {
-            None => {
-                result.push_str(remaining);
-                break;
-            }
-            Some(pos) => {
-                let before_ok = pos == 0
-                    || remaining[..pos]
-                        .chars()
-                        .last()
-                        .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '$');
-                let after_ok = remaining[pos + name.len()..]
-                    .chars()
-                    .next()
-                    .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '$');
-                if before_ok && after_ok {
-                    result.push_str(&remaining[..pos]);
-                    result.push_str(replacement);
-                    remaining = &remaining[pos + name.len()..];
-                } else {
-                    result.push_str(&remaining[..=pos]);
-                    remaining = &remaining[pos + 1..];
-                }
-            }
-        }
-    }
-    result
-}
-
-/// Substitutes prop identifiers into an expression string using the combined prop map.
-///
-/// The combined map encodes both static and dynamic props in one pass:
-/// `(true, value)` = static prop (resolves to a literal string),
-/// `(false, expr)` = dynamic prop (stays as a reactive expression).
-///
-/// Returns `Some((true, literal))` for a direct static match,
-/// `Some((false, expr))` for a dynamic/compound substitution,
-/// or `None` if the expression is unchanged.
-fn substitute_in_expr_combined(
-    trimmed: &str,
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
-) -> Option<(bool, String)> {
-    // Direct exact match — cheapest path
-    if let Some(&(is_static, val)) = combined.get(trimmed) {
-        return Some((is_static, val.to_string()));
-    }
-    // Compound expression: scan once for all identifier replacements
-    let mut result = trimmed.to_string();
-    for (&prop, &(is_static, val)) in combined {
-        let replacement = if is_static {
-            format!("({val})")
-        } else {
-            val.to_string()
-        };
-        result = replace_identifier(&result, prop, &replacement);
-    }
-    if result == trimmed {
-        None
-    } else {
-        Some((false, result))
-    }
-}
-
-/// Apply prop substitution to attribute values using the combined prop map.
-fn substitute_props_in_attrs_combined(
-    attributes: &[Attribute],
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
-) -> Vec<Attribute> {
-    attributes
-        .iter()
-        .map(|attr| {
-            let value = match &attr.value {
-                AttributeValue::Expression(expr) => {
-                    match substitute_in_expr_combined(expr.trim(), combined) {
-                        Some((true, val)) => AttributeValue::String(val),
-                        Some((false, e)) => AttributeValue::Expression(e),
-                        None => attr.value.clone(),
-                    }
-                }
-                other => other.clone(),
-            };
-            Attribute {
-                name: attr.name.clone(),
-                value,
-                span: attr.span,
-            }
-        })
-        .collect()
-}
-
-/// Build a combined prop map once and recurse using it.
-/// Avoids two separate O(n_props) iterations per expression for every element.
-fn substitute_props(
-    elements: &[Element],
-    static_props: &std::collections::HashMap<String, String>,
-    dynamic_props: &std::collections::HashMap<String, String>,
-) -> Vec<Element> {
-    // Build combined map once for the entire subtree traversal.
-    let combined: std::collections::HashMap<&str, (bool, &str)> = static_props
-        .iter()
-        .map(|(k, v)| (k.as_str(), (true, v.as_str())))
-        .chain(
-            dynamic_props
-                .iter()
-                .map(|(k, v)| (k.as_str(), (false, v.as_str()))),
-        )
-        .collect();
-    elements
-        .iter()
-        .map(|e| substitute_props_elem_combined(e, &combined))
-        .collect()
-}
-
-fn substitute_props_elem_combined(
-    element: &Element,
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
-) -> Element {
-    match element {
-        Element::Interpolation(expr, span) => {
-            match substitute_in_expr_combined(expr.trim(), combined) {
-                Some((true, val)) => Element::Text(val, *span),
-                Some((false, new_expr)) => Element::Interpolation(new_expr, *span),
-                None => element.clone(),
-            }
-        }
-        Element::Tag {
-            name,
-            attributes,
-            content,
-            span,
-        } => Element::Tag {
-            name: name.clone(),
-            attributes: substitute_props_in_attrs_combined(attributes, combined),
-            content: elements_combined(content, combined),
-            span: *span,
-        },
-        Element::Component {
-            name,
-            attributes,
-            content,
-            span,
-        } => Element::Component {
-            name: name.clone(),
-            attributes: substitute_props_in_attrs_combined(attributes, combined),
-            content: elements_combined(content, combined),
-            span: *span,
-        },
-        Element::For {
-            item,
-            index,
-            iterable,
-            key,
-            content,
-            span,
-        } => Element::For {
-            item: item.clone(),
-            index: index.clone(),
-            iterable: iterable.clone(),
-            key: key.clone(),
-            content: elements_combined(content, combined),
-            span: *span,
-        },
-        Element::If {
-            condition,
-            then_branch,
-            else_branch,
-            span,
-        } => Element::If {
-            condition: condition.clone(),
-            then_branch: elements_combined(then_branch, combined),
-            else_branch: else_branch
-                .as_ref()
-                .map(|eb| elements_combined(eb, combined)),
-            span: *span,
-        },
-        Element::ErrorBlock {
-            field,
-            content,
-            span,
-        } => Element::ErrorBlock {
-            field: field.clone(),
-            content: elements_combined(content, combined),
-            span: *span,
-        },
-        Element::SlotContent {
-            name,
-            content,
-            span,
-        } => Element::SlotContent {
-            name: name.clone(),
-            content: elements_combined(content, combined),
-            span: *span,
-        },
-        _ => element.clone(),
-    }
-}
-
-fn elements_combined(
-    elements: &[Element],
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
-) -> Vec<Element> {
-    elements
-        .iter()
-        .map(|e| substitute_props_elem_combined(e, combined))
-        .collect()
-}
-
-/// Derive a safe HTML-id-compatible prefix from a name (lowercase alphanumeric, max 12 chars).
-fn safe_id_prefix(name: &str) -> String {
-    let s: String = name
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .take(12)
-        .collect();
-    if s.is_empty() {
-        "p".to_string()
-    } else {
-        s
-    }
-}
-
 // Helper functions for SPA generation (test-only)
 #[cfg(test)]
 fn generate_layout_shell(
@@ -1835,7 +1261,7 @@ fn generate_component_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Span;
+    use crate::core::ast::Span;
 
     fn make_button_page(page_name: &str) -> Page {
         Page {
@@ -1893,6 +1319,7 @@ mod tests {
             title: "t".to_string(),
             extra_css_files: vec![],
             critical_css: None,
+            csp_meta: None,
         };
         let res = generate_spa_html(&doc, &opts).expect("spa ok");
 
@@ -1958,6 +1385,7 @@ mod tests {
             title: "t".to_string(),
             extra_css_files: vec![],
             critical_css: None,
+            csp_meta: None,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
         assert!(
@@ -2022,65 +1450,9 @@ mod tests {
             title: "t".to_string(),
             extra_css_files: vec![],
             critical_css: None,
+            csp_meta: None,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
-        assert!(res.html.contains("onfoo=\"webcore_handle_event('foo',"));
+        assert!(res.html.contains("data-webcore-e=\"foo\""));
     }
-}
-
-// ── HTML minifier (prod mode) ────────────────────────────────────────────────
-
-/// Strip HTML comments and collapse inter-tag whitespace (prod mode).
-pub(crate) fn minify_html(html: &str) -> String {
-    let no_comments = strip_html_comments(html);
-    collapse_whitespace_between_tags(&no_comments)
-}
-
-fn strip_html_comments(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let bytes = html.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i..].starts_with(b"<!--") {
-            if let Some(end) = html[i..].find("-->") {
-                i += end + 3;
-            } else {
-                result.push_str(&html[i..]);
-                break;
-            }
-        } else {
-            result.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    result
-}
-
-fn collapse_whitespace_between_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let bytes = html.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'>' {
-            result.push('>');
-            i += 1;
-            // Skip whitespace-only runs between > and <
-            let start = i;
-            while i < bytes.len()
-                && (bytes[i] == b' ' || bytes[i] == b'\n' || bytes[i] == b'\t' || bytes[i] == b'\r')
-            {
-                i += 1;
-            }
-            if i < bytes.len() && bytes[i] == b'<' {
-                // pure whitespace between > and < — discard
-            } else {
-                // contains non-whitespace — keep original
-                result.push_str(&html[start..i]);
-            }
-        } else {
-            result.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    result
 }

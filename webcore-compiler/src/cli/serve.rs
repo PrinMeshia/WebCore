@@ -1,6 +1,6 @@
 //! Dev server: HTTP file serving with WebSocket HMR (hot-module reload).
 
-use crate::build::build_project;
+use super::build::build_project;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
 use std::net::{TcpListener, UdpSocket};
