@@ -5,7 +5,39 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.2]
+## [2.7.0]
+
+### Ajouts (v2.7.0)
+
+- **`@for` imbriqué — accès aux variables externes** — les variables de boucle du `@for` parent sont désormais accessibles dans les boucles internes via un mécanisme de contexte (`_wc_ctx`) propagé aux templates imbriqués ; `fillItem()` résout les interpolations dans le contexte parent en cascade ; `bindFor()` accepte un paramètre `root=document` pour les appels récursifs ; garde `isConnected` pour les callbacks `$effect` stales ; flag `_wc_b` pour éviter le double-binding
+- **Fix grammaire `expression`** — la règle PEG `expression` utilisait un lookahead `element` en contexte atomique, ce qui empêchait `@for` et `@if` d'être des fils directs d'un autre `@for` ; la règle est simplifiée en `@{ (!("{" | "}") ~ ANY)+ }`, plus correcte et plus robuste
+- **`webc fmt`** — nouvelle commande CLI pour formater automatiquement les fichiers `.webc` ; implémente la conversion AST → source formatée avec 4 espaces d'indentation (configurable via `[fmt] indent = N` dans `webc.toml`) ; `webc fmt --check` sort avec code 1 si des fichiers seraient modifiés (CI) ; formatage idempotent garanti (parse → format → re-parse produit le même HTML)
+
+### Corrections (v2.7.0)
+
+- **`@for` / `@if` imbriqués sans wrapper** — auparavant, placer un `@for` ou un `@if` directement à l'intérieur d'un `@for` (sans balise wrapper) provoquait une erreur de parse `expected EOI, import_decl` ; corrigé par la simplification de la règle `expression`
+- 5 nouveaux tests — 152 tests au total
+
+---
+
+## [2.6.0]
+
+### Ajouts (v2.6.0)
+
+- **Fragment shorthand `<>...</>`** — groupe d'éléments sans balise wrapper ; compilé en nœuds inline ; supporte les directives de contrôle, les composants et l'imbrication arbitraire ; `Element::Fragment` dans l'AST, `<>` / `</>` dans la grammaire PEG
+- **Modificateurs d'événements** — `on:click|stop`, `on:click|prevent`, `on:click|once`, `on:click|self` — encodés dans `data-webcore-e="click|stop|prevent"` ; gérés par le listener délégué `D()` sans JS inline ; combinables (ex. `on:click|stop|prevent`) ; `|once` utilise un marqueur `data-webcore-onced` pour garantir l'exécution unique ; `|self` s'exécute uniquement si `e.target === el`
+- **Valeurs de props par défaut** — `props { label: String = "Défaut" }` — si la prop est omise à l'instanciation, la valeur par défaut est injectée statiquement ; compatible avec les props statiques et dynamiques ; types string, numérique et booléen supportés
+- **Commande `webc watch`** — surveille les fichiers sources et rebuilde automatiquement à chaque modification sans serveur de développement ; debounce 200 ms via la crate `notify` v8.2 ; idéal pour les pipelines CI/CD ou les builds continus
+- **Analyse de bundle améliorée** — détection du core bytes corrigée (`class State{` au lieu de `class _S`) ; ajout de `bindClassBindings` et `evalCond` dans le tableau d'analyse ; les tailles estimées reflètent mieux le bundle réel
+
+### Corrections (v2.6.0)
+
+- **Détection core bytes** — `class State{` remplace `class _S` dans `output.rs` ; le core était systématiquement compté à 420 octets fixes au lieu de refléter le nombre réel de composants réactifs
+- 8 nouveaux tests — 147 tests au total
+
+---
+
+## [2.5.2] 
 
 ### Améliorations DX (v2.5.2)
 

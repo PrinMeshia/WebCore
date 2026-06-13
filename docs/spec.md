@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 2.5.2 — Référence complète de la syntaxe `.webc`
+> Version : 2.6.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -63,7 +63,12 @@
 48. [Nouveautés v2.5.0](#nouveautés-v250)
 49. [Nouveautés v2.5.1](#nouveautés-v251)
 50. [Nouveautés v2.5.2](#nouveautés-v252)
-51. [Limites actuelles (v2.5.2)](#limites-actuelles-v252)
+51. [`<>...</>` — Fragment shorthand](#--fragment-shorthand)
+52. [`on:event|stop|prevent|once|self` — Modificateurs d'événements](#oneventstoppreventselfonce--modificateurs-dévénements)
+53. [Props — Valeurs par défaut](#props--valeurs-par-défaut)
+54. [Commande `webc watch`](#commande-webc-watch)
+55. [Nouveautés v2.6.0](#nouveautés-v260)
+56. [Limites actuelles (v2.6.0)](#limites-actuelles-v260)
 
 ---
 
@@ -295,6 +300,27 @@ Badge label="Actif" color="green" {}
 // Prop dynamique (expression réactive)
 Badge label={statusMsg} color={statusColor} {}
 ```
+
+**Valeurs par défaut** : chaque prop peut avoir une valeur par défaut utilisée si la prop est omise à l'instanciation :
+
+```webc
+component Badge {
+    props {
+        label: String = "N/A"
+        color: String = "gray"
+    }
+    view {
+        span class={color} "Statut : {label}"
+    }
+}
+
+// Utilisation sans props → valeurs par défaut injectées
+Badge {}          // → label="N/A", color="gray"
+Badge label="OK"  // → color="gray" (défaut)
+Badge label="OK" color="green" {}  // → override complet
+```
+
+La valeur par défaut est injectée **statiquement** à la compilation — elle n'est pas évaluée au runtime.
 
 **Props statiques** (`name="valeur"`) : substituées statiquement à la compilation.  
 **Props dynamiques** (`name={expr}`) : `{propName}` dans la vue devient un span réactif
@@ -655,6 +681,74 @@ p { "Bonjour " strong { "le monde" } " !" }
 link to="/about" { "À propos" }   // → <a href="/about">À propos</a>
 link href="https://example.com" { "Externe" }
 ```
+
+---
+
+## `<>...</>` — Fragment shorthand
+
+Un **fragment** groupe plusieurs éléments sans élément DOM wrapper. Il est utile pour rendre plusieurs nœuds adjacents là où un seul élément est attendu.
+
+### Syntaxe
+
+```webc
+<>
+    p "Premier"
+    p "Deuxième"
+</>
+```
+
+### Compilation
+
+Le compilateur rend les éléments du fragment **inline**, sans aucune balise wrapper :
+
+```html
+<!-- Source .webc -->
+<>
+    p "A"
+    p "B"
+</>
+
+<!-- HTML généré — pas de div intermédiaire -->
+<p>A</p>
+<p>B</p>
+```
+
+### Cas d'usage
+
+```webc
+// Plusieurs éléments à la racine d'une vue
+component CardContent {
+    view {
+        <>
+            h2 "Titre"
+            p "Description"
+            span class="badge" { "Nouveau" }
+        </>
+    }
+}
+
+// Dans un @if — évite un wrapper inutile
+@if isLoggedIn {
+    <>
+        p "Bienvenue !"
+        button on:click={logout} { "Déconnexion" }
+    </>
+}
+
+// Dans un slot
+page "home" {
+    slot sidebar {
+        <>
+            nav { link to="/a" { "A" } }
+            nav { link to="/b" { "B" } }
+        </>
+    }
+}
+```
+
+### Imbrication
+
+Les fragments peuvent contenir n'importe quel élément, directive de contrôle ou composant, y compris d'autres fragments.
 
 ---
 
@@ -1582,6 +1676,84 @@ el.addEventListener('input', (event) => {
 - Champ de recherche : évite un appel API à chaque frappe
 - Filtrage de liste : recalcule uniquement après une pause de l'utilisateur
 - Compatible avec tout type d'événement : `on:input|debounce`, `on:keyup|debounce`, `on:change|debounce`, etc.
+
+---
+
+## `on:event|stop|prevent|self|once` — Modificateurs d'événements
+
+Les modificateurs d'événements permettent de contrôler le comportement du listener sans JS brut. Ils s'ajoutent après le type d'événement, séparés par `|`.
+
+### Modificateurs disponibles
+
+| Modificateur | Effet |
+|---|---|
+| `\|stop` | Appelle `e.stopPropagation()` — empêche la propagation vers les parents |
+| `\|prevent` | Appelle `e.preventDefault()` — empêche le comportement par défaut (ex. soumission de formulaire) |
+| `\|once` | Le handler ne se déclenche qu'une seule fois (marqueur `data-webcore-onced`) |
+| `\|self` | Le handler ne se déclenche que si `e.target === l'élément lui-même` (pas un enfant) |
+| `\|debounce` | Voir [`on:event\|debounce`](#oneventdebounce--handlers-debouncés) |
+
+### Syntaxe
+
+```webc
+// Stop propagation
+button on:click|stop={count += 1} { "+" }
+
+// Prevent default
+form on:submit|prevent={handleSubmit} { ... }
+
+// Once — ne se déclenche qu'une fois
+button on:click|once={showWelcome = true} { "Afficher" }
+
+// Self — uniquement sur l'élément lui-même, pas ses enfants
+div on:click|self={collapsed = !collapsed} {
+    span { "Clic sur ce span ne déclenche pas le parent" }
+}
+
+// Combinaison
+form on:submit|stop|prevent={handleSubmit} { ... }
+```
+
+### Compilation
+
+Les modificateurs sont encodés dans l'attribut `data-webcore-e` :
+
+```html
+<!-- on:click|stop|prevent -->
+<button id="h1" data-webcore-e="click|stop|prevent">+</button>
+```
+
+Le listener délégué `D()` lit les modificateurs depuis `data-webcore-e` et les applique. La syntaxe `.webc` reste inchangée — seul le HTML généré reflète les modificateurs.
+
+### Compatibilité avec `|debounce`
+
+`|debounce` et les autres modificateurs sont **mutuellement exclusifs** — un handler debouncé utilise un mécanisme `setTimeout` distinct (voir [`on:event|debounce`](#oneventdebounce--handlers-debouncés)).
+
+---
+
+## Commande `webc watch`
+
+`webc watch` surveille les fichiers sources et rebuilde automatiquement à chaque modification, **sans démarrer de serveur de développement**.
+
+```bash
+cd mon-app
+webc watch
+```
+
+### Comportement
+
+- Surveille récursivement `src/`, `locales/`, `public/`, `theme.toml` et `webc.toml`
+- Debounce de 200 ms — un burst de modifications ne déclenche qu'un seul rebuild
+- Affiche le résultat du build (arborescence `dist/` ou erreurs) après chaque rebuild
+- Continue même si un build échoue — attend la prochaine modification
+
+### Différences avec `webc dev`
+
+| | `webc watch` | `webc dev` |
+|---|---|---|
+| Serveur HTTP | Non | Oui (port 3000) |
+| Rechargement navigateur (HMR) | Non | Oui (WebSocket) |
+| Idéal pour | CI/CD, builds continus, scripts | Développement interactif |
 
 ---
 
@@ -2627,7 +2799,7 @@ Quand `csp = true` en mode `prod`, chaque page reçoit automatiquement dans son 
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:">
 ```
 
-> Note : `style-src 'unsafe-inline'` est requis pour le critical CSS inline (voir [Limites actuelles](#limites-actuelles-v252)).
+> Note : `style-src 'unsafe-inline'` est requis pour le critical CSS inline (voir [Limites actuelles](#limites-actuelles-v260)).
 
 ---
 
@@ -2747,12 +2919,36 @@ Deux optimisations dans le JS généré :
 
 ---
 
-## Limites actuelles (v2.5.2)
+## Nouveautés v2.6.0
+
+### Fragment shorthand `<>...</>`
+
+Groupe d'éléments sans balise wrapper. Compilé en nœuds HTML inline — aucune `<div>` intermédiaire dans la sortie. Voir [`<>...</>`](#--fragment-shorthand).
+
+### Modificateurs d'événements
+
+`on:click|stop`, `on:click|prevent`, `on:click|once`, `on:click|self` — contrôle du comportement du listener sans JS brut. Combinables avec `|`. Encodés dans `data-webcore-e`. Voir [Modificateurs d'événements](#oneventstoppreventselfonce--modificateurs-dévénements).
+
+### Valeurs de props par défaut
+
+`props { label: String = "Défaut" }` — si la prop est omise à l'instanciation, la valeur par défaut est injectée statiquement. Voir [Props — Valeurs par défaut](#props--valeurs-par-défaut).
+
+### Commande `webc watch`
+
+Rebuild automatique à chaque modification de fichier source, sans serveur de développement. Debounce 200 ms via `notify`. Voir [Commande `webc watch`](#commande-webc-watch).
+
+### Analyse de bundle améliorée
+
+- Détection du core bytes corrigée (`class State{` au lieu de `class _S`)
+- Ajout de `bindClassBindings` et `evalCond` dans le tableau d'analyse post-build
+
+---
+
+## Limites actuelles (v2.7.0)
 
 | Limite | Détail |
 |---|---|
 | Expressions dans `on:mount` | Le corps `on:mount { }` est du JS brut — pas de vérification de types ni d'analyse statique |
-| `@for` imbriqué | Les variables de boucle externe ne sont pas accessibles dans la boucle interne (shadow) |
 | SSG et `http {}` | Les requêtes `http {}` ne sont pas exécutées côté serveur — `loading` reste `true` au pré-rendu |
 | WASM et SRI | Les assets WASM ne reçoivent pas encore de hash SRI |
 | `$watch` multiple | Un seul `$watch` par variable par composant |

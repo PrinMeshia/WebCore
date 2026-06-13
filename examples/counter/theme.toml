@@ -1,0 +1,31 @@
+[theme]
+name = "webcore-counter"
+
+[theme.colors]
+primary    = "#5B4AF7"
+secondary  = "#10B981"
+background = "#0F172A"
+surface    = "#1E293B"
+border     = "#334155"
+text       = "#F1F5F9"
+muted      = "#94A3B8"
+accent     = "#F59E0B"
+danger     = "#EF4444"
+code-bg    = "#0D1117"
+
+[theme.fonts]
+mono = "ui-monospace, SFMono-Regular, 'Fira Code', monospace"
+sans = "Inter, system-ui, sans-serif"
+
+[theme.spacing]
+xs  = "0.25rem"
+sm  = "0.5rem"
+md  = "1rem"
+lg  = "1.5rem"
+xl  = "2rem"
+xxl = "4rem"
+
+[theme.radius]
+sm = "4px"
+md = "8px"
+lg = "12px"

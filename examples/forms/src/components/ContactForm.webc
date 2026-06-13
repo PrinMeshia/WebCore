@@ -1,6 +1,6 @@
 component ContactForm {
     state {
-        sent:    Boolean = false
+        sent:      Boolean = false
         charCount: Number  = 0
     }
     computed {
@@ -9,144 +9,171 @@ component ContactForm {
     }
 
     view {
-        section class="form-section" {
-            h2 "Send us a message"
-            p class="section-sub" { "We reply within 24 hours." }
+        section class="form-card" {
+            div class="form-card-header" {
+                span class="form-icon form-icon-green" { "✉️" }
+                div {
+                    h2 class="form-title" { "Nous écrire" }
+                    p class="form-sub" { "Réponse sous 24 heures." }
+                }
+            }
 
             @if sent {
                 div class="success-banner" {
                     span class="success-icon" { "✓" }
-                    p { "Message sent! We'll be in touch soon." }
+                    div {
+                        p class="success-title" { "Message envoyé !" }
+                        p class="success-body" { "Nous reviendrons vers vous très bientôt." }
+                    }
                 }
             } @else {
                 form on:submit={sent = true} {
                     div class="field" {
-                        label { "Full name *" }
+                        label { "Nom complet *" }
                         input type="text"
                               name="fullname"
-                              placeholder="Jane Doe"
-                              validate:required="Name is required"
-                              validate:minlength="2,At least 2 characters"
-                              validate:maxlength="80,80 characters max"
-                        @error "fullname" {
-                            span class="err" { }
-                        }
+                              placeholder="Jane Dupont"
+                              validate:required="Le nom est requis"
+                              validate:minlength="2,Au moins 2 caractères"
+                              validate:maxlength="80,80 caractères max"
+                        @error "fullname" { span class="err" { } }
                     }
-
                     div class="field" {
                         label { "Email *" }
                         input type="email"
                               name="contact_email"
-                              placeholder="jane@example.com"
-                              validate:required="Email is required"
-                              validate:email="Enter a valid email"
-                        @error "contact_email" {
-                            span class="err" { }
-                        }
+                              placeholder="jane@exemple.com"
+                              validate:required="L'email est requis"
+                              validate:email="Entrez un email valide"
+                        @error "contact_email" { span class="err" { } }
                     }
-
                     div class="field" {
-                        label { "Subject *" }
+                        label { "Sujet *" }
                         input type="text"
                               name="subject"
-                              placeholder="How can we help?"
-                              validate:required="Subject is required"
-                              validate:minlength="5,At least 5 characters"
-                        @error "subject" {
-                            span class="err" { }
-                        }
+                              placeholder="Comment pouvons-nous vous aider ?"
+                              validate:required="Le sujet est requis"
+                              validate:minlength="5,Au moins 5 caractères"
+                        @error "subject" { span class="err" { } }
                     }
-
                     div class="field" {
-                        label { "Message * " }
+                        label { "Message *" }
                         textarea name="message"
                                  rows="5"
-                                 placeholder="Describe your issue or question…"
-                                 validate:required="Message is required"
-                                 validate:minlength="20,At least 20 characters"
+                                 placeholder="Décrivez votre question ou problème…"
+                                 validate:required="Le message est requis"
+                                 validate:minlength="20,Au moins 20 caractères"
                                  on:input={charCount = event.target.value.length}
-                        @error "message" {
-                            span class="err" { }
-                        }
-                        p class="char-counter" {
+                        @error "message" { span class="err" { } }
+                        div class="char-row" {
                             @if overLimit {
-                                span class="over" { "{remaining} characters over limit" }
+                                span class="char-count over" { "{remaining} au-dessus de la limite" }
                             } @else {
-                                span { "{remaining} characters remaining" }
+                                span class="char-count" { "{remaining} caractères restants" }
                             }
                         }
                     }
-
-                    button type="submit" class="btn-primary" { "Send message →" }
+                    button type="submit" class="btn-submit btn-submit-green" { "Envoyer le message →" }
                 }
             }
         }
     }
 
     style {
-        .form-section {
-            max-width: 480px;
-            margin: 2rem auto;
-            padding: 2rem;
-            background: #1e293b;
-            border-radius: 10px;
-            border: 1px solid #334155;
+        .form-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xl);
+            position: relative;
+            overflow: hidden;
+            &::before {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 2px;
+                background: linear-gradient(90deg, var(--color-secondary), #34d399);
+            }
         }
-        h2 { margin: 0 0 0.25rem; font-size: 1.4rem; }
-        .section-sub { color: #64748b; font-size: 0.85rem; margin: 0 0 1.5rem; }
-        .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1.1rem; }
-        label { font-size: 0.85rem; font-weight: 600; color: #cbd5e1; }
+        .form-card-header { display: flex; align-items: flex-start; gap: var(--spacing-md); }
+        .form-icon {
+            font-size: 1.5rem;
+            width: 2.75rem;
+            height: 2.75rem;
+            background: rgba(91,74,247,0.08);
+            border: 1px solid rgba(91,74,247,0.18);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .form-icon-green { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.2); }
+        .form-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 2px; }
+        .form-sub { color: var(--color-muted); font-size: 0.82rem; }
+        .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--spacing-md); }
+        label { font-size: 0.82rem; font-weight: 600; color: var(--color-text); }
         input, textarea {
-            padding: 0.5rem 0.75rem;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            color: #e2e8f0;
-            font-size: 0.95rem;
+            padding: 0.5rem 0.8rem;
+            background: var(--color-code-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            color: var(--color-text);
+            font-size: 0.9rem;
             font-family: inherit;
             resize: vertical;
-            transition: border-color 0.15s;
-            &:focus { outline: none; border-color: #3b82f6; }
+            transition: border-color 0.15s, box-shadow 0.15s;
+            &:focus { outline: none; border-color: var(--color-secondary); box-shadow: 0 0 0 3px rgba(16,185,129,0.12); }
+            &::placeholder { color: var(--color-muted); }
         }
-        .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
-        .char-counter { font-size: 0.78rem; color: #64748b; margin: 0.2rem 0 0; text-align: right; }
-        .over { color: #f87171; }
-        .btn-primary {
+        .err { font-size: 0.78rem; color: var(--color-danger); min-height: 1rem; }
+        .char-row { display: flex; justify-content: flex-end; margin-top: 3px; }
+        .char-count { font-size: 0.72rem; color: var(--color-muted); }
+        .over { color: var(--color-danger); }
+        .btn-submit {
             width: 100%;
             padding: 0.65rem;
-            background: #3b82f6;
+            background: linear-gradient(135deg, var(--color-primary), #818CF8);
             color: #fff;
             border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            font-weight: 700;
             cursor: pointer;
-            margin-top: 0.5rem;
-            transition: background 0.15s;
-            &:hover { background: #2563eb; }
+            transition: opacity 0.15s, transform 0.1s;
+            box-shadow: 0 4px 14px rgba(91,74,247,0.3);
+            &:hover { opacity: 0.9; transform: translateY(-1px); }
+        }
+        .btn-submit-green {
+            background: linear-gradient(135deg, var(--color-secondary), #34d399);
+            box-shadow: 0 4px 14px rgba(16,185,129,0.3);
         }
         .success-banner {
             display: flex;
             align-items: flex-start;
-            gap: 0.75rem;
-            padding: 1rem 1.25rem;
-            background: #052e16;
-            border: 1px solid #16a34a;
-            border-radius: 8px;
-            & p { margin: 0; color: #86efac; }
+            gap: var(--spacing-md);
+            padding: var(--spacing-md) var(--spacing-lg);
+            background: rgba(16,185,129,0.06);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: var(--radius-md);
         }
         .success-icon {
             flex-shrink: 0;
-            width: 1.5rem;
-            height: 1.5rem;
-            background: #16a34a;
+            width: 1.75rem;
+            height: 1.75rem;
+            background: var(--color-secondary);
             color: #fff;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             font-weight: 700;
         }
+        .success-title { font-weight: 700; color: var(--color-secondary); margin-bottom: 2px; font-size: 0.95rem; }
+        .success-body { font-size: 0.85rem; color: var(--color-muted); }
     }
 }

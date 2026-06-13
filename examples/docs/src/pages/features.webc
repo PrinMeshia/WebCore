@@ -406,7 +406,7 @@ csp   = true      # emits Content-Security-Policy meta"
                     tr {
                         td { strong { "CSS scope elision" } }
                         td { "v2.2.0" }
-                        td { "Components without a " code { "style {}" } " block don't emit " code { "data-v" } " — cleaner HTML." }
+                        td { "Components without a " code { "style \{\}" } " block don't emit " code { "data-v" } " — cleaner HTML." }
                     }
                     tr {
                         td { strong { "script defer + preload" } }
@@ -472,6 +472,75 @@ page \"post\" \{
             " — a crafted slug cannot escape "
             code { "dist/" }
             "."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "v2.6.0 highlights "
+            span class="version-tag" { "v2.6.0" }
+        }
+        p { "Three new syntax features and one new CLI command." }
+
+        h3 { "Fragment shorthand" }
+        p {
+            code { "<>...</>" }
+            " groups elements without a wrapper tag. Renders inline — no intermediate "
+            code { "<div>" }
+            " in the output."
+        }
+        pre class="code-block" {
+"component TwoItems \{
+    view \{
+        <>
+            p \"First\"
+            p \"Second\"
+        </>
+    \}
+\}
+// Output: <p>First</p><p>Second</p>"
+        }
+
+        h3 { "Event modifiers" }
+        p {
+            "Control listener behaviour with "
+            code { "|stop" }
+            ", "
+            code { "|prevent" }
+            ", "
+            code { "|once" }
+            ", "
+            code { "|self" }
+            " — no boilerplate JS."
+        }
+        pre class="code-block" {
+"form on:submit|prevent=\{handleSubmit\} \{ ... \}
+button on:click|stop=\{count += 1\} \{ \"+\" \}
+button on:click|once=\{welcomed = true\} \{ \"Welcome\" \}
+div on:click|self=\{toggle\} \{ span \{ \"child\" \} \}"
+        }
+
+        h3 { "Default prop values" }
+        pre class="code-block" {
+"component Badge \{
+    props \{ label: String = \"N/A\"  color: String = \"gray\" \}
+    view \{ span class=\{color\} \"\{label\}\" \}
+\}
+Badge \{\}              // uses defaults
+Badge label=\"OK\" \{\}  // color defaults to gray"
+        }
+
+        h3 { "webc watch" }
+        p {
+            code { "webc watch" }
+            " rebuilds on every source file change without starting a dev server — useful for CI pipelines and headless build workflows."
+        }
+        div class="callout-tip" {
+            "Run "
+            code { "webc serve" }
+            " for interactive development with HMR. Use "
+            code { "webc watch" }
+            " when you only need the output files."
         }
     }
 }

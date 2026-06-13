@@ -1,13 +1,40 @@
 page "post" {
     div class="post-page" {
+        link to="/" class="back-link" { "← Retour aux articles" }
         div class="post-header" {
-            link to="/" class="back-link" { "← Back to home" }
-            h1 "Article: {$route.slug}"
+            span class="post-tag" { "Article" }
+            h1 class="post-title" { "{$route.slug}" }
+            p class="post-slug-hint" {
+                "Slug extrait de l'URL — "
+                code { "/post/{$route.slug}" }
+            }
         }
         div class="post-body" {
-            p "You are reading the article "
-            strong "{$route.slug}"
-            p "The slug comes from the URL — navigate to /post/hello-world or /post/another-post to see it change."
+            p {
+                "Vous lisez l'article "
+                strong { "\"{$route.slug}\"" }
+                ". Ce contenu est généré dynamiquement depuis le paramètre de route."
+            }
+            p {
+                "Naviguez vers "
+                code { "/post/bonjour-monde" }
+                " ou "
+                code { "/post/un-autre-article" }
+                " pour voir le slug changer en temps réel."
+            }
+            div class="post-callout" {
+                strong { "Comment ça marche ?" }
+                p {
+                    "La route "
+                    code { "/post/:slug" }
+                    " est déclarée dans "
+                    code { "app.webc" }
+                    ". Le compilateur génère un router SPA qui extrait "
+                    code { "$route.slug" }
+                    " et l'injecte dans l'état réactif."
+                }
+            }
         }
+        link to="/" class="back-link" { "← Retour aux articles" }
     }
 }

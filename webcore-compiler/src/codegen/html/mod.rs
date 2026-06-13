@@ -282,7 +282,8 @@ fn contains_slot(elements: &[Element]) -> bool {
         Element::Tag { content, .. }
         | Element::Component { content, .. }
         | Element::For { content, .. }
-        | Element::ErrorBlock { content, .. } => contains_slot(content),
+        | Element::ErrorBlock { content, .. }
+        | Element::Fragment { content, .. } => contains_slot(content),
         Element::If {
             then_branch,
             else_branch,
@@ -401,6 +402,12 @@ fn resolve_slots(
             } => {
                 resolved.push(Element::ErrorBlock {
                     field: field.clone(),
+                    content: resolve_slots(content, slot_map, default_content),
+                    span: *span,
+                });
+            }
+            Element::Fragment { content, span } => {
+                resolved.push(Element::Fragment {
                     content: resolve_slots(content, slot_map, default_content),
                     span: *span,
                 });
@@ -792,7 +799,7 @@ fn generate_component_element(
             }
         }
 
-        // Collect static prop values
+        // Collect static prop values — may be extended below with default values
         let static_props: std::collections::HashMap<String, String> = attributes
             .iter()
             .filter_map(|a| {
@@ -815,6 +822,16 @@ fn generate_component_element(
                 }
             })
             .collect();
+
+        // Inject default prop values for props not supplied by the caller
+        let mut static_props = static_props;
+        for prop in &component.props {
+            if let Some(ref default_val) = prop.default_value {
+                if !static_props.contains_key(&prop.name) && !dynamic_props.contains_key(&prop.name) {
+                    static_props.insert(prop.name.clone(), default_val.clone());
+                }
+            }
+        }
 
         // Generate scope ID for this component's CSS — only if the component has styles.
         // Unstyled components do not need data-v attributes, which reduces HTML weight.
@@ -1005,6 +1022,14 @@ fn generate_element_with_scope(
             document,
             counter,
             scope_id,
+            prefix,
+            project_root,
+        ),
+        Element::Fragment { content, .. } => generate_elements_with_scope_and_counter(
+            content,
+            document,
+            scope_id,
+            counter,
             prefix,
             project_root,
         ),

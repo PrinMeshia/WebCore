@@ -462,3 +462,68 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
     print_bundle_analysis(&final_js);
     Ok(())
 }
+
+/// Watch mode: rebuild whenever source files change (no HTTP server).
+pub(crate) fn watch_project() -> Result<(), String> {
+    use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    println!("👁  Watch mode — rebuilding on file changes (Ctrl-C to stop)");
+
+    // Initial build
+    if let Err(e) = build_project() {
+        eprintln!("Build error: {e}");
+    }
+
+    let dirty = Arc::new(Mutex::new(false));
+    let dirty_watcher = dirty.clone();
+
+    let mut watcher: RecommendedWatcher = notify::recommended_watcher(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                ) {
+                    if let Ok(mut d) = dirty_watcher.lock() {
+                        *d = true;
+                    }
+                }
+            }
+        },
+    )
+    .map_err(|e| format!("Watcher error: {e}"))?;
+
+    for dir in &["src", "theme.toml", "webc.toml", "locales"] {
+        let p = std::path::Path::new(dir);
+        if p.exists() {
+            watcher
+                .watch(p, RecursiveMode::Recursive)
+                .map_err(|e| format!("Watch error for {dir}: {e}"))?;
+        }
+    }
+
+    let mut last_build = Instant::now();
+    loop {
+        std::thread::sleep(Duration::from_millis(200));
+        let is_dirty = dirty.lock().map(|mut d| {
+            if *d {
+                *d = false;
+                true
+            } else {
+                false
+            }
+        }).unwrap_or(false);
+
+        if is_dirty && last_build.elapsed() > Duration::from_millis(300) {
+            last_build = Instant::now();
+            println!("\n🔄 File changed — rebuilding...");
+            if let Err(e) = build_project() {
+                eprintln!("Build error: {e}");
+            } else {
+                println!("✅ Rebuild complete");
+            }
+        }
+    }
+}

@@ -155,11 +155,23 @@ pub(super) fn handle_event_attr(
         return None;
     }
     let raw_event_type = attr_name.strip_prefix("on:").unwrap_or("click");
-    let (event_type, debounce_ms) = if let Some(pos) = raw_event_type.find("|debounce") {
-        (&raw_event_type[..pos], Some(300u32))
-    } else {
-        (raw_event_type, None)
-    };
+
+    // Split on `|` to extract the base event type and optional modifiers.
+    // Supported modifiers: stop, prevent, once, self, debounce[=N]
+    let parts: Vec<&str> = raw_event_type.split('|').collect();
+    let base_event_type = parts[0];
+    let mut debounce_ms: Option<u32> = None;
+    let mut modifiers: Vec<&str> = Vec::new();
+    for part in &parts[1..] {
+        if part.starts_with("debounce") {
+            let ms = part.strip_prefix("debounce=")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(300u32);
+            debounce_ms = Some(ms);
+        } else {
+            modifiers.push(part);
+        }
+    }
 
     *counter += 1;
     let handler_id = format!("{prefix}btn{counter}");
@@ -171,10 +183,12 @@ pub(super) fn handle_event_attr(
         }
     }
 
+    // HandlerMapping stores base event type for non-debounce, or "type|debounce=N" for debounce.
+    // Non-debounce modifiers (stop, prevent, once, self) are encoded in the HTML attribute.
     let mapped_event_type = if let Some(ms) = debounce_ms {
-        format!("{event_type}|debounce={ms}")
+        format!("{base_event_type}|debounce={ms}")
     } else {
-        event_type.to_string()
+        base_event_type.to_string()
     };
     handlers.push(HandlerMapping {
         id: handler_id.clone(),
@@ -182,12 +196,15 @@ pub(super) fn handle_event_attr(
         expression: expr.to_string(),
     });
 
-    // Use data-webcore-e="<type>" for CSP-compatible event delegation.
-    // Debounced handlers are still wired via getElementById in JS (no inline handler needed).
+    // Use data-webcore-e="<type>[|mod1|mod2]" for CSP-compatible event delegation.
+    // Debounced handlers are wired via getElementById in JS (no data-webcore-e needed).
     let html_attr = if debounce_ms.is_some() {
         format!(" id=\"{handler_id}\"")
+    } else if modifiers.is_empty() {
+        format!(" id=\"{handler_id}\" data-webcore-e=\"{base_event_type}\"")
     } else {
-        format!(" id=\"{handler_id}\" data-webcore-e=\"{event_type}\"")
+        let mods_str = modifiers.join("|");
+        format!(" id=\"{handler_id}\" data-webcore-e=\"{base_event_type}|{mods_str}\"")
     };
     Some(html_attr)
 }

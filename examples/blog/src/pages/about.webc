@@ -1,5 +1,30 @@
 page "about" {
-    h2 "À propos"
-    p "Ce blog est généré entièrement par WebCore — zéro dépendance, zéro framework."
-    link to="/" { "← Retour" }
+    div class="about-page" {
+        div class="about-header" {
+            h1 class="about-title" { "À propos" }
+            p class="about-sub" {
+                "Ce blog est entièrement généré par "
+                strong { "WebCore" }
+                " — zéro dépendance, zéro framework."
+            }
+        }
+        div class="about-cards" {
+            div class="about-card" {
+                span class="about-icon" { "🦀" }
+                h3 { "Compilateur Rust" }
+                p { "Un parser PEG (Pest) transforme les fichiers " code { ".webc" } " en HTML sémantique, CSS scopé et un runtime JS minimal." }
+            }
+            div class="about-card" {
+                span class="about-icon" { "⚡" }
+                h3 { "Zéro dépendance" }
+                p { "Le " code { "dist/" } " produit ne contient aucune bibliothèque tierce. Le runtime WebCore fait moins de 5 KB." }
+            }
+            div class="about-card" {
+                span class="about-icon" { "🌐" }
+                h3 { "Routage SPA" }
+                p { "Les routes paramétrées (" code { "/post/:slug" } ") permettent une navigation fluide sans rechargement de page." }
+            }
+        }
+        link to="/" class="back-link" { "← Retour à l'accueil" }
+    }
 }

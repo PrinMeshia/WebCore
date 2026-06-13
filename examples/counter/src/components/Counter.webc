@@ -3,75 +3,174 @@ component Counter {
         count: Number = 0
         step:  Number = 1
     }
+    computed {
+        doubled = count * 2
+    }
 
     view {
-        div class="counter" {
-            p class="value" { "{count}" }
-            div class="controls" {
-                button class="btn" on:click={count = max(0, count - step)} { "−" }
-                p class="step-label" { "pas : {step}" }
-                button class="btn" on:click={count += step} { "+" }
-            }
-            div class="controls" {
-                button class="btn" on:click={step = max(1, step - 1)} { "−" }
-                span class="step-label" { "step" }
-                button class="btn" on:click={step += 1} { "+" }
-            }
-            @if count > 10 {
-                p class="hint positive" { "Grand nombre !" }
-            } @else {
-                p class="hint" { "Continuez..." }
+        div class="counter-shell" {
+            div class="counter-card" {
+                p class="counter-label" { "Compteur réactif" }
+                div class="counter-display" {
+                    span class="counter-value" { "{count}" }
+                }
+                div class="counter-controls" {
+                    button class="btn btn-secondary" on:click={count = max(0, count - step)} { "−" }
+                    button class="btn btn-primary"   on:click={count += step}               { "+" }
+                    button class="btn btn-ghost"     on:click={count = 0}                   { "Reset" }
+                }
+                div class="counter-step-row" {
+                    span class="step-label" { "Pas" }
+                    button class="step-btn" on:click={step = max(1, step - 1)} { "−" }
+                    span class="step-value" { "{step}" }
+                    button class="step-btn" on:click={step += 1} { "+" }
+                }
+                @if count > 0 {
+                    div class="counter-meta" {
+                        span class="meta-item" {
+                            span class="meta-label" { "× 2" }
+                            span class="meta-val"   { "{doubled}" }
+                        }
+                        span class="meta-item" {
+                            span class="meta-label" { "pas" }
+                            span class="meta-val meta-step" { "{step}" }
+                        }
+                    }
+                }
+                @if count > 10 {
+                    div class="counter-badge" { "🎉 Grand nombre !" }
+                } @else {
+                    div class="counter-hint" { "Cliquez + pour compter" }
+                }
             }
         }
     }
 
     style {
-        .counter {
+        .counter-shell {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding-top: 1rem;
+        }
+        .counter-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            width: 100%;
+            max-width: 380px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 1.5rem;
-            padding: 2rem;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            max-width: 320px;
-            margin: 0 auto;
+            gap: var(--spacing-lg);
+            position: relative;
+            overflow: hidden;
+            &::before {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 2px;
+                background: linear-gradient(90deg, var(--color-primary), #818CF8, var(--color-secondary));
+            }
         }
-        .value {
-            font-size: 4rem;
-            font-weight: 900;
-            letter-spacing: -0.04em;
-            color: #F1F5F9;
-            font-variant-numeric: tabular-nums;
+        .counter-label {
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--color-muted);
         }
-        .controls {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        .btn {
-            width: 2.5rem;
-            height: 2.5rem;
-            font-size: 1.4rem;
-            cursor: pointer;
-            border-radius: 50%;
-            border: 2px solid #4F46E5;
-            background: #4F46E5;
-            color: white;
+        .counter-display {
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform 0.1s, background 0.15s;
-            &:hover { background: #4338CA; transform: scale(1.1); }
-            &:active { transform: scale(0.95); }
+            background: var(--color-code-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-lg) var(--spacing-xxl);
+            min-width: 220px;
         }
-        .step-label { color: #94A3B8; font-size: 0.85rem; }
-        .hint {
-            color: #94A3B8;
-            font-size: 0.85rem;
-            text-align: center;
-            &.positive { color: #10B981; }
+        .counter-value {
+            font-size: 5.5rem;
+            font-weight: 900;
+            letter-spacing: -0.04em;
+            font-variant-numeric: tabular-nums;
+            background: linear-gradient(135deg, var(--color-primary), #818CF8);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            line-height: 1;
+        }
+        .counter-controls {
+            display: flex;
+            gap: var(--spacing-sm);
+        }
+        .btn {
+            padding: 0.5rem 1.35rem;
+            border-radius: var(--radius-md);
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: opacity 0.15s, transform 0.1s;
+            &:hover { opacity: 0.85; transform: translateY(-1px); }
+            &:active { transform: scale(0.96); }
+        }
+        .btn-primary   { background: var(--color-primary); color: #fff; }
+        .btn-secondary { background: var(--color-secondary); color: #fff; }
+        .btn-ghost {
+            background: transparent;
+            color: var(--color-muted);
+            border: 1px solid var(--color-border);
+            &:hover { color: var(--color-text); border-color: rgba(91,74,247,0.4); }
+        }
+        .counter-step-row {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-xs) var(--spacing-md);
+        }
+        .step-label { font-size: 0.75rem; color: var(--color-muted); font-weight: 600; letter-spacing: 0.05em; }
+        .step-value { font-size: 0.95rem; font-weight: 700; min-width: 1.75rem; text-align: center; }
+        .step-btn {
+            background: transparent;
+            border: 1px solid var(--color-border);
+            color: var(--color-muted);
+            width: 1.5rem;
+            height: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            padding: 0;
+            transition: color 0.15s, border-color 0.15s;
+            &:hover { color: var(--color-text); border-color: rgba(91,74,247,0.4); }
+        }
+        .counter-meta {
+            display: flex;
+            gap: var(--spacing-lg);
+        }
+        .meta-item { display: flex; align-items: center; gap: 6px; }
+        .meta-label { font-size: 0.75rem; color: var(--color-muted); }
+        .meta-val { font-weight: 700; color: var(--color-accent); font-size: 0.95rem; }
+        .meta-step { color: var(--color-secondary); }
+        .counter-badge {
+            font-size: 0.82rem;
+            padding: 4px 14px;
+            background: rgba(16,185,129,0.08);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: 999px;
+            color: var(--color-secondary);
+            font-weight: 600;
+        }
+        .counter-hint {
+            font-size: 0.78rem;
+            color: var(--color-border);
+            font-style: italic;
         }
     }
 }

@@ -1,21 +1,61 @@
 page "home" {
-    h2 "Derniers articles"
+    div class="blog-home" {
+        div class="blog-hero" {
+            h1 class="blog-title" { "Mon Blog" }
+            p class="blog-sub" { "Articles sur WebCore, Rust et le développement web déclaratif." }
+        }
 
-    article {
-        h3 "Découvrir WebCore"
-        p "WebCore est un langage déclaratif qui compile en HTML/CSS/JS minimaliste."
-        link to="/post/decouvrir-webcore" { "Lire la suite →" }
-    }
+        h2 class="section-label" { "Derniers articles" }
 
-    article {
-        h3 "Routes paramétrées"
-        p "Depuis v1.1.0, les routes peuvent contenir des segments dynamiques comme /post/:slug."
-        link to="/post/routes-parametrees" { "Lire la suite →" }
-    }
+        div class="articles-grid" {
+            article class="article-card" {
+                div class="article-meta" {
+                    span class="article-tag" { "WebCore" }
+                    span class="article-date" { "3 juin 2025" }
+                }
+                h3 class="article-title" {
+                    link to="/post/decouvrir-webcore" { "Découvrir WebCore" }
+                }
+                p class="article-excerpt" {
+                    "WebCore est un langage déclaratif qui compile en HTML/CSS/JS minimaliste. "
+                    "Zéro dépendance, zéro bundler, juste du web sémantique."
+                }
+                link to="/post/decouvrir-webcore" class="article-link" { "Lire la suite →" }
+            }
 
-    article {
-        h3 "Compilé en Rust"
-        p "Le compilateur utilise un parser PEG Pest pour générer un HTML sémantique et un runtime JS minimal."
-        link to="/post/compile-en-rust" { "Lire la suite →" }
+            article class="article-card" {
+                div class="article-meta" {
+                    span class="article-tag article-tag-accent" { "Routage" }
+                    span class="article-date" { "5 juin 2025" }
+                }
+                h3 class="article-title" {
+                    link to="/post/routes-parametrees" { "Routes paramétrées" }
+                }
+                p class="article-excerpt" {
+                    "Depuis v2.0, les routes peuvent contenir des segments dynamiques comme "
+                    code { "/post/:slug" }
+                    ". Accédez aux paramètres via "
+                    code { "$route.slug" }
+                    " dans n'importe quel composant."
+                }
+                link to="/post/routes-parametrees" class="article-link" { "Lire la suite →" }
+            }
+
+            article class="article-card" {
+                div class="article-meta" {
+                    span class="article-tag article-tag-secondary" { "Rust" }
+                    span class="article-date" { "7 juin 2025" }
+                }
+                h3 class="article-title" {
+                    link to="/post/compile-en-rust" { "Compilé en Rust" }
+                }
+                p class="article-excerpt" {
+                    "Le compilateur utilise un parser PEG Pest pour transformer du DSL "
+                    code { ".webc" }
+                    " en HTML sémantique et un runtime JS minimal. Erreurs avec fichier, ligne et colonne."
+                }
+                link to="/post/compile-en-rust" class="article-link" { "Lire la suite →" }
+            }
+        }
     }
 }

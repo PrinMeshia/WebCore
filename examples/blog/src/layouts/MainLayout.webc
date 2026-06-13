@@ -1,13 +1,19 @@
 layout MainLayout {
-    header {
-        nav {
-            link to="/" { "Accueil" }
-            link to="/about" { "À propos" }
+    header class="site-header" {
+        div class="header-inner" {
+            link to="/" class="logo" {
+                span class="logo-mark" { "▸" }
+                span { "WebCore" }
+                span class="logo-project" { "blog" }
+            }
+            nav class="site-nav" {
+                link to="/" { "Accueil" }
+                link to="/about" { "À propos" }
+            }
         }
-        h1 "Mon Blog WebCore"
     }
-    main { slot content }
-    footer {
-        p "Fait avec WebCore"
+    main class="site-main" { slot content }
+    footer class="site-footer" {
+        p { "Construit avec " strong { "WebCore" } " — routes paramétrées, SPA, zéro dépendance" }
     }
 }

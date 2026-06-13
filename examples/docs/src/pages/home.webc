@@ -1,6 +1,6 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v2.5.2 — Stable" }
+        div class="hero-badge" { "v2.6.0 — Stable" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }
@@ -44,7 +44,7 @@ page "home" {
             span class="stat-desc" { "PEG compiler" }
         }
         div class="stat-item" {
-            span class="stat-num" { "139" }
+            span class="stat-num" { "147" }
             span class="stat-desc" { "unit tests" }
         }
         div class="stat-item" {
@@ -111,13 +111,13 @@ page "home" {
                 icon="✨"
                 title="Signaux réactifs fins"
                 desc="$effect(fn) track les dépendances automatiquement. Un composant ne se re-rend que quand ses données changent réellement."
-                tag="v2.0.0"
+                tag="Réactivité"
             {}
             FeatureCard
                 icon="🔥"
                 title="HMR — Hot reload"
                 desc="webc serve surveille vos fichiers et recharge le navigateur automatiquement via WebSocket. Aucune configuration."
-                tag="v2.0.0"
+                tag="DX"
             {}
             FeatureCard
                 icon="🛡️"

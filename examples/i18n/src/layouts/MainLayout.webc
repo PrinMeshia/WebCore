@@ -1,11 +1,15 @@
 layout MainLayout {
-    header {
-        nav {
-            span class="brand" { "WebCore i18n" }
+    header class="site-header" {
+        div class="header-inner" {
+            span class="logo" {
+                span class="logo-mark" { "▸" }
+                span { "WebCore" }
+                span class="logo-project" { "i18n" }
+            }
         }
     }
-    main { slot content }
-    footer {
-        p "Built with WebCore — zero runtime dependencies."
+    main class="site-main" { slot content }
+    footer class="site-footer" {
+        p { "Construit avec " strong { "WebCore" } " — i18n compilé, zéro runtime de traduction" }
     }
 }

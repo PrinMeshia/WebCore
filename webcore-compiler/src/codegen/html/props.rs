@@ -206,6 +206,10 @@ pub(super) fn substitute_props_elem_combined(
             content: elements_combined(content, combined),
             span: *span,
         },
+        Element::Fragment { content, span } => Element::Fragment {
+            content: elements_combined(content, combined),
+            span: *span,
+        },
         _ => element.clone(),
     }
 }

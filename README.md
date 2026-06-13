@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 2.5.2 |
+| **Version** | 2.6.0 |
 | **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 139 tests unitaires |
+| **Tests** | 147 tests unitaires |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -101,6 +101,11 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **Collections SSG** : `"/post/:slug": PostPage each posts` — une page statique générée par élément d'un import de données ; `{$route.slug}` pré-rendu ; chemins de sortie validés contre le path traversal (v2.4.0)
 - **CSP stricte — event delegation** : tous les `onclick=`/`onsubmit=` inline remplacés par `data-webcore-e="<type>"` + listener délégué `D(t,p)` ; SPA links via `data-webcore-nav` ; CSS déféré via `data-webcore-defer` + `DOMContentLoaded` ; option `csp = true` dans `webc.toml` émet le meta `Content-Security-Policy` (v2.5.0)
 - **Corrections v2.5.1** : escape de `</style>` dans le CSS critique inline ; inclusion de `webcore.js` sur les pages zero-JS avec CSS différé ; `.length` correct sur les arrays contenant des virgules dans les chaînes et sur les chaînes Unicode (v2.5.1)
+- **Erreurs de parsing enrichies v2.5.2** : format `error[parse]: fichier:ligne:col` + ligne source + caret `^` + hints contextuels ; couleurs ANSI conditionnelles ; chemin de fichier propagé depuis tous les points de chargement (v2.5.2)
+- **Fragment shorthand `<>...</>`** : groupe d'éléments sans balise wrapper — compilé en nœuds inline ; supporte directives, composants et imbrication arbitraire (v2.6.0)
+- **Modificateurs d'événements** : `on:click|stop`, `on:click|prevent`, `on:click|once`, `on:click|self` — encodés dans `data-webcore-e` ; gérés par le listener délégué sans JS inline ; combinables (v2.6.0)
+- **Valeurs de props par défaut** : `props { label: String = "Défaut" }` — la valeur par défaut est injectée si la prop est omise à l'instanciation (v2.6.0)
+- **`webc watch`** : surveille les fichiers sources et rebuilde automatiquement à chaque modification sans serveur de développement ; debounce 200 ms (v2.6.0)
 
 ---
 
@@ -376,6 +381,14 @@ webc dev 3000
 cd examples/counter
 webc check
 # → parse + valide routes, composants et types de props sans écrire de fichiers
+```
+
+### Rebuild automatique (sans serveur)
+
+```bash
+cd examples/counter
+webc watch
+# → rebuilde à chaque modification de fichier .webc ou de configuration
 ```
 
 ---

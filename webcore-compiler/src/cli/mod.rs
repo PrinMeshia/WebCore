@@ -4,6 +4,7 @@ pub(crate) mod assets;
 pub(crate) mod build;
 pub(crate) mod check;
 pub(crate) mod config;
+pub(crate) mod fmt;
 pub(crate) mod loader;
 pub(crate) mod output;
 pub(crate) mod serve;
@@ -78,6 +79,48 @@ pub(crate) fn run() {
                 std::process::exit(1);
             }
         },
+        "watch" => {
+            if let Err(e) = build::watch_project() {
+                eprintln!("Watch error: {e}");
+                std::process::exit(1);
+            }
+        }
+        "fmt" => {
+            let mut check = false;
+            let mut indent: usize = 4;
+            let mut paths: Vec<String> = Vec::new();
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--check" => {
+                        check = true;
+                        i += 1;
+                    }
+                    "--indent" => {
+                        if let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) {
+                            indent = v;
+                        }
+                        i += 2;
+                    }
+                    arg => {
+                        paths.push(arg.to_string());
+                        i += 1;
+                    }
+                }
+            }
+            // Load indent from webc.toml if present and not overridden
+            if !args[2..].contains(&"--indent".to_string()) {
+                if let Ok(cfg) = config::load_config() {
+                    if let Some(v) = cfg.fmt_indent {
+                        indent = v;
+                    }
+                }
+            }
+            if let Err(e) = fmt::run(&paths, check, indent) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         _ => {
             eprintln!("Commande inconnue : {}", args[1]);
             print_help();
@@ -96,11 +139,17 @@ fn print_help() {
     println!("  new <nom>    Créer un nouveau projet WebCore");
     println!("  build        Compiler le projet (dist/)");
     println!("  check        Valider le projet sans générer de fichiers");
+    println!("  watch        Rebuilder à chaque modification (sans serveur)");
     println!("  dev [port]   Démarrer le serveur de développement (défaut : 3000)");
+    println!("  fmt [paths]  Formater les fichiers .webc (défaut : src/)");
     println!();
     println!("OPTIONS (dev) :");
     println!("  --host <ip>  Écouter sur une IP spécifique (ex: 0.0.0.0)");
     println!("  --open       Ouvrir le navigateur automatiquement");
+    println!();
+    println!("OPTIONS (fmt) :");
+    println!("  --check        Sortir avec code 1 si des fichiers seraient modifiés");
+    println!("  --indent <n>   Nombre d'espaces par niveau (défaut : 4)");
 }
 
 fn new_project(name: &str) -> Result<(), String> {

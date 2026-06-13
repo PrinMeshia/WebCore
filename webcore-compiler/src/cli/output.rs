@@ -91,7 +91,9 @@ pub(crate) fn print_bundle_analysis(js: &str) {
         ("bindIf", "bindIf (conditionals)", 320),
         ("bindFor", "bindFor (loops)", 512),
         ("bindAttrs", "bindAttrs (dyn attrs)", 180),
+        ("bindClassBindings", "bindClassBindings (class:)", 140),
         ("bindValidation", "bindValidation", 640),
+        ("evalCond", "evalCond (reactive eval)", 160),
         ("const LOCALES=", "i18n / t()", 210),
         ("const ROUTES=", "router (param routes)", 380),
         ("const toFile=", "router (simple nav)", 90),
@@ -100,8 +102,8 @@ pub(crate) fn print_bundle_analysis(js: &str) {
         ("const COMPUTED=", "computed vars", 95),
     ];
 
-    // Rough estimate: state-class boilerplate ~350 bytes per reactive component.
-    let core_bytes = js.matches("class _S").count() * 350 + 420;
+    // Rough estimate: state-class boilerplate ~420 bytes + ~350 per reactive component.
+    let core_bytes = js.matches("class State{").count() * 350 + 420;
 
     let mut total: u64 = core_bytes as u64;
     println!("\n  Bundle analysis");

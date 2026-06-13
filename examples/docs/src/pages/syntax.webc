@@ -45,6 +45,11 @@ page "syntax" {
         code { "webc:transition" }
         code { "webc:img" }
         code { "img fingerprint" }
+        code { "<>...</>" }
+        code { "|stop|prevent" }
+        code { "|once|self" }
+        code { "props default" }
+        code { "webc watch" }
     }
 
     section class="doc-section" {
@@ -844,6 +849,124 @@ $effect(() => {
             " tracks the currently running effect; "
             code { "S.get()" }
             " records which effect is subscribed to each key."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Fragment shorthand "
+            span class="version-tag" { "v2.6.0" }
+        }
+        p {
+            code { "<>...</>" }
+            " groups elements without a wrapper DOM node. Useful at the root of a view, inside "
+            code { "@if" }
+            " blocks, or in slots."
+        }
+        pre class="code-block" {
+"// Multiple root elements — no div wrapper
+component CardContent \{
+    view \{
+        <>
+            h2 \"Title\"
+            p \"Description\"
+            span class=\"badge\" \{ \"New\" \}
+        </>
+    \}
+\}
+
+// Inside @if — avoids an unnecessary wrapper
+@if isLoggedIn \{
+    <>
+        p \"Welcome back!\"
+        button on:click=\{logout\} \{ \"Sign out\" \}
+    </>
+\}"
+        }
+        div class="callout-tip" {
+            "The compiler renders fragment children "
+            strong { "inline" }
+            " — no intermediate tag appears in the HTML output."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Event modifiers "
+            span class="version-tag" { "v2.6.0" }
+        }
+        p {
+            "Append modifiers after the event type with "
+            code { "|" }
+            " to control listener behaviour declaratively — no JS boilerplate."
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Modifier" }
+                    th { "Effect" }
+                } }
+                tbody {
+                    tr { td { code { "|stop" } } td { code { "e.stopPropagation()" } " — prevents bubbling to parents" } }
+                    tr { td { code { "|prevent" } } td { code { "e.preventDefault()" } " — prevents default browser action" } }
+                    tr { td { code { "|once" } } td { "Handler fires only once (tombstone " code { "data-webcore-onced" } ")" } }
+                    tr { td { code { "|self" } } td { "Handler fires only when " code { "e.target === element" } " itself" } }
+                    tr { td { code { "|debounce" } } td { "Fires after 300 ms of inactivity (see debounce section)" } }
+                }
+            }
+        }
+        pre class="code-block" {
+"// Stop propagation
+button on:click|stop=\{count += 1\} \{ \"+\" \}
+
+// Prevent form submission default
+form on:submit|prevent=\{handleSubmit\} \{ ... \}
+
+// Only fires once
+button on:click|once=\{showBanner = true\} \{ \"Show once\" \}
+
+// Only fires when clicking the element itself, not a child
+div on:click|self=\{collapsed = !collapsed\} \{
+    span \{ \"Child click won't trigger parent\" \}
+\}
+
+// Combine modifiers
+form on:submit|stop|prevent=\{handleSubmit\} \{ ... \}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Default prop values "
+            span class="version-tag" { "v2.6.0" }
+        }
+        p {
+            "Props can declare a default value used when the caller omits them."
+        }
+        pre class="code-block" {
+"component Badge \{
+    props \{
+        label: String = \"N/A\"
+        color: String = \"gray\"
+    \}
+    view \{
+        span class=\{color\} \"Status: \{label\}\"
+    \}
+\}
+
+// Fully omitted — both defaults apply
+Badge \{\}
+
+// Partial override — color gets its default
+Badge label=\"Active\" \{\}
+
+// Full override
+Badge label=\"Active\" color=\"green\" \{\}"
+        }
+        div class="callout" {
+            "Default values are injected "
+            strong { "statically at compile time" }
+            " — they are not evaluated at runtime."
         }
     }
 }

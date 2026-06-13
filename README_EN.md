@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 2.5.2 |
+| **Version** | 2.6.0 |
 | **Status** | Stable |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 139 unit tests |
+| **Tests** | 147 unit tests |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -101,6 +101,11 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 - **SSG collections**: `"/post/:slug": PostPage each posts` — one static page generated per item of a data import; `{$route.slug}` pre-rendered; output paths validated against path traversal (v2.4.0)
 - **Strict CSP — event delegation**: all inline `onclick=`/`onsubmit=` replaced by `data-webcore-e="<type>"` + delegated `D(t,p)` listener; SPA links via `data-webcore-nav`; deferred CSS via `data-webcore-defer` + `DOMContentLoaded`; `csp = true` in `webc.toml` emits `Content-Security-Policy` meta tag (v2.5.0)
 - **v2.5.1 fixes**: `</style>` escaped in inlined critical CSS; `webcore.js` now included on zero-JS pages with deferred CSS; `.length` correctly counts elements in arrays with commas inside strings and characters in Unicode strings (v2.5.1)
+- **Enriched parse errors v2.5.2**: structured `error[parse]: file:line:col` format + source line + `^` caret + contextual hints; conditional ANSI colours; file path propagated from all load sites (v2.5.2)
+- **Fragment shorthand `<>...</>`**: groups elements without a wrapper tag — rendered inline; supports directives, components and arbitrary nesting (v2.6.0)
+- **Event modifiers**: `on:click|stop`, `on:click|prevent`, `on:click|once`, `on:click|self` — encoded in `data-webcore-e`; handled by the delegated listener with no extra inline JS; combinable (v2.6.0)
+- **Default prop values**: `props { label: String = "Default" }` — the default is injected when a prop is omitted at the call site (v2.6.0)
+- **`webc watch`**: watches source files and rebuilds automatically on every change without a dev server; 200 ms debounce (v2.6.0)
 
 ---
 
@@ -376,6 +381,14 @@ webc dev 3000
 cd examples/counter
 webc check
 # → parse + validate routes, components and prop types without writing any files
+```
+
+### Auto-rebuild (without a dev server)
+
+```bash
+cd examples/counter
+webc watch
+# → rebuilds on every .webc or config file change
 ```
 
 ---

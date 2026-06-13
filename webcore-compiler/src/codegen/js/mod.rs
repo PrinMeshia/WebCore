@@ -252,7 +252,7 @@ pub(crate) fn generate_runtime_js_with_vars(
             continue;
         }
         let compiled = compile_expression_full(&handler.expression, &compiled_vars);
-        writeln!(js, "{}(){{{}}},", handler.id, compiled).unwrap();
+        writeln!(js, "{}(event){{{}}},", handler.id, compiled).unwrap();
     }
     js.push_str("};\n\n");
 
@@ -285,7 +285,7 @@ pub(crate) fn generate_runtime_js_with_vars(
     if has_destroy {
         let bodies: Vec<String> = destroy_bodies
             .iter()
-            .map(|b| format!("()=>{{{}}}", b.trim()))
+            .map(|b| format!("()=>{{\n{}\n}}", b.trim()))
             .collect();
         writeln!(js, "const DESTROY_HOOKS=[{}];", bodies.join(",")).unwrap();
         js.push_str("const runDestroyHooks=()=>DESTROY_HOOKS.forEach(f=>f());\n\n");
@@ -340,7 +340,7 @@ pub(crate) fn generate_runtime_js_with_vars(
         js.push_str("const doc=new DOMParser().parseFromString(html,'text/html');\n");
         js.push_str("const main=doc.querySelector('main');\n");
         js.push_str("if(main)document.querySelector('main').replaceWith(main);\n");
-        write!(js, "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{all_rebinds}}}catch(e){{location.href='/'+file}}}};\n\n").unwrap();
+        write!(js, "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{all_rebinds};window.__wcAfterNav?.();}}catch(e){{location.href='/'+file}}}};\n\n").unwrap();
         js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
     }
 
@@ -357,7 +357,10 @@ pub(crate) fn generate_runtime_js_with_vars(
         seen.into_iter().collect()
     };
     if !non_debounce_event_types.is_empty() {
-        js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest(`[data-webcore-e=\"${t}\"]`);if(el&&H[el.id]){if(p)e.preventDefault();H[el.id]();}});\n");
+        // D(t, p): event delegation with modifier support.
+        // Modifiers (stop, prevent, once, self) are encoded in data-webcore-e="type|mod1|mod2".
+        // Uses startsWith check to match both plain ("click") and modified ("click|stop") elements.
+        js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest('[data-webcore-e]');if(!el||!H[el.id])return;const dwe=el.dataset.webcoreE;if(dwe!==t&&!dwe.startsWith(t+'|'))return;const mods=dwe.includes('|')?dwe.split('|').slice(1):[];if(mods.includes('self')&&e.target!==el)return;if(mods.includes('stop'))e.stopPropagation();if(p||mods.includes('prevent'))e.preventDefault();if(mods.includes('once')){if(el.dataset.webcoreOnced)return;el.dataset.webcoreOnced='1';}H[el.id](e);});\n");
         for et in &non_debounce_event_types {
             let prevent = matches!(et.as_str(), "click" | "submit");
             writeln!(js, "D('{}',{});", et, if prevent { 1 } else { 0 }).unwrap();
@@ -418,7 +421,7 @@ pub(crate) fn generate_runtime_js_with_vars(
         ";document.querySelectorAll('link[data-webcore-defer]').forEach(l=>l.media='all')";
     write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}{css_defer_swap}").unwrap();
     for body in &mount_bodies {
-        write!(js, ";(()=>{{{}}})()", body.trim()).unwrap();
+        write!(js, ";(()=>{{\n{}\n}})()", body.trim()).unwrap();
     }
     // ── $watch hooks ─────────────────────────────────────────────────────────
     for comp in document.components.values() {

@@ -328,9 +328,29 @@ pub(super) fn parse_props_block(pair: Pair<Rule>) -> Result<Vec<Prop>, ParseErro
                 .map(|p| p.as_str().to_string())
                 .unwrap_or_default();
 
-            let type_ = inner.next().map(|p| p.as_str().to_string());
+            // Next token may be type_name or the default value (via `= value`)
+            let mut type_: Option<String> = None;
+            let mut default_value: Option<String> = None;
 
-            props.push(Prop { name, type_, span });
+            for token in inner {
+                match token.as_rule() {
+                    Rule::type_name => {
+                        type_ = Some(token.as_str().to_string());
+                    }
+                    Rule::value => {
+                        // value wraps number | string_literal | boolean | identifier
+                        let raw = token.as_str().trim();
+                        default_value = Some(if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+                            raw[1..raw.len() - 1].to_string()
+                        } else {
+                            raw.to_string()
+                        });
+                    }
+                    _ => {}
+                }
+            }
+
+            props.push(Prop { name, type_, default_value, span });
         }
     }
 

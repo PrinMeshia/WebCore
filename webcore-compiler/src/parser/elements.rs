@@ -13,6 +13,7 @@ pub(super) fn parse_element(pair: Pair<Rule>) -> Result<Element, ParseError> {
     match inner.as_rule() {
         Rule::control_flow => super::directives::parse_control_flow(inner),
         Rule::slot_element => parse_slot(inner),
+        Rule::fragment_element => parse_fragment(inner),
         Rule::tag_element => parse_tag(inner),
         Rule::text_element => parse_text_element(inner),
         _ => Err(ParseError::new(format!(
@@ -20,6 +21,17 @@ pub(super) fn parse_element(pair: Pair<Rule>) -> Result<Element, ParseError> {
             inner.as_rule()
         ))),
     }
+}
+
+pub(super) fn parse_fragment(pair: Pair<Rule>) -> Result<Element, ParseError> {
+    let span = Span::from_pest(pair.as_span());
+    let mut content = Vec::new();
+    for child in pair.into_inner() {
+        if child.as_rule() == Rule::element {
+            content.push(parse_element(child)?);
+        }
+    }
+    Ok(Element::Fragment { content, span })
 }
 
 pub(super) fn parse_slot(pair: Pair<Rule>) -> Result<Element, ParseError> {
