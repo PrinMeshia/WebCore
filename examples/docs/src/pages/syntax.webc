@@ -258,12 +258,6 @@ button on:click=\{items = [...items, newItem]; draft = \"\"\} \{ \"Add\" \}
 // Inter-component event
 button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}"
         }
-        p { "Multiple instructions can be separated by " code { ";" } " in one handler:" }
-        pre class="code-block" {
-"// Each instruction is compiled independently
-button on:click=\{items = [...(items ?? []), newItem]; draft = \"\"\} \{ \"Add\" \}
-button on:click=\{count = 0; label = \"Done\"\} \{ \"Reset all\" \}"
-        }
     }
 
     section class="doc-section" {
@@ -739,6 +733,117 @@ icons/arrow.svg   →  icons/arrow.7b3c9e4d.svg
             "Always-on — no configuration needed. The browser can cache images indefinitely ("
             code { "Cache-Control: max-age=31536000, immutable" }
             "). When image content changes, the filename changes too, so the new version is fetched automatically."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "CSS nesting "
+            span class="version-tag" { "v2.0.0" }
+        }
+        p {
+            "Nested rules using the "
+            code { "&" }
+            " selector are now valid inside "
+            code { "style {}" }
+            " blocks. They are flattened to scoped CSS at compile time."
+        }
+        pre class="code-block" {
+"component Card {
+    view { div class=\"card\" { p \"content\" } }
+    style {
+        .card {
+            padding: 1rem;
+            &:hover { background: #f5f5f5; }
+            & > p { color: #333; }
+            &::before { content: \"\"; }
+        }
+    }
+}"
+        }
+        div class="callout" {
+            "The "
+            code { "&" }
+            " selector is replaced by the scoped parent selector at build time. Output is valid, flattened CSS — no native browser nesting required."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Error aggregation "
+            span class="version-tag" { "v2.0.0" }
+        }
+        p {
+            code { "webc build" }
+            " now collects ALL compile errors and reports them together, instead of stopping at the first error — just like the Rust compiler."
+        }
+        pre class="code-block" {
+"// Before (v1.x): stops at first error
+error: missing layout \"Main\" (available: none)
+
+// After (v2.0): all errors reported at once
+error[compile]: missing layout \"Main\" (available: none)
+error[compile]: component \"Counter\" not found
+error[parse]: src/pages/home.webc:3:12 — expected '}'
+
+3 error(s) found."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Bundle analysis "
+            span class="version-tag" { "v2.0.0" }
+        }
+        p {
+            "After a successful "
+            code { "webc build" }
+            ", the compiler prints a bundle analysis table showing which runtime features are included vs. tree-shaken."
+        }
+        pre class="code-block" {
+"Bundle Analysis:
+  ✓ state            312 b
+  ✓ signals ($effect) 428 b
+  ✓ dom init          89 b
+  ✓ bindFor          512 b
+  - bindIf           (tree-shaken)
+  - http             (tree-shaken)
+  ✓ router           634 b
+Total JS: 1.98 KB"
+        }
+        div class="callout-tip" {
+            "Features not used by your project are tree-shaken automatically. The analysis helps you understand what is contributing to the final JS bundle."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Fine-grained signals "
+            span class="version-tag" { "v2.0.0" }
+        }
+        p {
+            "WebCore v2 uses fine-grained reactive signals internally. "
+            code { "$effect(fn)" }
+            " replaces the v1 "
+            code { "VARS.forEach(v=>S.on(v,fn))" }
+            " pattern — dependency tracking is automatic."
+        }
+        pre class="code-block" {
+"// v1.x (manual subscription list)
+VARS.forEach(v => S.on(v, fn));
+
+// v2.0 (automatic tracking via $effect)
+$effect(() => {
+    el.textContent = S.get('count');
+    // count is tracked automatically
+});"
+        }
+        div class="callout" {
+            "Components only re-render when their actual dependencies change. "
+            code { "var __wcfx" }
+            " tracks the currently running effect; "
+            code { "S.get()" }
+            " records which effect is subscribed to each key."
         }
     }
 }

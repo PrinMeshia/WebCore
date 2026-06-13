@@ -1,10 +1,11 @@
-//! Theme system for WebCore
+//! Theme system for `WebCore`
 
 use std::collections::HashMap;
 use std::fs;
 
 #[derive(Debug, Clone)]
 pub struct Theme {
+    #[allow(dead_code)]
     pub name: String,
     pub colors: HashMap<String, String>,
     pub fonts: HashMap<String, String>,
@@ -33,12 +34,12 @@ struct ThemeData {
     breakpoints: HashMap<String, String>,
 }
 
-pub fn load_theme(theme_path: &str) -> Result<Theme, String> {
+pub(crate) fn load_theme(theme_path: &str) -> Result<Theme, String> {
     let content = fs::read_to_string(theme_path)
-        .map_err(|e| format!("Failed to read theme file {}: {}", theme_path, e))?;
+        .map_err(|e| format!("Failed to read theme file {theme_path}: {e}"))?;
 
     let config: ThemeConfig = toml::from_str(&content)
-        .map_err(|e| format!("Failed to parse theme file {}: {}", theme_path, e))?;
+        .map_err(|e| format!("Failed to parse theme file {theme_path}: {e}"))?;
 
     Ok(Theme {
         name: config.theme.name,

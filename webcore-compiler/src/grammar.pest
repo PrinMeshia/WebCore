@@ -74,7 +74,9 @@ style_block = { "style" ~ "{" ~ style_item* ~ "}" }
 style_item = _{ media_block | style_rule }
 media_block = { "@media" ~ media_query ~ "{" ~ style_rule* ~ "}" }
 media_query = @{ (!"{" ~ ANY)+ }
-style_rule = { selector ~ "{" ~ style_property* ~ "}" }
+style_rule = { selector ~ "{" ~ (style_property | nested_rule)* ~ "}" }
+nested_rule = { nested_selector ~ "{" ~ style_property* ~ "}" }
+nested_selector = @{ "&" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")* }
 selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")+ }
 style_property = { property_name ~ ":" ~ property_value ~ ";"? }
 property_name = @{ (ASCII_ALPHA | "-")+ }

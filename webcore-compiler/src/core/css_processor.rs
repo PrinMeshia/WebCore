@@ -1,9 +1,9 @@
-//! CSS Post-processing with LightningCSS
+//! CSS Post-processing with `LightningCSS`
 
 use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleSheet};
 use lightningcss::targets::{Browsers, Targets};
 
-pub fn process_css(css: &str, minify: bool) -> Result<String, String> {
+pub(crate) fn process_css(css: &str, minify: bool) -> Result<String, String> {
     // Parse CSS
     let stylesheet = StyleSheet::parse(
         css,
@@ -11,7 +11,7 @@ pub fn process_css(css: &str, minify: bool) -> Result<String, String> {
             ..Default::default()
         },
     )
-    .map_err(|e| format!("Failed to parse CSS: {}", e))?;
+    .map_err(|e| format!("Failed to parse CSS: {e}"))?;
 
     // Configure targets for modern browsers
     let targets = Targets {
@@ -34,15 +34,15 @@ pub fn process_css(css: &str, minify: bool) -> Result<String, String> {
     // Generate optimized CSS
     let result = stylesheet
         .to_css(printer_options)
-        .map_err(|e| format!("Failed to generate CSS: {}", e))?;
+        .map_err(|e| format!("Failed to generate CSS: {e}"))?;
 
     Ok(result.code)
 }
 
-pub fn minify_css(css: &str) -> Result<String, String> {
+pub(crate) fn minify_css(css: &str) -> Result<String, String> {
     process_css(css, true)
 }
 
-pub fn format_css(css: &str) -> Result<String, String> {
+pub(crate) fn format_css(css: &str) -> Result<String, String> {
     process_css(css, false)
 }

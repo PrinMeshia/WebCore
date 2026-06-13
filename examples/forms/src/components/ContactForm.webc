@@ -106,8 +106,8 @@ component ContactForm {
             font-family: inherit;
             resize: vertical;
             transition: border-color 0.15s;
+            &:focus { outline: none; border-color: #3b82f6; }
         }
-        input:focus, textarea:focus { outline: none; border-color: #3b82f6; }
         .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
         .char-counter { font-size: 0.78rem; color: #64748b; margin: 0.2rem 0 0; text-align: right; }
         .over { color: #f87171; }
@@ -123,8 +123,8 @@ component ContactForm {
             cursor: pointer;
             margin-top: 0.5rem;
             transition: background 0.15s;
+            &:hover { background: #2563eb; }
         }
-        .btn-primary:hover { background: #2563eb; }
         .success-banner {
             display: flex;
             align-items: flex-start;
@@ -133,6 +133,7 @@ component ContactForm {
             background: #052e16;
             border: 1px solid #16a34a;
             border-radius: 8px;
+            & p { margin: 0; color: #86efac; }
         }
         .success-icon {
             flex-shrink: 0;
@@ -147,6 +148,5 @@ component ContactForm {
             font-size: 0.8rem;
             font-weight: 700;
         }
-        .success-banner p { margin: 0; color: #86efac; }
     }
 }

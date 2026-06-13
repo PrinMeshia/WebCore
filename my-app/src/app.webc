@@ -1,0 +1,7 @@
+app MyApp {
+  routes {
+    "/": HomePage
+    "/about": AboutPage
+    "/counter": CounterPage
+  }
+}

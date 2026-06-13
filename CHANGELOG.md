@@ -5,6 +5,44 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.0.0]
+
+### Rupture avec v1.x
+
+- **Signaux réactifs fins (`$effect`)** — l'abonnement `VARS.forEach(v=>S.on(v,fn))` est remplacé par `$effect(fn)` ; le tracking des dépendances est automatique via `var __wcfx=null` et le champ `#s` de la classe `State` ; un composant ne se re-rend que lorsque ses dépendances réelles changent ; réduction de la mémoire et des re-renders inutiles
+- **HMR (rechargement automatique)** — `webc serve` surveille les fichiers source et recharge le navigateur automatiquement via WebSocket ; aucune configuration requise
+- **Sécurité : path traversal corrigé** — `webc serve` utilisait `format!("dist{url}")` directement ; `resolve_safe_path()` utilise maintenant `fs::canonicalize()` + `starts_with(dist_root)` ; toute URL qui sort de `dist/` retourne 403
+- **Détection de cycles** — `webc check` détecte les références circulaires entre composants (A utilise B qui utilise A) et rapporte le cycle complet
+
+### Ajouts
+
+- **Agrégation des erreurs de compilation** — `webc build` collecte désormais TOUTES les erreurs avant de s'arrêter et les affiche en une seule passe, comme le compilateur Rust ; `CompileErrors(Vec<CompileError>)` encapsule la liste complète
+- **CSS nesting** — les règles imbriquées (`&:hover { }`, `& > span { }`, `&::before { }`) sont désormais valides dans les blocs `style {}` ; aplaties en CSS scopé valide à l'émission ; le parser, l'AST (`StyleRule.nested`) et le codegen CSS sont tous mis à jour
+- **Rapport d'analyse du bundle** — après un `webc build` réussi, un tableau affiche les fonctionnalités runtime incluses (`✓`) ou tree-shaquées (`-`) avec leurs tailles estimées ; aide à diagnostiquer ce qui contribue au bundle JS final
+
+### Refactorisation
+
+- **Arborescence `src/` réorganisée** en modules thématiques :
+  - `core/` — primitives compilateur sans I/O (`ast`, `error`, `ssg`, `theme`, `utils`, `css_processor`)
+  - `parser/` — `declarations`, `directives`, `elements`
+  - `codegen/` — `css.rs`, `html/` (`mod`, `attrs`, `props`, `component`), `js/` (`mod`, `runtime`, `events`, `dom`)
+  - `cli/` — `build`, `serve`, `check`, `assets` (pipeline CLI)
+  - `tests/` — tests golden scindés par domaine (`html`, `js`, `css`, `ssg`, `i18n`, `features`, `errors`)
+  - `main.rs` réduit à un point d'entrée minimal (38 lignes)
+- `CompileError` : enum typée remplaçant `Result<T, String>` dans tout le codegen ; `CompileErrors` agrège plusieurs erreurs
+- `attr_names.rs` : constantes centralisées pour tous les attributs `data-webcore-*`
+- Macro `write!()` / `writeln!()` : élimine les allocations `String` intermédiaires dans les émetteurs HTML/CSS/JS
+- Helpers partagés (`html_escape`, `html_unescape`) extraits dans `core/utils.rs`
+- Substitution O(n) des props : `HashMap<&str, (bool, &str)>` construit une seule fois
+- Validation CSS : avertissement sur les noms de propriétés CSS inconnus (les variables `--custom-var` sont toujours autorisées)
+
+### Améliorations
+
+- 19 nouveaux tests par rapport à v1.5.0 — 105 tests au total
+- **Extension VSCode** — support de la coloration syntaxique pour `ref:`, `style:`, `webc:img`, `webc:transition`, CSS nesting (`&:hover`), `on:mount`/`on:destroy`, `key={}` dans `@for` ; 25 snippets ajoutés
+
+---
+
 ## [1.5.0]
 
 ### Ajouts
@@ -72,7 +110,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.1] · [GitHub Release](https://github.com/PrinMeshia/Webcore/releases/tag/v1.1.1)
+## [1.1.1]
 
 ### Corrections
 
@@ -275,7 +313,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.0] — 2025 (MVP initial)
+## [0.1.0] — (MVP initial)
 
 ### Ajouts
 

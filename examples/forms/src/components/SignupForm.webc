@@ -94,8 +94,8 @@ component SignupForm {
             color: #e2e8f0;
             font-size: 0.95rem;
             transition: border-color 0.15s;
+            &:focus { outline: none; border-color: #3b82f6; }
         }
-        input:focus { outline: none; border-color: #3b82f6; }
         .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
         .btn-primary {
             width: 100%;
@@ -109,8 +109,8 @@ component SignupForm {
             cursor: pointer;
             margin-top: 0.5rem;
             transition: background 0.15s;
+            &:hover { background: #2563eb; }
         }
-        .btn-primary:hover { background: #2563eb; }
         .success-banner {
             display: flex;
             align-items: flex-start;
@@ -119,6 +119,8 @@ component SignupForm {
             background: #052e16;
             border: 1px solid #16a34a;
             border-radius: 8px;
+            & p { margin: 0; color: #86efac; line-height: 1.5; }
+            & strong { color: #4ade80; }
         }
         .success-icon {
             flex-shrink: 0;
@@ -133,7 +135,5 @@ component SignupForm {
             font-size: 0.8rem;
             font-weight: 700;
         }
-        .success-banner p { margin: 0; color: #86efac; line-height: 1.5; }
-        .success-banner strong { color: #4ade80; }
     }
 }

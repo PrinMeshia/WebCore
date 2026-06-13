@@ -1,6 +1,6 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v1.1.1 — Stable" }
+        div class="hero-badge" { "v2.0.0 — Stable" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }
@@ -22,12 +22,17 @@ page "home" {
     computed \{ doubled = count * 2 \}
     view \{
         div \{
-            p \"Value: \{count\} — doubled: \{doubled\}\"
+            p \"Valeur : \{count\} — x2 : \{doubled\}\"
             button on:click=\{count += 1\} \{ \"+\" \}
             button on:click=\{count = max(0, count-1)\} \{ \"−\" \}
         \}
     \}
-    style \{ div \{ display: flex; gap: 1rem; \} \}
+    style \{
+        .card \{
+            display: flex; gap: 1rem;
+            &:hover \{ box-shadow: 0 4px 16px rgba(91,74,247,0.2); \}
+        \}
+    \}
 \}"
             }
         }
@@ -39,8 +44,12 @@ page "home" {
             span class="stat-desc" { "PEG compiler" }
         }
         div class="stat-item" {
-            span class="stat-num" { "76" }
+            span class="stat-num" { "105" }
             span class="stat-desc" { "unit tests" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "$effect" }
+            span class="stat-desc" { "Signals fins" }
         }
         div class="stat-item" {
             span class="stat-num" { "<5 KB" }
@@ -98,6 +107,18 @@ page "home" {
                 desc="Pre-render initial values, ship translated strings from TOML, and call Rust WASM from any component."
                 tag="Features"
             {}
+            FeatureCard
+                icon="✨"
+                title="Signaux réactifs fins"
+                desc="$effect(fn) track les dépendances automatiquement. Un composant ne se re-rend que quand ses données changent réellement."
+                tag="v2.0.0"
+            {}
+            FeatureCard
+                icon="🔥"
+                title="HMR — Hot reload"
+                desc="webc serve surveille vos fichiers et recharge le navigateur automatiquement via WebSocket. Aucune configuration."
+                tag="v2.0.0"
+            {}
         }
     }
 
@@ -137,7 +158,7 @@ cd Webcore/webcore-compiler && cargo build --release"
                 span class="step-num" { "3" }
                 div {
                     strong { "Start the dev server" }
-                    pre class="inline-code" { "cd my-app && webc dev 3000" }
+                    pre class="inline-code" { "cd my-app && webc serve" }
                 }
             }
         }

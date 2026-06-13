@@ -3,7 +3,7 @@ page "examples" {
         h1 { "Examples" }
         p class="page-sub" {
             "Full projects built with WebCore — run any of them locally with "
-            code { "webc dev" }
+            code { "webc serve" }
         }
     }
 
@@ -20,44 +20,44 @@ page "examples" {
             div class="example-card" {
                 code class="example-tag" { "counter" }
                 h3 { "Counter" }
-                p { "Minimal reactive counter with increment and decrement. The simplest possible WebCore app — ideal starting point." }
+                p { "Minimal reactive counter with increment, decrement and step. The simplest possible WebCore app — ideal starting point." }
                 pre class="code-block" { "cd examples/counter
-webc dev" }
+webc serve" }
             }
             div class="example-card" {
                 code class="example-tag" { "todo" }
                 h3 { "Todo" }
-                p { "Todo list with add, toggle done, and delete. Demonstrates @for, @if, and reactive state with computed values and @for key diffing." }
+                p { "Todo list with add, toggle done, and delete. Demonstrates @for with key diffing, @if, computed values and CSS nesting." }
                 pre class="code-block" { "cd examples/todo
-webc dev" }
+webc serve" }
             }
             div class="example-card" {
                 code class="example-tag" { "blog" }
                 h3 { "Blog" }
                 p { "Multi-page blog with parameterized routes (/post/:slug). Shows SPA routing, $route params, and global store for theme switching." }
                 pre class="code-block" { "cd examples/blog
-webc dev" }
+webc serve" }
             }
             div class="example-card" {
                 code class="example-tag" { "forms" }
                 h3 { "Forms" }
                 p { "SignupForm and ContactForm with full declarative validation — required, email, minlength, maxlength, pattern, and @error blocks." }
                 pre class="code-block" { "cd examples/forms
-webc dev" }
+webc serve" }
             }
             div class="example-card" {
                 code class="example-tag" { "i18n" }
                 h3 { "i18n" }
                 p { "Internationalisation demo — t() calls, plural forms (items_one / items_other), positional params, and reactive setLocale()." }
                 pre class="code-block" { "cd examples/i18n
-webc dev" }
+webc serve" }
             }
             div class="example-card" {
                 code class="example-tag" { "docs" }
                 h3 { "Docs" }
-                p { "This documentation site — 5 pages, SPA routing, named slots, copy-to-clipboard, active nav, and a minimal design system." }
+                p { "This documentation site — 5 pages, SPA routing, named slots, sidebar TOC, copy-to-clipboard, announcement bar, and a minimal design system." }
                 pre class="code-block" { "cd examples/docs
-webc dev" }
+webc serve" }
             }
         }
     }
@@ -92,9 +92,9 @@ webc dev" }
         pre class="code-block" {
 "webc new my-app
 cd my-app
-webc dev"
+webc serve        # dev server with HMR"
         }
-        p { "The scaffold generates a working Counter component with reactive state and scoped CSS, so you have something to build on immediately." }
+        p { "The scaffold generates a working Counter component with reactive state, CSS nesting and scoped styles, so you have something to build on immediately." }
     }
 
     section class="doc-section" {
@@ -104,11 +104,18 @@ webc dev"
             code { "webc build" }
             " to produce a minified, production-ready "
             code { "dist/" }
-            " — CSS is processed with LightningCSS, JS is stripped of comments and whitespace."
+            ". After the build, the compiler prints a bundle analysis table showing which runtime features are included vs. tree-shaken."
         }
         pre class="code-block" {
 "webc build        # minified output in dist/
-webc build dev    # un-minified, easier to inspect"
+
+Bundle Analysis:
+  ✓ state            312 b
+  ✓ signals ($effect) 428 b
+  ✓ bindFor          512 b
+  - http             (tree-shaken)
+  - router           (tree-shaken)
+Total JS: 1.35 KB"
         }
     }
 }
