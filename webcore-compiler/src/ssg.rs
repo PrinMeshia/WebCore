@@ -7,7 +7,7 @@
 //! The JS runtime (`bindIf`, `bind`) overwrites these values reactively after
 //! `DOMContentLoaded`, so SSG is fully compatible with the existing runtime.
 
-use crate::core::ast::WebCoreDocument;
+use crate::ast::WebCoreDocument;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -33,17 +33,23 @@ pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String,
         }
     }
 
-    // Data imports are available as initial state for SSG
-    for (name, json) in &document.data_imports {
-        state.entry(name.clone()).or_insert_with(|| json.trim().to_string());
-    }
-
     state
 }
 
-use crate::core::utils::{html_escape, html_unescape};
+/// Undo HTML entity encoding so we can evaluate the raw expression/condition.
+fn html_unescape(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+}
 
-
+fn html_escape_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
 
 /// Resolve a single token (variable name or numeric literal) to f64.
 fn resolve_number(token: &str, state: &HashMap<String, String>) -> Option<f64> {
@@ -153,36 +159,40 @@ pub(crate) fn eval_expr_with_locale(
         return Some(format!("{n}"));
     }
 
-    // Property access: items.length, name.toUpperCase(), etc.
-    // Use rfind so `a.b.length` finds the last dot correctly.
-    if let Some(dot_pos) = expr.rfind('.') {
-        let obj_part = expr[..dot_pos].trim();
-        let prop = expr[dot_pos + 1..].trim();
-        // Skip $store.x / $route.x / $query.x — handled elsewhere
-        if !obj_part.starts_with('$') {
-            if let Some(obj_val) = eval_expr_with_locale(obj_part, state, locales, locale) {
-                let t = obj_val.trim();
-                return match prop {
-                    "length" => {
-                        if t == "[]" || t.is_empty() {
-                            Some("0".to_string())
-                        } else if t.starts_with('[') && t.ends_with(']') {
-                            let inner = &t[1..t.len() - 1];
-                            if inner.trim().is_empty() {
-                                Some("0".to_string())
-                            } else {
-                                Some(inner.split(',').count().to_string())
-                            }
-                        } else {
-                            Some(obj_val.chars().count().to_string())
-                        }
-                    }
-                    "toUpperCase()" => Some(obj_val.to_uppercase()),
-                    "toLowerCase()" => Some(obj_val.to_lowercase()),
-                    "trim()" => Some(obj_val.trim().to_string()),
-                    _ => None,
-                };
+    // .length on a state variable
+    if let Some(var_name) = expr.strip_suffix(".length") {
+        if let Some(val) = state.get(var_name.trim()) {
+            let trimmed = val.trim();
+            if trimmed.starts_with('[') {
+                // Count comma-separated elements (simple heuristic)
+                if trimmed == "[]" {
+                    return Some("0".to_string());
+                }
+                let count = trimmed[1..trimmed.len() - 1].split(',').count();
+                return Some(count.to_string());
             }
+            return Some(val.len().to_string());
+        }
+    }
+
+    // .toUpperCase() on a state variable
+    if let Some(var_name) = expr.strip_suffix(".toUpperCase()") {
+        if let Some(val) = state.get(var_name.trim()) {
+            return Some(val.to_uppercase());
+        }
+    }
+
+    // .toLowerCase() on a state variable
+    if let Some(var_name) = expr.strip_suffix(".toLowerCase()") {
+        if let Some(val) = state.get(var_name.trim()) {
+            return Some(val.to_lowercase());
+        }
+    }
+
+    // .trim() on a state variable
+    if let Some(var_name) = expr.strip_suffix(".trim()") {
+        if let Some(val) = state.get(var_name.trim()) {
+            return Some(val.trim().to_string());
         }
     }
 
@@ -217,7 +227,7 @@ pub(crate) fn apply_ssg_with_locales(
         let raw_expr = &cap[2]; // the raw (HTML-escaped) expression
         let expr = html_unescape(raw_expr);
         if let Some(val) = eval_expr_with_locale(&expr, state, locales, default_locale) {
-            write!(out, "{}>{}</span>", full_attr, html_escape(&val)).unwrap();
+            write!(out, "{}>{}</span>", full_attr, html_escape_text(&val)).unwrap();
         } else {
             out.push_str(m.as_str());
         }
@@ -241,7 +251,11 @@ pub(crate) fn apply_ssg_with_locales(
             Some(false) => " style=\"display:none\"",
             None => "",
         };
-        write!(out, r#"<div data-webcore-if="{raw_cond}"{rest_attrs}{style}>"#).unwrap();
+        write!(
+            out,
+            r#"<div data-webcore-if="{raw_cond}"{rest_attrs}{style}>"#
+        )
+        .unwrap();
         last = m.end();
     }
     out.push_str(&result[last..]);
@@ -262,7 +276,11 @@ pub(crate) fn apply_ssg_with_locales(
             Some(false) => " style=\"display:block\"", // condition false → else shown
             None => "",
         };
-        write!(out, r#"<div data-webcore-else="{raw_cond}"{rest_attrs}{style}>"#).unwrap();
+        write!(
+            out,
+            r#"<div data-webcore-else="{raw_cond}"{rest_attrs}{style}>"#
+        )
+        .unwrap();
         last = m.end();
     }
     out.push_str(&result[last..]);

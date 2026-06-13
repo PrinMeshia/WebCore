@@ -4,7 +4,7 @@
 //! `Result<T, String>`.  Internal helpers that still use `String` errors can
 //! propagate via `?` thanks to `impl From<String> for CompileError`.
 
-use crate::core::ast::Span;
+use crate::ast::Span;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -17,14 +17,20 @@ pub enum CompileError {
         span: Option<Span>,
     },
     /// A referenced layout does not exist.
-    MissingLayout { name: String, available: Vec<String> },
+    MissingLayout {
+        name: String,
+        available: Vec<String>,
+    },
     /// A referenced page does not exist.
     MissingPage { name: String },
     /// A referenced component does not exist (reserved for future LSP use).
     #[allow(dead_code)]
     MissingComponent { name: String },
     /// I/O error (file read, write, etc.).
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// Generic catch-all for messages not yet migrated.
     Custom(String),
 }
@@ -32,9 +38,20 @@ pub enum CompileError {
 impl std::fmt::Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompileError::Parse { file, message, span } => {
+            CompileError::Parse {
+                file,
+                message,
+                span,
+            } => {
                 if let Some(sp) = span {
-                    write!(f, "Parse error in {} ({}:{}): {}", file.display(), sp.line, sp.col, message)
+                    write!(
+                        f,
+                        "Parse error in {} ({}:{}): {}",
+                        file.display(),
+                        sp.line,
+                        sp.col,
+                        message
+                    )
                 } else {
                     write!(f, "Parse error in {}: {}", file.display(), message)
                 }

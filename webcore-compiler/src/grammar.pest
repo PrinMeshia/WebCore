@@ -7,9 +7,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* ~ "\n"? | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 
 // Document structure
 document = { SOI ~ top_level_item* ~ EOI }
-top_level_item = _{ import_decl | app_decl | store_decl | layout_decl | page_decl | component_decl }
-
-// Import declaration: import posts from "data/posts.json"
+top_level_item = _{ app_decl | store_decl | layout_decl | page_decl | component_decl | import_decl }
 import_decl = { "import" ~ identifier ~ "from" ~ string_literal }
 
 // ============ APP DECLARATION ============
@@ -19,7 +17,7 @@ app_field = { app_theme | app_layout | app_routes }
 app_theme = { "theme" ~ ":" ~ string_literal }
 app_layout = { "layout" ~ ":" ~ identifier }
 app_routes = { "routes" ~ "{" ~ route_entry* ~ "}" }
-route_entry = { string_literal ~ ":" ~ identifier }
+route_entry = { string_literal ~ ":" ~ identifier ~ ("each" ~ identifier)? }
 
 // ============ STORE DECLARATION ============
 store_decl = { "store" ~ "{" ~ state_def* ~ "}" }
@@ -43,10 +41,6 @@ component_decl = { "component" ~ identifier ~ "{" ~ component_body ~ "}" }
 component_body = { component_section* }
 component_section = _{ props_block | state_block | computed_block | on_mount_block | on_destroy_block | watch_block | http_block | view_block | style_block | element }
 
-// Watch: $watch varName => { body }  or  $watch $store.varName => { body }
-watch_block = { "$watch" ~ watch_target ~ "=>" ~ on_mount_body }
-watch_target = @{ "$store." ~ identifier | identifier }
-
 // ============ HTTP BLOCK (inside component) ============
 http_block       = { "http" ~ "{" ~ http_field* ~ "}" }
 http_field       = { http_field_name ~ ":" ~ http_field_value }
@@ -61,6 +55,7 @@ computed_rhs = @{ (!"\n" ~ !"\r" ~ !"}" ~ ANY)+ }
 // on:mount / on:destroy lifecycle hooks — recursive brace matching (any nesting depth)
 on_mount_block = { "on:mount" ~ on_mount_body }
 on_destroy_block = { "on:destroy" ~ on_mount_body }
+watch_block = { "$watch" ~ identifier ~ "=>" ~ on_mount_body }
 on_mount_body    = @{ "{" ~ on_mount_content* ~ "}" }
 on_mount_content =  _{ on_mount_nested | (!("{" | "}") ~ ANY) }
 on_mount_nested  =  _{ "{" ~ on_mount_content* ~ "}" }
@@ -81,11 +76,6 @@ style_block = { "style" ~ "{" ~ style_item* ~ "}" }
 style_item = _{ media_block | keyframes_block | style_rule }
 media_block = { "@media" ~ media_query ~ "{" ~ style_rule* ~ "}" }
 media_query = @{ (!"{" ~ ANY)+ }
-// @keyframes: animation name + keyframe steps (from/to/percentage)
-keyframes_block = { "@keyframes" ~ keyframes_name ~ "{" ~ keyframe_step* ~ "}" }
-keyframes_name = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
-keyframe_step = { keyframe_selector ~ "{" ~ style_property* ~ "}" }
-keyframe_selector = @{ ("from" | "to" | (ASCII_DIGIT+ ~ "%")) ~ (" " ~ ("," ~ " "?)? ~ ("from" | "to" | ASCII_DIGIT+ ~ "%"))* }
 style_rule = { selector ~ "{" ~ (style_property | nested_rule)* ~ "}" }
 nested_rule = { nested_selector ~ "{" ~ style_property* ~ "}" }
 nested_selector = @{ "&" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")* }
@@ -93,6 +83,17 @@ selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=
 style_property = { property_name ~ ":" ~ property_value ~ ";"? }
 property_name = @{ (ASCII_ALPHA | "-")+ }
 property_value = @{ (!(";" | "}") ~ ANY)+ }
+keyframes_block = {
+    "@keyframes" ~ identifier ~
+    "{" ~
+    keyframe_step* ~
+    "}"
+}
+keyframe_step = {
+    keyframe_selector ~
+    "{" ~ style_property* ~ "}"
+}
+keyframe_selector = @{ (ASCII_DIGIT+ ~ "%" | "from" | "to") ~ ("," ~ WHITESPACE* ~ (ASCII_DIGIT+ ~ "%" | "from" | "to"))* }
 
 // ============ ELEMENTS (VIEW CONTENT) ============
 element = { control_flow | slot_element | tag_element | text_element }
@@ -100,11 +101,11 @@ element = { control_flow | slot_element | tag_element | text_element }
 // Control flow: @for, @if, @switch, @error
 control_flow = { for_loop | if_statement | switch_statement | error_block }
 
-for_loop = { "@for" ~ identifier ~ ("," ~ identifier)? ~ for_key_decl? ~ for_transition_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
-for_key_decl = { "key" ~ "=" ~ ("{" ~ for_key_inner ~ "}" | for_key_expr) }
-for_key_inner = @{ (!"}" ~ ANY)* }
+for_loop = { "@for" ~ identifier ~ ("," ~ identifier)? ~ for_key_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
+for_key_decl = { "key" ~ "=" ~ for_key_value }
+for_key_value = { for_key_braced | for_key_expr }
+for_key_braced = { "{" ~ expression_content ~ "}" }
 for_key_expr = @{ (ASCII_ALPHANUMERIC | "_" | "." | "[" | "]" | "$")+ }
-for_transition_decl = { "webc:transition" ~ "=" ~ string_literal }
 
 if_statement = { "@if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
 else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
@@ -138,9 +139,8 @@ attribute = { attr_name ~ "=" ~ attr_value }
 attr_name = @{ (ASCII_ALPHA | "_" | "-" | ":" | "|")+ }
 attr_value = { expression_attr | string_literal | "true" | "false" }
 expression_attr = { "{" ~ expression_content ~ "}" }
-expression_content = @{ expr_char* }
-expr_char = _{ expr_balanced | (!("{" | "}") ~ ANY) }
-expr_balanced = _{ "{" ~ expr_char* ~ "}" }
+expression_content = @{ (expr_brace_seq | (!"}" ~ !"{" ~ ANY))* }
+expr_brace_seq = @{ "{" ~ (expr_brace_seq | (!("}" | "{") ~ ANY))* ~ "}" }
 
 // ============ STRINGS AND INTERPOLATION ============
 string_literal = ${ "\"" ~ string_inner ~ "\"" }

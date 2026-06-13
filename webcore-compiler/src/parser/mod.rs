@@ -4,7 +4,7 @@ mod declarations;
 mod directives;
 mod elements;
 
-use crate::core::ast::{ImportDecl, Span, WebCoreDocument};
+use crate::ast::{Span, WebCoreDocument};
 use pest::Parser;
 use pest_derive::Parser;
 use std::collections::HashMap;
@@ -132,10 +132,20 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                     }
                     Rule::import_decl => {
                         let mut parts = inner.into_inner();
-                        let name = parts.next().map(|p| p.as_str().to_string()).unwrap_or_default();
-                        let path_raw = parts.next().map(|p| p.as_str().to_string()).unwrap_or_default();
-                        let path = elements::extract_string_literal(&path_raw);
-                        document.imports.push(ImportDecl { name, path });
+                        let name = parts
+                            .next()
+                            .map(|p| p.as_str().to_string())
+                            .unwrap_or_default();
+                        let path_raw = parts
+                            .next()
+                            .map(|p| p.as_str().to_string())
+                            .unwrap_or_default();
+                        let path = if path_raw.starts_with('"') && path_raw.ends_with('"') {
+                            path_raw[1..path_raw.len() - 1].to_string()
+                        } else {
+                            path_raw
+                        };
+                        document.imports.push(crate::ast::ImportDecl { name, path });
                     }
                     _ => {}
                 }
@@ -153,19 +163,32 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                 break;
             }
         }
+        if depth_err.is_some() {
+            break;
+        }
     }
-    for comp in document.components.values() {
-        for el in &comp.view {
-            if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
-                depth_err = Some(e);
+    if depth_err.is_none() {
+        for comp in document.components.values() {
+            for el in &comp.view {
+                if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
+                    depth_err = Some(e);
+                    break;
+                }
+            }
+            if depth_err.is_some() {
                 break;
             }
         }
     }
-    for layout in document.layouts.values() {
-        for el in &layout.content {
-            if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
-                depth_err = Some(e);
+    if depth_err.is_none() {
+        for layout in document.layouts.values() {
+            for el in &layout.content {
+                if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
+                    depth_err = Some(e);
+                    break;
+                }
+            }
+            if depth_err.is_some() {
                 break;
             }
         }
@@ -178,7 +201,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
 }
 
 fn check_nesting_depth(
-    el: &crate::core::ast::Element,
+    el: &crate::ast::Element,
     depth: usize,
     max: usize,
 ) -> Result<(), ParseError> {
@@ -196,7 +219,7 @@ fn check_nesting_depth(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::ast::{AttributeValue, Element};
+    use crate::ast::{AttributeValue, Element};
 
     #[test]
     fn test_parse_simple_component() {

@@ -1,7 +1,7 @@
 //! CSS Code Generator with Scoped Styles
 
-use crate::core::ast::{Component, StyleItem, StyleRule, WebCoreDocument, KeyframeStep};
-use crate::core::theme::Theme;
+use crate::ast::{Component, KeyframeStep, StyleItem, StyleRule, WebCoreDocument};
+use crate::theme::Theme;
 use std::fmt::Write as _;
 
 // FNV-1a 32-bit constants (https://tools.ietf.org/html/draft-eastlake-fnv)
@@ -22,25 +22,103 @@ pub(crate) fn generate_scope_id(component_name: &str) -> String {
 
 /// Known standard CSS property names. Custom properties (`--var`) are always allowed.
 const KNOWN_CSS_PROPS: &[&str] = &[
-    "color","background","background-color","background-image","background-size",
-    "background-position","background-repeat","background-attachment",
-    "margin","margin-top","margin-right","margin-bottom","margin-left",
-    "padding","padding-top","padding-right","padding-bottom","padding-left",
-    "border","border-top","border-right","border-bottom","border-left",
-    "border-radius","border-color","border-width","border-style",
-    "width","height","min-width","max-width","min-height","max-height",
-    "display","flex","flex-direction","flex-wrap","flex-grow","flex-shrink",
-    "justify-content","align-items","align-self","align-content",
-    "grid","grid-template-columns","grid-template-rows","grid-column","grid-row","gap",
-    "column-gap","row-gap","grid-area","grid-template-areas",
-    "position","top","right","bottom","left","z-index","float","clear",
-    "font-size","font-weight","font-family","font-style","font-variant","line-height",
-    "text-align","text-decoration","text-transform","text-overflow","letter-spacing",
-    "overflow","overflow-x","overflow-y","cursor","opacity","visibility","pointer-events",
-    "transition","transform","animation","animation-name","animation-duration",
-    "box-shadow","text-shadow","outline","list-style","content",
-    "white-space","word-break","word-wrap","vertical-align",
-    "object-fit","object-position","aspect-ratio","resize",
+    "color",
+    "background",
+    "background-color",
+    "background-image",
+    "background-size",
+    "background-position",
+    "background-repeat",
+    "background-attachment",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-radius",
+    "border-color",
+    "border-width",
+    "border-style",
+    "width",
+    "height",
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "display",
+    "flex",
+    "flex-direction",
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "align-content",
+    "grid",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-column",
+    "grid-row",
+    "gap",
+    "column-gap",
+    "row-gap",
+    "grid-area",
+    "grid-template-areas",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "z-index",
+    "float",
+    "clear",
+    "font-size",
+    "font-weight",
+    "font-family",
+    "font-style",
+    "font-variant",
+    "line-height",
+    "text-align",
+    "text-decoration",
+    "text-transform",
+    "text-overflow",
+    "letter-spacing",
+    "overflow",
+    "overflow-x",
+    "overflow-y",
+    "cursor",
+    "opacity",
+    "visibility",
+    "pointer-events",
+    "transition",
+    "transform",
+    "animation",
+    "animation-name",
+    "animation-duration",
+    "box-shadow",
+    "text-shadow",
+    "outline",
+    "list-style",
+    "content",
+    "white-space",
+    "word-break",
+    "word-wrap",
+    "vertical-align",
+    "object-fit",
+    "object-position",
+    "aspect-ratio",
+    "resize",
 ];
 
 /// Emit a warning to stderr if `prop_name` is not a known CSS property.
@@ -49,6 +127,20 @@ fn warn_unknown_css_prop(prop_name: &str, context: &str) {
     if !prop_name.starts_with("--") && !KNOWN_CSS_PROPS.contains(&prop_name) {
         eprintln!("warning[css]: unknown property '{prop_name}' in {context}");
     }
+}
+
+fn emit_keyframes(name: &str, steps: &[KeyframeStep]) -> String {
+    let mut css = String::new();
+    writeln!(css, "@keyframes {name} {{").unwrap();
+    for step in steps {
+        writeln!(css, "  {} {{", step.selector).unwrap();
+        for prop in &step.properties {
+            writeln!(css, "    {}: {};", prop.name, prop.value).unwrap();
+        }
+        css.push_str("  }\n");
+    }
+    css.push_str("}\n");
+    css
 }
 
 fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
@@ -84,20 +176,6 @@ fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
     css
 }
 
-fn emit_keyframes(name: &str, steps: &[KeyframeStep]) -> String {
-    let mut css = String::new();
-    writeln!(css, "@keyframes {name} {{").unwrap();
-    for step in steps {
-        writeln!(css, "  {} {{", step.selector).unwrap();
-        for prop in &step.properties {
-            writeln!(css, "    {}: {};", prop.name, prop.value).unwrap();
-        }
-        css.push_str("  }\n");
-    }
-    css.push_str("}\n");
-    css
-}
-
 /// Generate scoped CSS for a single component
 #[must_use]
 pub(crate) fn generate_scoped_css(component: &Component) -> String {
@@ -123,6 +201,7 @@ pub(crate) fn generate_scoped_css(component: &Component) -> String {
                 css.push_str("}\n");
             }
             StyleItem::Keyframes { name, steps } => {
+                // @keyframes are global by design — emit unscoped
                 css.push_str(&emit_keyframes(name, steps));
             }
         }
@@ -193,9 +272,10 @@ pub(crate) fn generate_all_scoped_css(document: &WebCoreDocument) -> String {
     css
 }
 
-/// Generate combined CSS: theme variables + scoped component styles
+/// Generate the global (non-component) CSS: theme variables + base styles.
+/// This is the part of the stylesheet shared by every page.
 #[must_use]
-pub(crate) fn generate_combined_css(theme: Option<&Theme>, document: &WebCoreDocument) -> String {
+pub(crate) fn generate_global_css(theme: Option<&Theme>) -> String {
     let mut css = String::new();
 
     // Theme variables
@@ -250,6 +330,13 @@ p { margin: 0 0 1em; }
 ",
     );
     css.push('\n');
+    css
+}
+
+/// Generate combined CSS: theme variables + scoped component styles
+#[must_use]
+pub(crate) fn generate_combined_css(theme: Option<&Theme>, document: &WebCoreDocument) -> String {
+    let mut css = generate_global_css(theme);
 
     // Scoped component styles
     css.push_str(&generate_all_scoped_css(document));

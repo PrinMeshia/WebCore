@@ -27,20 +27,20 @@
 //! document AST and emits each runtime helper only when it is actually needed.
 //! Simple pages (no `@if`, no `@for`, no validation) get a runtime of ~300 bytes.
 
-mod dom;
-mod events;
-mod runtime;
+mod js_dom;
+mod js_events;
+mod js_runtime;
 
-use crate::core::ast::WebCoreDocument;
-use crate::codegen::html::HandlerMapping;
-use std::fmt::Write as _;
-use dom::{
+use crate::ast::WebCoreDocument;
+use crate::codegen::codegen_html::HandlerMapping;
+use js_dom::{
     collect_component_event_listeners, collect_on_destroy_bodies, collect_on_mount_bodies,
     detect_features, rebind_seq,
 };
-use events::{compile_expression_full, replace_utils_short};
-use runtime::{emit_bind_fns, emit_evalcond, emit_state_class, emit_vars_array};
+use js_events::{compile_expression_full, replace_utils_short};
+use js_runtime::{emit_bind_fns, emit_evalcond, emit_state_class, emit_vars_array};
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 /// Collect all local state variable names from a document (component-level).
 /// Includes computed var names so that `evalCond('doubled')` resolves to
@@ -80,12 +80,12 @@ fn js_default_value(type_: &str, default_value: Option<&str>) -> String {
 
 /// Convert a component/page name to the expected HTML filename (mirrors main.rs logic).
 fn page_name_to_file(name: &str) -> String {
-    events::page_name_to_file(name)
+    js_events::page_name_to_file(name)
 }
 
 /// Convert a route pattern `/post/:slug` to a JS regex string and return param names.
 fn route_to_js_regex(pattern: &str) -> (String, Vec<String>) {
-    events::route_to_js_regex(pattern)
+    js_events::route_to_js_regex(pattern)
 }
 
 /// Escape a string for safe embedding in a JS double-quoted string literal.
@@ -97,7 +97,10 @@ fn escape_js_str(s: &str) -> String {
 }
 
 #[must_use]
-pub(crate) fn generate_runtime_js(handlers: &[HandlerMapping], document: &WebCoreDocument) -> String {
+pub(crate) fn generate_runtime_js(
+    handlers: &[HandlerMapping],
+    document: &WebCoreDocument,
+) -> String {
     let state_vars = collect_state_variables(document);
     let store_vars = collect_store_variables(document);
     generate_runtime_js_with_vars(handlers, &state_vars, &store_vars, document)
@@ -123,7 +126,8 @@ pub(crate) fn generate_runtime_js_with_vars(
     let mut computed_entries: Vec<String> = Vec::new();
     for component in document.components.values() {
         for cv in &component.computed {
-            let compiled = replace_utils_short(&events::replace_store_and_local(&cv.expr, state_vars));
+            let compiled =
+                replace_utils_short(&js_events::replace_store_and_local(&cv.expr, state_vars));
             computed_entries.push(format!("{{name:'{}',fn:()=>{}}}", cv.name, compiled));
         }
     }
@@ -156,9 +160,9 @@ pub(crate) fn generate_runtime_js_with_vars(
     js.push_str(&emit_state_class(features.has_refs));
     js.push('\n');
 
-    // ── Data imports (build-time JSON/TOML → S.setQ) ─────────────────────────
+    // ── Data imports — emit as initial state before other state vars ─────────
     for (name, json) in &document.data_imports {
-        writeln!(js, "S.setQ('{}',{});", name, json.trim()).unwrap();
+        writeln!(js, "S.setQ({:?},{});", name, json).unwrap();
     }
 
     // ── State initialisation ─────────────────────────────────────────────────
@@ -202,12 +206,21 @@ pub(crate) fn generate_runtime_js_with_vars(
             .collect();
         locale_entries.sort();
         writeln!(js, "const LOCALES={{{}}};", locale_entries.join(",")).unwrap();
-        writeln!(js, "let LOCALE=\"{}\";", escape_js_str(&document.default_locale)).unwrap();
+        writeln!(
+            js,
+            "let LOCALE=\"{}\";",
+            escape_js_str(&document.default_locale)
+        )
+        .unwrap();
         // t(key) — simple lookup
         // t(key, n: number) — plural: looks for key_one / key_other, replaces {{count}}
         // t(key, arg) — positional: replaces {{0}} in the translation string
         js.push_str("const t=(k,a)=>{if(a===undefined)return LOCALES[LOCALE]?.[k]??k;if(typeof a==='number'){const pk=a===1?k+'_one':k+'_other';return(LOCALES[LOCALE]?.[pk]??LOCALES[LOCALE]?.[k]??k).replace(/\\{\\{count\\}\\}/g,String(a));}return(LOCALES[LOCALE]?.[k]??k).replace(/\\{\\{0\\}\\}/g,String(a));};\n");
-        write!(js, "const setLocale=l=>{{if(LOCALES[l]){{LOCALE=l;{all_rebinds}}}}};\n\n").unwrap();
+        write!(
+            js,
+            "const setLocale=l=>{{if(LOCALES[l]){{LOCALE=l;{all_rebinds}}}}};\n\n"
+        )
+        .unwrap();
     }
 
     // ── QUERY_PARAMS Proxy (tree-shaken: only when $query. used) ─────────────
@@ -249,7 +262,11 @@ pub(crate) fn generate_runtime_js_with_vars(
             // u re-runs rebindComputed so computed vars (e.g. doubled) are fresh
             // before the span's textContent is updated. setQ is side-effect-free
             // (no listener cascade), so this cannot loop.
-            let recompute_in_u = if has_computed { "rebindComputed();" } else { "" };
+            let recompute_in_u = if has_computed {
+                "rebindComputed();"
+            } else {
+                ""
+            };
             write!(js,
                 "document.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{{const e=el.dataset.webcoreInterpolation,u=()=>{{{}el.textContent=String(evalCond(e)??'')}};$effect(u)}})}};\n\n",
                 recompute_in_u
@@ -288,8 +305,14 @@ pub(crate) fn generate_runtime_js_with_vars(
                 let (regex, params) = route_to_js_regex(path);
                 let file = page_name_to_file(page_name);
                 let params_js: Vec<String> = params.iter().map(|p| format!("\"{p}\"")).collect();
-                write!(routes_js, "{{re:/{}/,file:\"{}\",params:[{}]}},",
-                    regex, escape_js_str(&file), params_js.join(",")).unwrap();
+                write!(
+                    routes_js,
+                    "{{re:/{}/,file:\"{}\",params:[{}]}},",
+                    regex,
+                    escape_js_str(&file),
+                    params_js.join(",")
+                )
+                .unwrap();
             }
             routes_js.push_str("];\n");
             js.push_str(&routes_js);
@@ -346,8 +369,8 @@ pub(crate) fn generate_runtime_js_with_vars(
     } else {
         ""
     };
-    let transition_css_inject = if features.has_transition || features.has_list_transition {
-        ";document.head.insertAdjacentHTML('beforeend','<style>.webc-fade-enter{opacity:0;transition:opacity 250ms ease}.webc-fade-enter-to{opacity:1}.webc-fade-leave{opacity:1;transition:opacity 250ms ease}.webc-fade-leave-to{opacity:0}.webc-slide-enter{transform:translateY(-6px);opacity:0;transition:transform 200ms ease,opacity 200ms ease}.webc-slide-enter-to{transform:none;opacity:1}.webc-slide-leave{transition:transform 200ms ease,opacity 200ms ease}.webc-slide-leave-to{transform:translateY(-6px);opacity:0}.webc-list-fade-enter{opacity:0;transition:opacity 200ms ease}.webc-list-fade-enter-to{opacity:1}.webc-list-fade-leave{opacity:1;transition:opacity 200ms ease}.webc-list-fade-leave-to{opacity:0}.webc-list-slide-enter{transform:translateY(-4px);opacity:0;transition:transform 150ms ease,opacity 150ms ease}.webc-list-slide-enter-to{transform:none;opacity:1}.webc-list-slide-leave{transition:transform 150ms ease,opacity 150ms ease}.webc-list-slide-leave-to{transform:translateY(-4px);opacity:0}</style>')"
+    let transition_css_inject = if features.has_transition {
+        ";document.head.insertAdjacentHTML('beforeend','<style>.webc-fade-enter{opacity:0;transition:opacity 250ms ease}.webc-fade-enter-to{opacity:1}.webc-fade-leave{opacity:1;transition:opacity 250ms ease}.webc-fade-leave-to{opacity:0}.webc-slide-enter{transform:translateY(-6px);opacity:0;transition:transform 200ms ease,opacity 200ms ease}.webc-slide-enter-to{transform:none;opacity:1}.webc-slide-leave{transition:transform 200ms ease,opacity 200ms ease}.webc-slide-leave-to{transform:translateY(-6px);opacity:0}</style>')"
     } else {
         ""
     };
@@ -360,16 +383,20 @@ pub(crate) fn generate_runtime_js_with_vars(
     for body in &mount_bodies {
         write!(js, ";(()=>{{{}}})()", body.trim()).unwrap();
     }
-    // $watch registrations — S.on / STORE.on listeners registered at DOMContentLoaded
-    for component in document.components.values() {
-        for watch in &component.watches {
-            let state_obj = if watch.is_store { "STORE" } else { "S" };
-            write!(js, ";{state_obj}.on('{}',{}=>{{{}}})", watch.var_name, watch.var_name, watch.body.trim()).unwrap();
+    // ── $watch hooks ─────────────────────────────────────────────────────────
+    for comp in document.components.values() {
+        for hook in &comp.watch_hooks {
+            write!(js, ";S.on('{}',{}=>{{{}}})", hook.var, hook.var, hook.body).unwrap();
         }
     }
     for listener in &comp_listeners {
         let compiled = compile_expression_full(&listener.expression, state_vars);
-        write!(js, ";document.addEventListener('{}',e=>{{{}}})", listener.event_name, compiled).unwrap();
+        write!(
+            js,
+            ";document.addEventListener('{}',e=>{{{}}})",
+            listener.event_name, compiled
+        )
+        .unwrap();
     }
     // ── Debounce event listeners ──────────────────────────────────────────────
     // Wire up debounce handlers: find the element by id and attach a debounced listener.
@@ -381,18 +408,19 @@ pub(crate) fn generate_runtime_js_with_vars(
             .collect();
         for handler in debounce_handlers {
             // event_type is like "input|debounce=300"
-            let (event_name, delay_ms) = if let Some(pipe_pos) = handler.event_type.find("|debounce") {
-                let base = &handler.event_type[..pipe_pos];
-                let after = &handler.event_type[pipe_pos + "|debounce".len()..];
-                let ms: u32 = if let Some(stripped) = after.strip_prefix('=') {
-                    stripped.parse().unwrap_or(300)
+            let (event_name, delay_ms) =
+                if let Some(pipe_pos) = handler.event_type.find("|debounce") {
+                    let base = &handler.event_type[..pipe_pos];
+                    let after = &handler.event_type[pipe_pos + "|debounce".len()..];
+                    let ms: u32 = if let Some(stripped) = after.strip_prefix('=') {
+                        stripped.parse().unwrap_or(300)
+                    } else {
+                        300
+                    };
+                    (base, ms)
                 } else {
-                    300
+                    (handler.event_type.as_str(), 300u32)
                 };
-                (base, ms)
-            } else {
-                (handler.event_type.as_str(), 300u32)
-            };
             let compiled = compile_expression_full(&handler.expression, state_vars);
             dbt_idx += 1;
             write!(js,
@@ -414,7 +442,11 @@ pub(crate) fn generate_runtime_js_with_vars(
             if let Some(http) = &component.http {
                 let into_var = &http.into;
                 let url = &http.url;
-                let rb = if all_rebinds.is_empty() { String::new() } else { format!("{all_rebinds};") };
+                let rb = if all_rebinds.is_empty() {
+                    String::new()
+                } else {
+                    format!("{all_rebinds};")
+                };
                 write!(js,
                     ";(async()=>{{try{{const __r=await fetch(\"{}\");if(!__r.ok)throw new Error(__r.statusText);const __d=await __r.json();S.set('{}',__d);S.set('loading',false);{}}}catch(__e){{S.set('error',__e.message);S.set('loading',false);{}}}}})()",
                     escape_js_str(url),

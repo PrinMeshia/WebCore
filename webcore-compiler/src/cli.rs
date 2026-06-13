@@ -1,9 +1,6 @@
 //! CLI argument parsing and command dispatch.
 
-pub(crate) mod assets;
-pub(crate) mod build;
-pub(crate) mod check;
-pub(crate) mod serve;
+use crate::{build, check, serve};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -18,7 +15,9 @@ pub(crate) fn run() {
 
     match args[1].as_str() {
         "new" => {
-            let name = if let Some(n) = args.get(2) { n.clone() } else {
+            let name = if let Some(n) = args.get(2) {
+                n.clone()
+            } else {
                 eprintln!("Usage: webc new <nom-du-projet>");
                 std::process::exit(1);
             };
@@ -66,15 +65,13 @@ pub(crate) fn run() {
                 std::process::exit(1);
             }
         }
-        "check" => {
-            match check::check_project() {
-                Ok(()) => {}
-                Err(e) => {
-                    eprintln!("{e}");
-                    std::process::exit(1);
-                }
+        "check" => match check::check_project() {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
             }
-        }
+        },
         _ => {
             eprintln!("Commande inconnue : {}", args[1]);
             print_help();

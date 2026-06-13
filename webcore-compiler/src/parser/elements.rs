@@ -1,6 +1,6 @@
 //! Element parsing: tags, components, slots, text, and interpolation.
 
-use crate::core::ast::{Element, Span, Attribute, AttributeValue};
+use crate::ast::{Attribute, AttributeValue, Element, Span};
 use crate::parser::{ParseError, Rule};
 use pest::iterators::Pair;
 
@@ -31,7 +31,8 @@ pub(super) fn parse_slot(pair: Pair<Rule>) -> Result<Element, ParseError> {
         .is_some_and(|p| p.as_rule() == Rule::identifier)
     {
         inner
-            .next().map_or_else(|| "content".to_string(), |p| p.as_str().to_string())
+            .next()
+            .map_or_else(|| "content".to_string(), |p| p.as_str().to_string())
     } else {
         "content".to_string()
     };
@@ -233,10 +234,23 @@ pub(super) fn split_interpolated_text(text: &str) -> Vec<Element> {
     while i < len {
         if chars[i] == '\\' && i + 1 < len {
             match chars[i + 1] {
-                '{' => { current_text.push('{'); i += 2; }
-                '"' => { current_text.push('"'); i += 2; }
-                '\\' => { current_text.push('\\'); i += 2; }
-                other => { current_text.push('\\'); current_text.push(other); i += 2; }
+                '{' => {
+                    current_text.push('{');
+                    i += 2;
+                }
+                '"' => {
+                    current_text.push('"');
+                    i += 2;
+                }
+                '\\' => {
+                    current_text.push('\\');
+                    i += 2;
+                }
+                other => {
+                    current_text.push('\\');
+                    current_text.push(other);
+                    i += 2;
+                }
             }
         } else if chars[i] == '{' {
             // Start of interpolation — flush pending text
@@ -247,7 +261,10 @@ pub(super) fn split_interpolated_text(text: &str) -> Vec<Element> {
             // Find matching '}'
             if let Some(close) = chars[i + 1..].iter().position(|&c| c == '}') {
                 let var_name: String = chars[i + 1..i + 1 + close].iter().collect();
-                elements.push(Element::Interpolation(var_name.trim().to_string(), default_span));
+                elements.push(Element::Interpolation(
+                    var_name.trim().to_string(),
+                    default_span,
+                ));
                 i += close + 2;
             } else {
                 // No closing brace — treat rest as literal text

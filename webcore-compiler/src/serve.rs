@@ -1,13 +1,13 @@
 //! Dev server: HTTP file serving with WebSocket HMR (hot-module reload).
 
-use super::build::build_project;
+use crate::build::build_project;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::fs;
 use std::net::{TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::fs;
 use tiny_http::{Request, Response, Server};
 use tungstenite::{accept, Message};
 
@@ -42,7 +42,9 @@ pub(crate) fn resolve_safe_path(url: &str) -> Option<PathBuf> {
         // Strip leading slash to avoid treating it as absolute
         PathBuf::from("dist").join(url.trim_start_matches('/'))
     } else {
-        let html_path = PathBuf::from("dist").join(url.trim_start_matches('/')).join("index.html");
+        let html_path = PathBuf::from("dist")
+            .join(url.trim_start_matches('/'))
+            .join("index.html");
         if html_path.exists() {
             html_path
         } else {
@@ -80,8 +82,7 @@ pub(crate) fn handle_request(request: Request, ws_port: u16) -> Result<(), Strin
                 // Inject WebSocket HMR script
                 if let Ok(html) = String::from_utf8(bytes.clone()) {
                     let hmr_script = get_ws_hmr_script(ws_port);
-                    let injected_html =
-                        html.replace("</body>", &format!("{hmr_script}</body>"));
+                    let injected_html = html.replace("</body>", &format!("{hmr_script}</body>"));
                     bytes = injected_html.into_bytes();
                 }
                 "text/html; charset=utf-8"
@@ -156,7 +157,11 @@ fn get_primary_ipv4() -> Option<String> {
     None
 }
 
-pub(crate) fn serve_project(port: u16, host: Option<String>, auto_open: bool) -> Result<(), String> {
+pub(crate) fn serve_project(
+    port: u16,
+    host: Option<String>,
+    auto_open: bool,
+) -> Result<(), String> {
     // initial build
     build_project().map_err(|e| e.to_string())?;
 
@@ -233,7 +238,10 @@ pub(crate) fn serve_project(port: u16, host: Option<String>, auto_open: bool) ->
     if let Some(url) = qr_url {
         if let Ok(code) = qrcode::QrCode::new(url.as_bytes()) {
             println!("\n  Scan QR (Network):");
-            let qr = code.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build();
+            let qr = code
+                .render::<qrcode::render::unicode::Dense1x2>()
+                .quiet_zone(true)
+                .build();
             println!("{qr}");
         }
     }

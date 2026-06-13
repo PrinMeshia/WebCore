@@ -55,13 +55,6 @@ impl Span {
     }
 }
 
-/// A top-level `import name from "path"` declaration.
-#[derive(Debug, Clone)]
-pub struct ImportDecl {
-    pub name: String,
-    pub path: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct WebCoreDocument {
     pub app: Option<App>,
@@ -75,10 +68,30 @@ pub struct WebCoreDocument {
     pub layouts: HashMap<String, Layout>,
     pub pages: HashMap<String, Page>,
     pub components: HashMap<String, Component>,
-    /// Top-level `import name from "path"` declarations (resolved at build time).
+    /// Build-time data imports (`import posts from "data/posts.json"`).
+    #[allow(dead_code)]
     pub imports: Vec<ImportDecl>,
-    /// Resolved data: variable name → JSON string (from JSON/TOML import files).
+    /// Resolved data imports: name → JSON string.
+    #[allow(dead_code)]
     pub data_imports: HashMap<String, String>,
+}
+
+/// A `$watch varName => { body }` hook inside a component.
+#[derive(Debug, Clone)]
+pub struct WatchHook {
+    #[allow(dead_code)]
+    pub var: String,
+    #[allow(dead_code)]
+    pub body: String,
+}
+
+/// A build-time data import: `import name from "path"`.
+#[derive(Debug, Clone)]
+pub struct ImportDecl {
+    #[allow(dead_code)]
+    pub name: String,
+    #[allow(dead_code)]
+    pub path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +101,10 @@ pub struct App {
     pub theme: Option<String>,
     pub layout: Option<String>,
     pub routes: HashMap<String, String>,
+    /// SSG collections: route path → data-import name.
+    /// `"/post/:slug": PostPage each posts` → `{"/post/:slug": "posts"}`.
+    /// At build time one static page is generated per item of the collection.
+    pub collections: HashMap<String, String>,
     #[allow(dead_code)]
     pub span: Span,
 }
@@ -134,9 +151,10 @@ pub struct Component {
     pub props: Vec<Prop>,
     pub state: Vec<StateVar>,
     pub computed: Vec<ComputedVar>,
-    pub watches: Vec<WatchDef>,
     pub mount_body: Option<String>,
     pub destroy_body: Option<String>,
+    #[allow(dead_code)]
+    pub watch_hooks: Vec<WatchHook>,
     pub http: Option<HttpBlock>,
     pub view: Vec<Element>,
     pub style: Vec<StyleItem>,
@@ -155,17 +173,6 @@ pub struct Prop {
 pub struct ComputedVar {
     pub name: String,
     pub expr: String,
-    #[allow(dead_code)]
-    pub span: Span,
-}
-
-/// A `$watch varName => { body }` or `$watch $store.varName => { body }` declaration.
-#[derive(Debug, Clone)]
-pub struct WatchDef {
-    pub var_name: String,
-    /// True when watching a `$store.varName` — emits `STORE.on(...)` instead of `S.on(...)`
-    pub is_store: bool,
-    pub body: String,
     #[allow(dead_code)]
     pub span: Span,
 }
@@ -203,13 +210,12 @@ pub enum Element {
         span: Span,
     },
     Interpolation(String, Span),
-    /// Loop: @for item [, index] [key=expr] [webc:transition="name"] in items { ... }
+    /// Loop: @for item [, index] [key=expr] in items { ... }
     For {
         item: String,
         index: Option<String>,
         iterable: String,
         key: Option<String>,
-        list_transition: Option<String>,
         content: Vec<Element>,
         span: Span,
     },
@@ -329,14 +335,14 @@ pub struct StyleProperty {
     pub span: Span,
 }
 
-/// One keyframe step inside `@keyframes`, e.g. `from { opacity: 0; }` or `50% { ... }`.
+/// A single step inside a `@keyframes` block (e.g. `from`, `to`, `50%`).
 #[derive(Debug, Clone)]
 pub struct KeyframeStep {
     pub selector: String,
     pub properties: Vec<StyleProperty>,
 }
 
-/// An item inside a `style { }` block — a plain rule, @media block, or @keyframes.
+/// An item inside a `style { }` block — either a plain rule, a @media block, or @keyframes.
 #[derive(Debug, Clone)]
 pub enum StyleItem {
     Rule(StyleRule),
@@ -346,7 +352,6 @@ pub enum StyleItem {
         #[allow(dead_code)]
         span: Span,
     },
-    /// `@keyframes name { from { ... } to { ... } }` — emitted unscoped.
     Keyframes {
         name: String,
         steps: Vec<KeyframeStep>,
