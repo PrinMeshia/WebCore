@@ -1,6 +1,6 @@
 //! Top-level declaration parsing: component, page, layout, app, store.
 
-use crate::core::ast::{App, Span, Layout, Page, HeadBlock, HttpBlock, Component, StateVar, Prop, ComputedVar, StyleRule, StyleProperty, StyleItem};
+use crate::core::ast::{App, Span, Layout, Page, HeadBlock, HttpBlock, Component, StateVar, Prop, ComputedVar, WatchDef, StyleRule, StyleProperty, StyleItem, KeyframeStep};
 use crate::parser::{ParseError, Rule};
 use crate::parser::elements::{parse_element, extract_string_literal};
 use pest::iterators::Pair;
@@ -209,6 +209,7 @@ pub(super) fn parse_component(pair: Pair<Rule>) -> Result<Component, ParseError>
         props: Vec::new(),
         state: Vec::new(),
         computed: Vec::new(),
+        watches: Vec::new(),
         mount_body: None,
         destroy_body: None,
         http: None,
@@ -235,6 +236,9 @@ pub(super) fn parse_component(pair: Pair<Rule>) -> Result<Component, ParseError>
                 }
                 Rule::on_destroy_block => {
                     component.destroy_body = Some(parse_on_mount_block(section)?);
+                }
+                Rule::watch_block => {
+                    component.watches.push(parse_watch_block(section)?);
                 }
                 Rule::http_block => {
                     component.http = Some(parse_http_block(section)?);
@@ -382,6 +386,38 @@ pub(super) fn parse_on_mount_block(pair: Pair<Rule>) -> Result<String, ParseErro
     Ok(body.to_string())
 }
 
+/// Parse a `$watch varName => { body }` or `$watch $store.varName => { body }` block.
+fn parse_watch_block(pair: Pair<Rule>) -> Result<WatchDef, ParseError> {
+    let span = Span::from_pest(pair.as_span());
+    let mut inner = pair.into_inner();
+    let target_raw = inner
+        .next()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_default();
+    let (var_name, is_store) = if let Some(stripped) = target_raw.strip_prefix("$store.") {
+        (stripped.to_string(), true)
+    } else {
+        (target_raw, false)
+    };
+    // on_mount_body captures `{ ... }` verbatim — strip the outer braces
+    let body_raw = inner.next().map_or("{}", |p| p.as_str());
+    let trimmed = body_raw.trim();
+    let body = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        trimmed[1..trimmed.len() - 1].trim().to_string()
+    } else {
+        trimmed.to_string()
+    };
+    Ok(WatchDef { var_name, is_store, body, span })
+}
+
+fn parse_style_property(pair: Pair<Rule>) -> Result<StyleProperty, ParseError> {
+    let prop_span = Span::from_pest(pair.as_span());
+    let mut inner = pair.into_inner();
+    let name = inner.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+    let value = inner.next().map(|p| p.as_str().trim().to_string()).unwrap_or_default();
+    Ok(StyleProperty { name, value, span: prop_span })
+}
+
 pub(super) fn parse_style_rule_pair(rule_pair: Pair<Rule>) -> Result<StyleRule, ParseError> {
     let span = Span::from_pest(rule_pair.as_span());
     let mut inner = rule_pair.into_inner();
@@ -396,24 +432,7 @@ pub(super) fn parse_style_rule_pair(rule_pair: Pair<Rule>) -> Result<StyleRule, 
     for item in inner {
         match item.as_rule() {
             Rule::style_property => {
-                let prop_span = Span::from_pest(item.as_span());
-                let mut prop_inner = item.into_inner();
-
-                let name = prop_inner
-                    .next()
-                    .map(|p| p.as_str().to_string())
-                    .unwrap_or_default();
-
-                let value = prop_inner
-                    .next()
-                    .map(|p| p.as_str().trim().to_string())
-                    .unwrap_or_default();
-
-                properties.push(StyleProperty {
-                    name,
-                    value,
-                    span: prop_span,
-                });
+                properties.push(parse_style_property(item)?);
             }
             Rule::nested_rule => {
                 let nested_span = Span::from_pest(item.as_span());
@@ -427,17 +446,7 @@ pub(super) fn parse_style_rule_pair(rule_pair: Pair<Rule>) -> Result<StyleRule, 
                 let mut nested_props = Vec::new();
                 for prop in nested_inner {
                     if prop.as_rule() == Rule::style_property {
-                        let prop_span = Span::from_pest(prop.as_span());
-                        let mut prop_inner = prop.into_inner();
-                        let name = prop_inner
-                            .next()
-                            .map(|p| p.as_str().to_string())
-                            .unwrap_or_default();
-                        let value = prop_inner
-                            .next()
-                            .map(|p| p.as_str().trim().to_string())
-                            .unwrap_or_default();
-                        nested_props.push(StyleProperty { name, value, span: prop_span });
+                        nested_props.push(parse_style_property(prop)?);
                     }
                 }
                 nested.push(StyleRule {
@@ -484,6 +493,35 @@ pub(super) fn parse_style_block(pair: Pair<Rule>) -> Result<Vec<StyleItem>, Pars
                 }
 
                 items.push(StyleItem::Media { query, rules, span });
+            }
+            Rule::keyframes_block => {
+                let mut inner = item_pair.into_inner();
+                let name = inner
+                    .next()
+                    .map(|p| p.as_str().to_string())
+                    .unwrap_or_default();
+
+                let mut steps = Vec::new();
+                for step_pair in inner {
+                    if step_pair.as_rule() == Rule::keyframe_step {
+                        let mut sp = step_pair.into_inner();
+                        let selector = sp
+                            .next()
+                            .map(|p| p.as_str().to_string())
+                            .unwrap_or_default();
+                        let mut properties = Vec::new();
+                        for prop_pair in sp {
+                            if prop_pair.as_rule() == Rule::style_property {
+                                if let Ok(sp) = parse_style_property(prop_pair) {
+                                    properties.push(sp);
+                                }
+                            }
+                        }
+                        steps.push(KeyframeStep { selector, properties });
+                    }
+                }
+
+                items.push(StyleItem::Keyframes { name, steps });
             }
             _ => {}
         }

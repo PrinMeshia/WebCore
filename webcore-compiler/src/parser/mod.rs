@@ -4,7 +4,7 @@ mod declarations;
 mod directives;
 mod elements;
 
-use crate::core::ast::{Span, WebCoreDocument};
+use crate::core::ast::{ImportDecl, Span, WebCoreDocument};
 use pest::Parser;
 use pest_derive::Parser;
 use std::collections::HashMap;
@@ -101,6 +101,8 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
         layouts: HashMap::new(),
         pages: HashMap::new(),
         components: HashMap::new(),
+        imports: Vec::new(),
+        data_imports: HashMap::new(),
     };
 
     for pair in pairs {
@@ -128,13 +130,67 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                             .components
                             .insert(component.name.clone(), component);
                     }
+                    Rule::import_decl => {
+                        let mut parts = inner.into_inner();
+                        let name = parts.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+                        let path_raw = parts.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+                        let path = elements::extract_string_literal(&path_raw);
+                        document.imports.push(ImportDecl { name, path });
+                    }
                     _ => {}
                 }
             }
         }
     }
 
+    // Validate nesting depth across all elements to prevent stack-overflow bombs.
+    const MAX_DEPTH: usize = 128;
+    let mut depth_err: Option<ParseError> = None;
+    for page in document.pages.values() {
+        for el in &page.content {
+            if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
+                depth_err = Some(e);
+                break;
+            }
+        }
+    }
+    for comp in document.components.values() {
+        for el in &comp.view {
+            if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
+                depth_err = Some(e);
+                break;
+            }
+        }
+    }
+    for layout in document.layouts.values() {
+        for el in &layout.content {
+            if let Err(e) = check_nesting_depth(el, 0, MAX_DEPTH) {
+                depth_err = Some(e);
+                break;
+            }
+        }
+    }
+    if let Some(e) = depth_err {
+        return Err(e);
+    }
+
     Ok(document)
+}
+
+fn check_nesting_depth(
+    el: &crate::core::ast::Element,
+    depth: usize,
+    max: usize,
+) -> Result<(), ParseError> {
+    if depth > max {
+        return Err(ParseError::new(format!(
+            "Element nesting exceeds maximum depth of {max} — reduce component complexity"
+        )));
+    }
+    for child in el.children() {
+        check_nesting_depth(child, depth + 1, max)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

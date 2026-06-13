@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 2.0.0 — Référence complète de la syntaxe `.webc`
+> Version : 2.1.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -47,16 +47,19 @@
 32. [`webc:transition` — Animations CSS](#webctransition--animations-css)
 33. [`webc:img` — Images optimisées](#webcimg--images-optimisées)
 34. [Fingerprinting des images](#fingerprinting-des-images)
-35. [Limites actuelles (v2.0.0)](#limites-actuelles-v200)
-36. [Nouveautés v1.1.1](#nouveautés-v111)
-37. [Nouveautés v1.2.0](#nouveautés-v120)
-38. [Nouveautés v1.3.0](#nouveautés-v130)
-39. [Nouveautés v1.4.0](#nouveautés-v140)
-40. [Nouveautés v1.5.0](#nouveautés-v150)
-41. [Nouveautés v2.0.0](#nouveautés-v200)
-42. [Signaux réactifs fins](#signaux-réactifs-fins)
-43. [CSS nesting](#css-nesting)
-44. [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
+35. [`$watch` — Observateurs réactifs](#watch--observateurs-réactifs)
+36. [Validation des props à la compilation](#validation-des-props-à-la-compilation)
+37. [Limites actuelles (v2.1.0)](#limites-actuelles-v210)
+38. [Nouveautés v1.1.1](#nouveautés-v111)
+39. [Nouveautés v1.2.0](#nouveautés-v120)
+40. [Nouveautés v1.3.0](#nouveautés-v130)
+41. [Nouveautés v1.4.0](#nouveautés-v140)
+42. [Nouveautés v1.5.0](#nouveautés-v150)
+43. [Nouveautés v2.0.0](#nouveautés-v200)
+44. [Nouveautés v2.1.0](#nouveautés-v210)
+45. [Signaux réactifs fins](#signaux-réactifs-fins)
+46. [CSS nesting](#css-nesting)
+47. [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
 
 ---
 
@@ -661,6 +664,15 @@ button on:click={emit("ping", count)} { "Ping" }
 button on:click={webcore_navigate(/about)} { "Aller à propos" }
 ```
 
+### Objets littéraux dans les handlers
+
+Les accolades équilibrées sont autorisées dans les expressions `on:*` — il est donc possible de passer des objets littéraux directement :
+
+```webc
+button on:click={items = [...items, {text: draft, done: false}]; draft = ""} { "Ajouter" }
+button on:click={handler({key: "value", nested: {x: 1}})} { "Action" }
+```
+
 ### Handlers multi-instructions
 
 Plusieurs instructions peuvent être séparées par `;` dans un même handler. Chacune est compilée indépendamment :
@@ -847,12 +859,8 @@ Avec key pour le DOM diffing :
 }
 ```
 
-> **Pattern `window.helper`** : la grammaire interdit les accolades dans les expressions `on:click`. Pour créer des objets, définir un helper dans `on:mount` :
-> ```webc
-> on:mount { window.mkItem = text => ({text, done: false}) }
-> // Puis dans la vue :
-> button on:click={items = [...(items ?? []), mkItem(draft)]; draft = ""} { "Ajouter" }
-> ```
+La valeur de `key` peut être un chemin simple (`item.id`) ou une expression JS arbitraire
+entre accolades (`key={item.id + "-" + item.type}`) — voir [`@for` avec key](#for-avec-key-dom-diffing).
 
 ---
 
@@ -1257,8 +1265,13 @@ Il met à jour `el.style.display` et `el.textContent` de manière réactive.
 | Addition/soustraction | `{count + 1}` | valeur + 1 |
 | Variable de store | `{$store.hits}` | valeur du store |
 | Condition `>`, `<`, `>=`, `<=`, `==`, `!=` | `@if count > 0` | `display:block/none` |
+| Longueur de liste | `{items.length}` | nombre d'éléments initial |
+| Longueur de chaîne | `{name.length}` | longueur de la chaîne |
+| Casse | `{name.toUpperCase()}` | chaîne en majuscules |
+| Casse | `{name.toLowerCase()}` | chaîne en minuscules |
+| Trim | `{label.trim()}` | chaîne sans espaces de tête/queue |
 
-Les expressions complexes (appels de fonction, ternaires, etc.) sont laissées vides — le runtime les résout au chargement.
+Les expressions complexes non listées ci-dessus (appels de fonction, ternaires, méthodes non supportées, etc.) sont laissées vides — le runtime les résout au chargement.
 
 ---
 
@@ -1855,17 +1868,115 @@ Le fingerprinting est activé **par défaut**, quelle que soit la valeur de `mod
 
 ---
 
-## Limites actuelles (v2.0.0)
+## `$watch` — Observateurs réactifs
+
+`$watch` permet d'observer une variable d'état et d'exécuter un effet secondaire **pur** (sans mettre à jour le DOM) à chaque changement. C'est l'outil idéal pour la persistance locale, l'analytics ou la synchronisation externe.
+
+```webc
+component Settings {
+    state {
+        theme: String = "dark"
+        volume: Number = 80
+    }
+
+    $watch theme => {
+        localStorage.setItem("theme", theme)
+    }
+
+    $watch volume => {
+        analytics.track("volume_changed", {value: volume})
+    }
+
+    view {
+        select bind:value={theme} {
+            option value="dark" { "Sombre" }
+            option value="light" { "Clair" }
+        }
+    }
+}
+```
+
+### Syntaxe
+
+```webc
+$watch <varName> => {
+    // corps JS — accès à <varName> directement
+}
+```
+
+- `<varName>` doit être une variable déclarée dans `state` du même composant.
+- Le corps est exécuté **à chaque changement** de la variable, après la mise à jour de l'état.
+- Contrairement à `$effect`, `$watch` **n'effectue aucun bind DOM** — pas de re-render.
+- Plusieurs `$watch` peuvent être déclarés dans un même composant.
+
+### Différence avec `$effect`
+
+| | `$effect` | `$watch` |
+|---|---|---|
+| Déclencheur | Toute dépendance lue dans le bloc | Une seule variable nommée |
+| Binding DOM | Oui (met à jour le DOM) | Non |
+| Usage | Interpolations, classes conditionnelles | Persistance, analytics, sync externe |
+
+### Exemple : persistance localStorage
+
+```webc
+component Cart {
+    state { items: List = [] }
+
+    $watch items => {
+        localStorage.setItem("cart", JSON.stringify(items))
+    }
+
+    on:mount {
+        const saved = localStorage.getItem("cart")
+        if (saved) S.set("items", JSON.parse(saved))
+    }
+
+    view { /* ... */ }
+}
+```
+
+---
+
+## Validation des props à la compilation
+
+Le compilateur émet un avertissement (`warning[props]`) lorsqu'un composant reçoit une prop inconnue — c'est-à-dire une prop non déclarée dans son bloc `props {}`.
+
+```webc
+component Button {
+    props { label: String }
+    view { button "{label}" }
+}
+
+// Utilisation dans une vue parente :
+Button label="OK" colr="red" {}
+//                ^^^^ typo — avertissement à la compilation
+```
+
+Sortie console :
+
+```
+warning[props]: component 'Button' received unknown prop 'colr' — it will be ignored
+```
+
+### Comportement
+
+- L'avertissement est émis sur `stderr` pendant `webc build` et `webc check`.
+- La compilation **continue** — il s'agit d'un avertissement non bloquant.
+- Les attributs avec préfixe `on:`, `webc:`, `class:`, `style:`, `ref:`, `bind:`, `client:` sont **exclus** de la vérification (ce sont des directives runtime, pas des props).
+- Si le composant n'a pas de bloc `props {}`, aucune vérification n'est effectuée.
+
+---
+
+## Limites actuelles (v2.1.0)
 
 | Limite | Contournement |
 |---|---|
-| SSG limité aux expressions simples (variables, arithmetic ±, comparaisons numériques) | Le runtime résout les expressions complexes au chargement |
 | WASM : un seul module par projet | Exporter toutes les fonctions depuis un seul `lib.rs` |
 | Événements inter-composants portée globale (`document`) — pas de portée par instance | Préfixer le nom d'événement pour éviter les collisions |
-| `@for key=` : clé doit être un chemin simple (`item`, `item.id`) — pas d'expressions JS arbitraires | Pré-calculer la clé dans l'état avant la boucle |
 | Routes paramétrées : pas de routes imbriquées ni de regexp custom | Utiliser des routes à un seul segment dynamique par chemin |
-| Objets littéraux interdits dans les expressions `on:click` (accolades ambiguës) | Définir un helper `window.mkObj = ...` dans `on:mount` |
-| `webc:img` : un seul module `imagesize` — formats AVIF et JXL non supportés pour la lecture de dimensions | Spécifier `width` et `height` manuellement pour ces formats |
+| `webc:img` : formats AVIF et JXL non supportés pour la lecture de dimensions | Spécifier `width` et `height` manuellement pour ces formats |
+| SSG : méthodes de chaîne/tableau non supportées au-delà de `length`, `toUpperCase`, `toLowerCase`, `trim` | Le runtime résout les méthodes non supportées au chargement |
 
 ---
 
@@ -1903,6 +2014,25 @@ Le compilateur génère un tableau `ROUTES` avec patterns RegExp et une fonction
 
 Sans `key`, la liste est entièrement re-rendue à chaque changement. Avec `key`,
 `bindFor()` patche uniquement les nœuds modifiés/ajoutés/supprimés.
+
+La valeur de `key` accepte deux formes :
+
+| Forme | Exemple | Usage |
+|---|---|---|
+| Chemin simple | `key=item.id` | Accès de propriété sans calcul |
+| Expression JS | `key={item.id + "-" + item.type}` | Concaténation, calcul, appel de méthode |
+
+```webc
+// Chemin simple (recommandé quand la clé est une propriété directe)
+@for item key=item.id in items {
+    li "{item.name}"
+}
+
+// Expression complexe entre accolades
+@for item key={item.category + ":" + item.id} in items {
+    li "{item.name}"
+}
+```
 
 ### i18n : paramètres et pluralisation
 
@@ -2075,6 +2205,9 @@ Voir [Fingerprinting des images](#fingerprinting-des-images).
 - **HMR** — `webc serve` surveille et recharge automatiquement
 - **Path traversal corrigé** — `webc serve` retourne 403 pour les URLs hors `dist/`
 - **Détection de cycles** — `webc check` signale les références circulaires
+
+## Nouveautés v2.0.1
+
 - **Agrégation des erreurs** — toutes les erreurs de build sont reportées ensemble
 - **CSS nesting** — voir section [CSS nesting](#css-nesting)
 - **Rapport bundle** — voir section [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
@@ -2141,3 +2274,93 @@ Total JS: 1.98 KB
 ```
 
 Les fonctionnalités non utilisées sont tree-shaquées automatiquement : `http`, `bindIf`, `bindFor`, etc. n'apparaissent dans le bundle que si le projet les utilise.
+
+---
+
+## Nouveautés v2.1.0
+
+### Objets littéraux dans `on:click` (et tout `on:*`)
+
+Les accolades équilibrées sont désormais autorisées dans les expressions `on:*`. Il n'est plus nécessaire de définir un helper `window.mkObj` dans `on:mount`.
+
+```webc
+// Avant v2.1 — workaround requis
+on:mount { window.mkItem = t => ({text: t, done: false}) }
+button on:click={items = [...items, mkItem(draft)]} { "Ajouter" }
+
+// v2.1 — direct
+button on:click={items = [...items, {text: draft, done: false}]} { "Ajouter" }
+```
+
+### `@for key={expr}` — expressions complexes
+
+L'attribut `key` d'un `@for` supporte désormais des expressions JS arbitraires entre accolades, en plus du chemin simple existant.
+
+```webc
+@for item key={item.category + ":" + item.id} in items {
+    li "{item.name}"
+}
+```
+
+### SSG — propriétés de chaîne et longueur de liste
+
+Le pré-rendu SSG résout maintenant les accès de propriété simples sur l'état initial :
+
+```webc
+// Ces interpolations sont pré-remplies dans le HTML statique :
+p "{items.length} articles"      // → "3 articles"
+p "{name.toUpperCase()}"         // → "ALICE"
+p "{label.trim()}"               // → "hello"
+```
+
+Méthodes supportées : `.length`, `.toUpperCase()`, `.toLowerCase()`, `.trim()`.
+
+### `$watch` — observateurs réactifs
+
+Nouveau bloc `$watch` pour déclencher des effets secondaires purs (sans bind DOM) à chaque changement d'une variable d'état. Voir [`$watch`](#watch--observateurs-réactifs).
+
+```webc
+$watch count => {
+    localStorage.setItem("count", count)
+}
+```
+
+### Validation des props à la compilation
+
+Le compilateur émet désormais un `warning[props]` lorsqu'une prop inconnue est passée à un composant. Voir [Validation des props à la compilation](#validation-des-props-à-la-compilation).
+
+### Imports de données à la compilation
+
+`import name from "path"` (JSON ou TOML) injecte un fichier de données comme variable réactive.
+
+```webc
+import posts from "data/posts.json"
+
+component PostList {
+    view {
+        @for post in posts { li "{post.title}" }
+    }
+}
+```
+
+Le fichier est lu par `webc build` et injecté comme `S.setQ('posts', [...])` avant `DOMContentLoaded`. Les TOML sont automatiquement convertis en JSON.
+
+### `@for webc:transition` — Animations de liste
+
+`webc:transition="fade"` sur un `@for` anime les éléments entrants et sortants.
+
+```webc
+component TodoList {
+    state { items: Array }
+    view {
+        @for item key={item.id} webc:transition="fade" in items {
+            li "{item.name}"
+        }
+    }
+}
+```
+
+**Transitions intégrées** : `fade` (opacité) et `slide` (translateY + opacité).
+Les classes CSS générées : `.webc-list-fade-enter`, `.webc-list-fade-enter-to`, `.webc-list-fade-leave`, `.webc-list-fade-leave-to`.
+
+Fonctionne avec ou sans `key=`. Avec `key=`, les sorties utilisent `transitionend` avant de retirer le nœud du DOM.

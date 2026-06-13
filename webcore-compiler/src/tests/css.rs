@@ -14,6 +14,8 @@ fn golden_scoped_css_emits_data_v_selector() {
         layouts: std::collections::HashMap::new(),
         pages: std::collections::HashMap::new(),
         components: std::collections::HashMap::new(),
+        imports: vec![],
+        data_imports: std::collections::HashMap::new(),
     };
     doc.components.insert(
         "Counter".into(),
@@ -22,6 +24,7 @@ fn golden_scoped_css_emits_data_v_selector() {
             props: vec![],
             state: vec![],
             computed: vec![],
+            watches: vec![],
             mount_body: None,
             destroy_body: None,
             http: None,
@@ -116,4 +119,35 @@ fn golden_css_nesting_parse_and_roundtrip() {
     assert!(!css.contains('&'), "& leaked into output CSS:\n{css}");
     assert!(css.contains(":focus"), ":focus missing from output:\n{css}");
     assert!(css.contains("::before"), "::before missing from output:\n{css}");
+}
+
+#[test]
+fn golden_keyframes_emitted_unscoped() {
+    let src = r#"
+component Spinner {
+    view { div "loading" }
+    style {
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+        .spinner { animation: spin 1s linear infinite; }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let css = generate_combined_css(None, &doc);
+    assert!(css.contains("@keyframes spin"), "@keyframes rule missing in output:\n{css}");
+    assert!(css.contains("rotate(0deg)"), "from step missing in output:\n{css}");
+    assert!(css.contains("rotate(360deg)"), "to step missing in output:\n{css}");
+    // @keyframes block itself must not be wrapped in a scoped selector
+    let kf_start = css.find("@keyframes spin").expect("@keyframes not found");
+    let kf_end = css[kf_start..].find('}').map(|i| kf_start + i + 1).unwrap_or(css.len());
+    let kf_block = &css[kf_start..kf_end];
+    assert!(
+        !kf_block.contains(&format!("[{}=", attr_names::SCOPE)),
+        "@keyframes block should not contain a scoped selector:\n{kf_block}"
+    );
+    // The .spinner rule itself should still be scoped
+    assert!(css.contains("animation: spin 1s linear infinite"), ".spinner animation property missing:\n{css}");
 }

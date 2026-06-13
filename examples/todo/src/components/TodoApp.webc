@@ -7,12 +7,16 @@ component TodoApp {
         total = (items ?? []).length
     }
 
+    $watch items => {
+        localStorage.setItem("webcore_todos", JSON.stringify(items))
+    }
+
     on:mount {
-        window.mkTodo = text => ({text, done: false})
-        S.set('items', [
-            mkTodo("Buy groceries"),
-            mkTodo("Read a book"),
-            mkTodo("Write some Rust")
+        const saved = localStorage.getItem("webcore_todos")
+        S.set('items', saved ? JSON.parse(saved) : [
+            {text: "Buy groceries", done: false},
+            {text: "Read a book",   done: false},
+            {text: "Write some Rust", done: false}
         ])
         document.querySelector('.todo-list').addEventListener('click', function(e) {
             const w = e.target.closest('[data-webcore-idx]')
@@ -35,7 +39,7 @@ component TodoApp {
             div class="add-row" {
                 input type="text" placeholder="Nouvelle tâche…" value={draft}
                       on:input={draft = event.target.value}
-                button on:click={items = [...(items ?? []), mkTodo(draft)]; draft = ""} { "Ajouter" }
+                button on:click={items = [...(items ?? []), {text: draft, done: false}]; draft = ""} { "Ajouter" }
             }
 
             @if total > 0 {

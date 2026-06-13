@@ -30,6 +30,8 @@ mod i18n;
 #[cfg(test)]
 mod js;
 #[cfg(test)]
+mod security;
+#[cfg(test)]
 mod ssg;
 
 #[cfg(test)]

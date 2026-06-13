@@ -36,6 +36,8 @@ pub(super) struct RuntimeFeatures {
     pub has_style_binding: bool,
     /// Any element has a `webc:transition` attribute
     pub has_transition: bool,
+    /// Any `@for` loop has a `webc:transition` attribute
+    pub has_list_transition: bool,
 }
 
 pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
@@ -47,10 +49,13 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                     f.has_query_params = true;
                 }
             }
-            Element::For { content, iterable, .. } => {
+            Element::For { content, iterable, list_transition, .. } => {
                 f.has_for = true;
                 if iterable.contains("$query.") {
                     f.has_query_params = true;
+                }
+                if list_transition.is_some() {
+                    f.has_list_transition = true;
                 }
                 detect_features_in_elements(content, f);
             }

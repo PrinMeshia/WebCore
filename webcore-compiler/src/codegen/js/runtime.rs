@@ -167,7 +167,34 @@ pub(super) fn emit_bind_fns(f: &RuntimeFeatures) -> String {
         // fillItem(el, val, i): sets text for interpolation spans (supports "item.prop" paths),
         // writes data-webcore-idx, and mirrors object properties as data-* attributes for CSS.
         // Keyed diffing: webcoreKey stored on firstElementChild (no extra wrapper div).
-        js.push_str("const bindFor=()=>{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)})},render=()=>{const items=state.get(itN)??[];if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{cont.innerHTML='';items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cont.appendChild(cl)});}};$effect(render)});};\n");
+        // List transitions: data-webcore-for-transition="name" applies CSS classes on enter/leave.
+        // tr_enter_keyed: used on `fe` (firstElementChild of cloned template in keyed path)
+        // tr_enter_simple: used on `firstEl` (non-keyed path)
+        // tr_leave: used on `el` (existing keyed element being removed)
+        let tr_enter_keyed = if f.has_list_transition {
+            "if(tr){fe.classList.add('webc-list-'+tr+'-enter');requestAnimationFrame(()=>fe.classList.replace('webc-list-'+tr+'-enter','webc-list-'+tr+'-enter-to'));}"
+        } else {
+            ""
+        };
+        let tr_enter_simple = if f.has_list_transition {
+            "if(tr){firstEl.classList.add('webc-list-'+tr+'-enter');requestAnimationFrame(()=>firstEl.classList.replace('webc-list-'+tr+'-enter','webc-list-'+tr+'-enter-to'));}"
+        } else {
+            ""
+        };
+        let tr_leave = if f.has_list_transition {
+            "if(tr){el.classList.add('webc-list-'+tr+'-leave');requestAnimationFrame(()=>{el.classList.replace('webc-list-'+tr+'-leave','webc-list-'+tr+'-leave-to');el.addEventListener('transitionend',()=>el.remove(),{once:true});});}else "
+        } else {
+            ""
+        };
+        let tr_decl = if f.has_list_transition {
+            "tr=tmpl.dataset.webcoreForTransition,"
+        } else {
+            ""
+        };
+        #[allow(clippy::write_with_newline)]
+        write!(js,
+            "const bindFor=()=>{{document.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{{const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,{tr_decl}isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN,state=isStore?STORE:S,cont=tmpl.nextElementSibling,evalKey=keyExpr?(val=>{{if(/^[\\\\w$]+(?:\\\\.[\\\\w$]+)*$/.test(keyExpr))return keyExpr.split('.').reduce((o,k)=>o?.[k],{{[iN]:val}});try{{return new Function(iN,'\"use strict\";return '+keyExpr)(val);}}catch(_){{return undefined;}}}}):null,fillItem=(el,val,i)=>{{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{{const ie=s.dataset.webcoreInterpolation;if(ie===iN)s.textContent=String(val??'');else if(idxN&&ie===idxN)s.textContent=String(i);else if(ie.startsWith(iN+'.'))s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'')}});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{{if(typeof v!=='object')el.dataset[k]=String(v)}})}},render=()=>{{const items=state.get(itN)??[];if(evalKey){{const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>{{const el=existing.get(k);{tr_leave}el.remove()}});const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{{if(existing.has(key)&&keep.has(key)){{const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}}else{{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){{fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);{tr_enter_keyed}}}frag.append(...Array.from(cl.children));}}}});cont.replaceChildren(frag);}}else{{cont.innerHTML='';items.forEach((val,i)=>{{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl){{fillItem(firstEl,val,i);{tr_enter_simple}}}cont.appendChild(cl)}});}}}};$effect(render)}})}};\n"
+        ).unwrap();
     }
     if f.has_dynamic_attrs {
         if f.has_style_binding {

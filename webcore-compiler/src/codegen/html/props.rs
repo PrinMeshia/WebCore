@@ -144,6 +144,7 @@ pub(super) fn substitute_props_elem_combined(
             index,
             iterable,
             key,
+            list_transition,
             content,
             span,
         } => Element::For {
@@ -151,6 +152,7 @@ pub(super) fn substitute_props_elem_combined(
             index: index.clone(),
             iterable: iterable.clone(),
             key: key.clone(),
+            list_transition: list_transition.clone(),
             content: elements_combined(content, combined),
             span: *span,
         },

@@ -277,6 +277,7 @@ fn resolve_slots(
                 index,
                 iterable,
                 key,
+                list_transition,
                 content,
                 span,
             } => {
@@ -285,6 +286,7 @@ fn resolve_slots(
                     index: index.clone(),
                     iterable: iterable.clone(),
                     key: key.clone(),
+                    list_transition: list_transition.clone(),
                     content: resolve_slots(content, slot_map, default_content),
                     span: *span,
                 });
@@ -611,8 +613,11 @@ fn generate_tag_element(
             // Internal paths get an onclick for SPA navigation so clicking
             // never triggers a full page reload.  href is kept as fallback.
             if has_nav && h.starts_with('/') {
+                // JS-escape the value embedded inside the single-quoted onclick string
+                // to prevent injection via paths containing backslashes or single quotes.
+                let js_safe_h = h.replace('\\', "\\\\").replace('\'', "\\'");
                 write!(result, " href=\"{}\" onclick=\"webcore_navigate('{}'); return false;\"",
-                    html_escape(&h), h).unwrap();
+                    html_escape(&h), js_safe_h).unwrap();
             } else {
                 write!(result, " href=\"{}\"", html_escape(&h)).unwrap();
             }
@@ -687,10 +692,11 @@ fn generate_element_with_scope(
             index,
             iterable,
             key,
+            list_transition,
             content,
             ..
         } => render_for_element(
-            item, index.as_deref(), iterable, key.as_deref(),
+            item, index.as_deref(), iterable, key.as_deref(), list_transition.as_deref(),
             content, document, counter, scope_id, prefix, project_root,
         ),
         Element::If {
@@ -705,12 +711,27 @@ fn generate_element_with_scope(
     }
 }
 
+/// Parse `"N..M"` range syntax (e.g. `"0..5"`) into `(start, end)`.
+/// Returns `None` for non-range iterables.
+fn parse_int_range(iterable: &str) -> Option<(i64, i64)> {
+    let s = iterable.trim();
+    let (lhs, rhs) = s.split_once("..")?;
+    let start: i64 = lhs.trim().parse().ok()?;
+    let end: i64 = rhs.trim().parse().ok()?;
+    if start <= end && (end - start) <= 1000 {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_for_element(
     item: &str,
     index: Option<&str>,
     iterable: &str,
     key: Option<&str>,
+    list_transition: Option<&str>,
     content: &[Element],
     document: &WebCoreDocument,
     counter: &mut usize,
@@ -718,6 +739,15 @@ fn render_for_element(
     prefix: &str,
     project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), CompileError> {
+    // Expand integer range syntax: "N..M" → inline array used as iterable
+    let range_buf: String;
+    let iterable = if let Some((start, end)) = parse_int_range(iterable) {
+        let nums = (start..end).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+        range_buf = format!("[{nums}]");
+        range_buf.as_str()
+    } else {
+        iterable
+    };
     let mut open = format!(
         "<template {}=\"{}\" {}=\"{}\"",
         attr_names::FOR, item, attr_names::FOR_IN, iterable
@@ -727,6 +757,9 @@ fn render_for_element(
     }
     if let Some(k) = key {
         write!(open, " {}=\"{}\"", attr_names::FOR_KEY, html_escape(k)).unwrap();
+    }
+    if let Some(tr) = list_transition {
+        write!(open, " {}=\"{}\"", attr_names::FOR_TRANSITION, html_escape(tr)).unwrap();
     }
     if let Some(sid) = scope_id {
         write!(open, " {}=\"{}\"", attr_names::SCOPE, sid).unwrap();
@@ -922,6 +955,8 @@ mod tests {
             layouts: std::collections::HashMap::new(),
             pages: std::collections::HashMap::new(),
             components: std::collections::HashMap::new(),
+            imports: vec![],
+            data_imports: std::collections::HashMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -978,6 +1013,8 @@ mod tests {
             layouts: std::collections::HashMap::new(),
             pages: std::collections::HashMap::new(),
             components: std::collections::HashMap::new(),
+            imports: vec![],
+            data_imports: std::collections::HashMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -1038,6 +1075,8 @@ mod tests {
             layouts: std::collections::HashMap::new(),
             pages: std::collections::HashMap::new(),
             components: std::collections::HashMap::new(),
+            imports: vec![],
+            data_imports: std::collections::HashMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),

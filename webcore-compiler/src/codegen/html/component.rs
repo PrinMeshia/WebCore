@@ -26,6 +26,30 @@ pub(super) fn generate_component_element(
     project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), CompileError> {
     if let Some(component) = document.components.get(name) {
+        // Warn on unknown props at compile time (skip built-in directive prefixes)
+        if !component.props.is_empty() {
+            let declared: std::collections::HashSet<&str> =
+                component.props.iter().map(|p| p.name.as_str()).collect();
+            for attr in attributes {
+                if attr.name.starts_with("on:")
+                    || attr.name.starts_with("webc:")
+                    || attr.name.starts_with("class:")
+                    || attr.name.starts_with("style:")
+                    || attr.name.starts_with("ref:")
+                    || attr.name.starts_with("bind:")
+                    || attr.name.starts_with("client:")
+                {
+                    continue;
+                }
+                if !declared.contains(attr.name.as_str()) {
+                    eprintln!(
+                        "warning[props]: component '{}' received unknown prop '{}' — it will be ignored",
+                        name, attr.name
+                    );
+                }
+            }
+        }
+
         let static_props: std::collections::HashMap<String, String> = attributes
             .iter()
             .filter_map(|a| {

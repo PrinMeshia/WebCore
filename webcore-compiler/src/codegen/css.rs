@@ -1,6 +1,6 @@
 //! CSS Code Generator with Scoped Styles
 
-use crate::core::ast::{Component, StyleItem, StyleRule, WebCoreDocument};
+use crate::core::ast::{Component, StyleItem, StyleRule, WebCoreDocument, KeyframeStep};
 use crate::core::theme::Theme;
 use std::fmt::Write as _;
 
@@ -84,6 +84,20 @@ fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
     css
 }
 
+fn emit_keyframes(name: &str, steps: &[KeyframeStep]) -> String {
+    let mut css = String::new();
+    writeln!(css, "@keyframes {name} {{").unwrap();
+    for step in steps {
+        writeln!(css, "  {} {{", step.selector).unwrap();
+        for prop in &step.properties {
+            writeln!(css, "    {}: {};", prop.name, prop.value).unwrap();
+        }
+        css.push_str("  }\n");
+    }
+    css.push_str("}\n");
+    css
+}
+
 /// Generate scoped CSS for a single component
 #[must_use]
 pub(crate) fn generate_scoped_css(component: &Component) -> String {
@@ -107,6 +121,9 @@ pub(crate) fn generate_scoped_css(component: &Component) -> String {
                     css.push_str(&emit_scoped_rule(rule, &scope_id, "  "));
                 }
                 css.push_str("}\n");
+            }
+            StyleItem::Keyframes { name, steps } => {
+                css.push_str(&emit_keyframes(name, steps));
             }
         }
     }

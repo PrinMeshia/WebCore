@@ -4,6 +4,7 @@ pub const IF_ELSE: &str = "data-webcore-else";
 pub const FOR: &str = "data-webcore-for";
 pub const FOR_IN: &str = "data-webcore-in";
 pub const FOR_KEY: &str = "data-webcore-for-key";
+pub const FOR_TRANSITION: &str = "data-webcore-for-transition";
 pub const FOR_INDEX: &str = "data-webcore-for-index";
 pub const FOR_CONTAINER: &str = "data-webcore-for-container";
 pub const INTERPOLATION: &str = "data-webcore-interpolation";
