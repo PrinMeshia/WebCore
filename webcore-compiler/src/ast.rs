@@ -76,9 +76,25 @@ pub struct Layout {
     pub span: Span,
 }
 
+/// HTTP fetch block inside a component: `http { get: "/api/posts" into: posts }`
+#[derive(Debug, Clone)]
+pub struct HttpBlock {
+    pub method: String,
+    pub url: String,
+    pub into: String,
+}
+
+/// Head block inside a page: `head { title "..." meta key="value" }`
+#[derive(Debug, Clone)]
+pub struct HeadBlock {
+    pub title: Option<String>,
+    pub metas: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Page {
     pub name: String,
+    pub head: Option<HeadBlock>,
     pub content: Vec<Element>,
     pub span: Span,
 }
@@ -91,6 +107,7 @@ pub struct Component {
     pub computed: Vec<ComputedVar>,
     pub mount_body: Option<String>,
     pub destroy_body: Option<String>,
+    pub http: Option<HttpBlock>,
     pub view: Vec<Element>,
     pub style: Vec<StyleItem>,
     pub span: Span,

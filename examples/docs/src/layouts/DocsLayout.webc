@@ -1,17 +1,19 @@
 layout DocsLayout {
     div class="docs-shell" {
+        DocsShell {}
         header class="site-header" {
             div class="header-inner" {
-                div class="logo" {
+                link to="/" class="logo" {
                     span class="logo-mark" { "▸" }
                     span class="logo-text" { "WebCore" }
-                    span class="logo-version" { "v1.1" }
+                    span class="logo-version" { "v1.1.1" }
                 }
                 nav class="site-nav" {
                     link to="/" { "Home" }
                     link to="/syntax" { "Syntax" }
                     link to="/components" { "Components" }
                     link to="/features" { "Features" }
+                    link to="/examples" { "Examples" }
                 }
             }
         }
@@ -22,7 +24,12 @@ layout DocsLayout {
             p {
                 "Built with "
                 strong { "WebCore" }
-                " — a declarative language compiled with Rust."
+                " · "
+                a href="https://github.com/PrinMeshia/Webcore" { "GitHub" }
+                " · "
+                a href="https://github.com/PrinMeshia/Webcore/releases" { "Releases" }
+                " · "
+                a href="https://github.com/PrinMeshia/Webcore/blob/main/CHANGELOG.md" { "Changelog" }
             }
         }
     }

@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 1.2.0 |
+| **Version** | 1.5.0 |
 | **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 80 tests unitaires |
+| **Tests** | 92 tests unitaires |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -63,6 +63,17 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **URLs propres** : les pages sont servies sans extension (ex. `/about` au lieu de `/about.html`)
 - **`dist/assets/`** : JS, CSS et assets publics isolés dans un sous-dossier dédié
 - **Arborescence du build** : résumé `dist/` avec tailles de fichiers affiché après chaque build
+- **`http { }` — fetch déclaratif** : `get: "/url"  into: var` dans un composant ; `loading` et `error` auto-injectés et réactifs ; réponse JSON automatiquement parsée
+- **`head { }` — titre et meta par page** : `title "..."` et `meta name="..."` par page ; override le titre global de `webc.toml`
+- **`$query.` — query string params** : `{$query.search}`, `{$query.page}` — accès aux paramètres d'URL ; tree-shaké si inutilisé
+- **`class:active={expr}` — classes CSS conditionnelles** : binding conditionnel via `bindAttrs()` ; plusieurs `class:` par élément ; tree-shaké
+- **`on:event|debounce` — handler debouncé** : `on:input|debounce={expr}` — se déclenche après 300 ms d'inactivité ; fonctionne avec tout type d'événement
+- **`ref:name=true` — références DOM directes** : `input ref:name=true` enregistre l'élément dans `refs['name']` via `DOMContentLoaded` ; accès direct sans `querySelector` ; utile pour la gestion du focus ; tree-shaké
+- **`style:prop={expr}` — styles inline dynamiques** : `div style:color={myColor}` → `el.style.setProperty('color', ...)` via `bindAttrs()` ; peut coexister avec `style="..."` et `class:` ; tree-shaké
+- **Contenu par défaut des slots** : `slot sidebar { p "Contenu par défaut" }` dans un layout — utilisé si la page ne remplit pas le slot ; les slots non remplis étaient précédemment supprimés silencieusement
+- **`webc:transition="name"` — animations CSS** : `div webc:transition="fade" { ... }` — transitions intégrées `fade` et `slide` sur les blocs `@if` ; CSS injecté automatiquement ; tree-shaké
+- **`webc:img` — images optimisées** : `img webc:img src="/hero.png" alt="Hero"` injecte `loading="lazy"`, `decoding="async"` et les dimensions (`width`/`height`) lues dans `public/` à la compilation ; prévient le layout shift (CLS) ; avertissement `warning[a11y]` si `alt` est absent ; transformation purement compile-time, zéro JS émis
+- **Fingerprinting des images** : chaque image dans `public/` reçoit un hash de contenu FNV-1a 32 bits à `webc build` (`logo.png` → `logo.a3f9c1b2.png`) ; toutes les références HTML et CSS mises à jour automatiquement ; cache-busting parfait sans configuration
 
 ---
 
@@ -271,6 +282,36 @@ p "{t(\"greeting\", username)}"  // "Bonjour, Alice !"
 p "Résultat : {a + b}"
 p { "Bonjour " strong { "le monde" } " !" }
 div class={dynamicClass} { "contenu" }
+```
+
+### Bloc `http { }` — fetch déclaratif (v1.3.0)
+
+```webc
+component Posts {
+    state { posts: List = null }
+    http { get: "/api/posts"  into: posts }
+    view {
+        @if loading { p "Chargement…" }
+        @if error   { p "Erreur : {error}" }
+        @for post in posts { li "{post.title}" }
+    }
+}
+```
+
+`loading` et `error` sont **auto-injectés** — pas besoin de les déclarer dans `state`.
+
+### Classes conditionnelles et debounce (v1.3.0)
+
+```webc
+// class:name={expr} — active/désactive la classe selon l'expression
+div class:active={isOpen} class:hidden={!visible} { "contenu" }
+
+// on:event|debounce — se déclenche après 300 ms d'inactivité
+input on:input|debounce={search = event.target.value}
+
+// $query. — accès aux paramètres d'URL
+p "Recherche : {$query.search}"
+p "Page : {$query.page}"
 ```
 
 ---
@@ -504,6 +545,32 @@ cargo fmt
 - [x] **Sélecteurs CSS multi-éléments** — `input, textarea { }` désormais valide dans les blocs `style { }`
 - [x] **DOM diffing `@for` sans wrapper** — clé posée sur `firstElementChild`, éliminant les espaces parasites entre items
 - [x] **Exemple `examples/forms/`** — `SignupForm` + `ContactForm` avec validation complète, computed, compteur de caractères
+
+---
+
+### ✅ v1.3.0 — HTTP, head, query params, classes conditionnelles, debounce (complète)
+
+- [x] **`http { }` — fetch déclaratif** — `get: "/url"  into: var` dans un composant ; `loading`/`error` auto-injectés et réactifs ; réponse JSON parsée automatiquement
+- [x] **`head { }` — personnalisation du `<head>`** — `title "..."` et `meta name="..."` par page ; override le titre global de `webc.toml`
+- [x] **`$query.` — query string params** — `{$query.search}`, `{$query.page}` ; tree-shaké si inutilisé
+- [x] **`class:name={expr}` — classes conditionnelles** — `class:active={isOpen}` ; `bindAttrs()` gère le toggle ; tree-shaké
+- [x] **`on:event|debounce`** — handler debouncé (300 ms par défaut) ; fonctionne avec tout type d'événement
+
+---
+
+### ✅ v1.4.0 — Références DOM, styles dynamiques, slot default, transitions (complète)
+
+- [x] **`ref:name=true` — références DOM directes** — `input ref:name=true` émet `data-webcore-ref="name"` ; `refs['name']` accessible après `DOMContentLoaded` ; accès direct sans `querySelector` ; tree-shaké via `has_refs`
+- [x] **`style:prop={expr}` — styles inline dynamiques** — `div style:color={myColor}` → `el.style.setProperty('color', ...)` via `bindAttrs()` ; peut coexister avec `style="..."` et `class:` ; tree-shaké via `has_style_binding`
+- [x] **Contenu par défaut des slots** — `slot sidebar { p "Contenu par défaut" }` dans un layout ; utilisé si la page ne remplit pas le slot ; les slots non remplis étaient précédemment supprimés silencieusement
+- [x] **`webc:transition="name"` — animations CSS** — `div webc:transition="fade" { ... }` ; transitions intégrées `fade` et `slide` sur les blocs `@if` ; CSS injecté automatiquement ; tree-shaké via `has_transition`
+
+---
+
+### ✅ v1.5.0 — Images optimisées et fingerprinting (complète)
+
+- [x] **`webc:img` — images optimisées** — `img webc:img src="/hero.png" alt="Hero"` compile vers `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">` ; dimensions lues depuis `public/` à la compilation (prévient le CLS) ; avertissement `warning[a11y]` si `alt` est absent ; `webc:img` absent du HTML généré ; zéro JS émis ; crate `imagesize`
+- [x] **Fingerprinting des images** — chaque image dans `public/` reçoit un hash FNV-1a 32 bits à `webc build` (`logo.png` → `logo.a3f9c1b2.png`) ; extensions : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif` ; toutes les références HTML et CSS mises à jour automatiquement ; cache-busting parfait, aucune configuration requise
 
 ---
 

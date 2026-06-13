@@ -1,11 +1,50 @@
 page "syntax" {
     div class="page-header" {
-        h1 "Syntax Reference"
+        h1 { "Syntax Reference" }
         p class="page-sub" {
             "Complete reference for the "
             code { ".webc" }
-            " language syntax."
+            " language — all constructs, directives and built-ins."
         }
+    }
+
+    div class="quick-ref" {
+        code { "app \{\}" }
+        code { "layout \{\}" }
+        code { "page \{\}" }
+        code { "component \{\}" }
+        code { "store \{\}" }
+        code { "state \{\}" }
+        code { "computed \{\}" }
+        code { "props \{\}" }
+        code { "@if / @else" }
+        code { "@for" }
+        code { "@for key=" }
+        code { "@for item, i" }
+        code { "@switch" }
+        code { "bind:" }
+        code { "@error" }
+        code { "on:click=" }
+        code { "on:mount" }
+        code { "on:destroy" }
+        code { "emit()" }
+        code { "t()" }
+        code { "$store." }
+        code { "$route." }
+        code { "slot content" }
+        code { "link to=" }
+        code { "validate:" }
+        code { "http \{\}" }
+        code { "head \{\}" }
+        code { "$query." }
+        code { "class:" }
+        code { "|debounce" }
+        code { "ref:" }
+        code { "style:" }
+        code { "slot default" }
+        code { "webc:transition" }
+        code { "webc:img" }
+        code { "img fingerprint" }
     }
 
     section class="doc-section" {
@@ -13,7 +52,7 @@ page "syntax" {
         p {
             "The "
             code { "app" }
-            " block is the entry point. It declares the layout and route table."
+            " block is the entry point. It declares the theme, layout and route table."
         }
         pre class="code-block" {
 "app MyApp \{
@@ -49,7 +88,11 @@ layout DashLayout \{
     main   \{ slot content \}
 \}"
         }
-        p { "Pages fill named slots with " code { "slot name \{ ... \}" } " blocks." }
+        p {
+            "Pages fill named slots with "
+            code { "slot name \{ ... \}" }
+            " blocks."
+        }
         pre class="code-block" {
 "page \"dashboard\" \{
     slot header  \{ h1 \"Dashboard\" \}
@@ -81,8 +124,7 @@ layout DashLayout \{
         p {
             "Expressions inside "
             code { "\{\}" }
-            " are evaluated reactively at runtime. They support arithmetic, comparisons, "
-            "function calls and computed variables."
+            " are evaluated reactively. They support arithmetic, comparisons, function calls and computed variables."
         }
         pre class="code-block" {
 "p \"Count: \{count\}\"
@@ -96,34 +138,99 @@ div class=\{dynamicClass\} \{ \}"
     section class="doc-section" {
         h2 { "Control flow" }
         pre class="code-block" {
-"// @if / @else -- reactive condition
+"// Conditional
 @if count > 0 \{
     p \"Positive\"
 \} @else \{
     p \"Zero or negative\"
 \}
 
-// @for -- reactive list render (full re-render on change)
+// List — full re-render on change
 @for item in items \{
     li \"\{item\}\"
 \}
 
-// @for with key -- key-based DOM diffing (v1.1.0)
-// Only modified nodes are patched; focus and animation are preserved
+// List with key — DOM diffing (only changed nodes patched)
 @for post key=post.id in posts \{
     article \"\{post.title\}\"
 \}
 
-// @error -- validation error block
+// Validation error block
 @error \"email\" \{
     span class=\"error\" \"Invalid email\"
 \}"
         }
+        div class="callout" {
+            strong { "Key diffing: " }
+            "The "
+            code { "key=" }
+            " expression must be unique within the list. Use "
+            code { "item.id" }
+            " or "
+            code { "item.slug" }
+            ". Added nodes are inserted, removed ones deleted, unchanged ones stay — preserving focus and animation state."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "@for with index "
+            span class="version-tag" { "v1.2.0" }
+        }
         p {
-            "With "
-            code { "key=expr" }
-            " the runtime compares keys before patching. "
-            "Added nodes are inserted, removed nodes are deleted, unchanged ones stay untouched."
+            "Add a second variable after "
+            code { "," }
+            " to receive the 0-based index of each item."
+        }
+        pre class="code-block" {
+"@for item, i in items \{
+    li \"\{i\}. \{item\}\"
+\}
+
+// Ranking with computed position
+@for entry, rank in scores \{
+    li \"#\{rank + 1\} — \{entry.name\}: \{entry.score\}\"
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "@switch / @case / @default "
+            span class="version-tag" { "v1.2.0" }
+        }
+        p {
+            "Multi-branch directive — a readable alternative to chained "
+            code { "@if" }
+            " / "
+            code { "@else" }
+            ". Compiled to an "
+            code { "@if" }
+            " chain at parse time — zero runtime overhead."
+        }
+        pre class="code-block" {
+"@switch status \{
+    @case \"active\"   \{ span class=\"badge green\"  \"Active\"   \}
+    @case \"pending\"  \{ span class=\"badge yellow\" \"Pending\"  \}
+    @case \"archived\" \{ span class=\"badge gray\"   \"Archived\" \}
+    @default          \{ span class=\"badge\"        \"Unknown\"  \}
+\}
+
+// Expression switch
+@switch count % 3 \{
+    @case 0 \{ p \"Divisible by 3\" \}
+    @case 1 \{ p \"Remainder 1\"    \}
+    @case 2 \{ p \"Remainder 2\"    \}
+\}"
+        }
+        div class="callout" {
+            "The expression is compared with "
+            code { "===" }
+            " to each "
+            code { "@case" }
+            " value. "
+            code { "@default" }
+            " is optional — if omitted and no case matches, nothing is rendered."
         }
     }
 
@@ -132,19 +239,23 @@ div class=\{dynamicClass\} \{ \}"
         p {
             "Use "
             code { "on:<type>=\{expr\}" }
-            " on any element. The expression runs when the event fires."
+            " on any element. Multiple instructions can be separated by "
+            code { ";" }
+            "."
         }
         pre class="code-block" {
 "button on:click=\{count += 1\}                    \{ \"+\" \}
-button on:click=\{count = max(0, count - 1)\}      \{ \"-\" \}
-button on:click=\{count = 0\}                      \{ \"Reset\" \}
+button on:click=\{count = max(0, count - 1)\}      \{ \"−\" \}
 input  on:input=\{name = event.target.value\}
 form   on:submit=\{handleSubmit\}
 
 // Navigation
 button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
 
-// Inter-component events
+// Multi-instruction handler
+button on:click=\{items = [...items, newItem]; draft = \"\"\} \{ \"Add\" \}
+
+// Inter-component event
 button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}"
         }
         p { "Multiple instructions can be separated by " code { ";" } " in one handler:" }
@@ -169,24 +280,57 @@ input required
 div class=\{dynamicClass\}
 input value=\{count\}
 
-// Validation
+// Validation attributes
 input name=\"email\"
       validate:required=\"Email is required\"
-      validate:email=\"Invalid address\""
+      validate:email=\"Invalid address\"
+      validate:minlength=\"3,At least 3 chars\""
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Two-way binding "
+            span class="version-tag" { "v1.2.0" }
+        }
+        p {
+            code { "bind:attr=\{var\}" }
+            " is shorthand for the attribute + its update handler — keeps value and state in sync automatically."
+        }
+        pre class="code-block" {
+"// bind:value syncs on every keystroke (on:input)
+input type=\"text\" bind:value=\{name\}
+
+// bind:checked syncs on toggle (on:change)
+input type=\"checkbox\" bind:checked=\{accepted\}
+
+// Equivalent long form (what bind: expands to)
+input type=\"text\" value=\{name\} on:input=\{name = event.target.value\}"
+        }
+        div class="callout-tip" {
+            code { "bind:value" }
+            " uses "
+            code { "on:input" }
+            " (fires on every keystroke). "
+            code { "bind:checked" }
+            " uses "
+            code { "on:change" }
+            " (fires on toggle)."
         }
     }
 
     section class="doc-section" {
         h2 { "Navigation" }
         pre class="code-block" {
-"// Declarative link (SPA-aware)
+"// Declarative SPA link
 link to=\"/about\" \{ \"About\" \}
+link to=\"/about\" class=\"nav-link\" \{ \"About\" \}
 
 // Programmatic
 button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
-button on:click=\{webcore_navigate(root)\}      \{ \"Home\" \}"
+button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
         }
-        p {
+        div class="callout-tip" {
             "Navigation uses "
             code { "history.pushState" }
             " + fetch — no full page reload. "
@@ -196,12 +340,150 @@ button on:click=\{webcore_navigate(root)\}      \{ \"Home\" \}"
     }
 
     section class="doc-section" {
-        h2 { "Parameterized routes (v1.1.0)" }
+        h2 {
+            "HTTP block "
+            span class="version-tag" { "v1.3.0" }
+        }
+        p {
+            "The "
+            code { "http \{\}" }
+            " block triggers a declarative JSON fetch inside "
+            code { "DOMContentLoaded" }
+            ". "
+            code { "loading" }
+            " and "
+            code { "error" }
+            " state variables are auto-injected — no need to declare them."
+        }
+        pre class="code-block" {
+"component Posts \{
+    state \{ posts: List = null \}
+    http \{ get: \"/api/posts\"  into: posts \}
+    view \{
+        @if loading \{ p \"Loading...\" \}
+        @if error   \{ p \"Error: \{error\}\" \}
+        @for post in posts \{ li \"\{post.title\}\" \}
+    \}
+\}"
+        }
+        div class="callout" {
+            code { "loading" }
+            " is set to "
+            code { "false" }
+            " after the response (success or error). "
+            code { "error" }
+            " holds the error message if the fetch fails."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Page head "
+            span class="version-tag" { "v1.3.0" }
+        }
+        p {
+            "The "
+            code { "head \{\}" }
+            " block inside a "
+            code { "page" }
+            " customizes the HTML "
+            code { "<head>" }
+            " — title and meta tags. Overrides the global title from "
+            code { "webc.toml" }
+            "."
+        }
+        pre class="code-block" {
+"page \"article\" \{
+    head \{
+        title \"My Article\"
+        meta description=\"A WebCore blog post\"
+        meta og:title=\"My Article\"
+    \}
+    h1 \"Hello\"
+\}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Query params "
+            span class="version-tag" { "v1.3.0" }
+        }
+        p {
+            "Access URL query string parameters with "
+            code { "$query.<name>" }
+            ". Tree-shaken: "
+            code { "QUERY_PARAMS" }
+            " is only emitted when at least one "
+            code { "$query." }
+            " reference is present."
+        }
+        pre class="code-block" {
+"p \"Search: \{$query.search\}\"
+p \"Page: \{$query.page\}\"
+p \"Sort: \{$query.sort\}\""
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Conditional classes "
+            span class="version-tag" { "v1.3.0" }
+        }
+        p {
+            code { "class:name=\{expr\}" }
+            " binds a CSS class to a boolean expression. The class is added when truthy, removed when falsy. Handled reactively by "
+            code { "bindAttrs()" }
+            "."
+        }
+        pre class="code-block" {
+"div class:active=\{isOpen\} \{ \"Content\" \}
+div class:active=\{isOpen\} class:hidden=\{!visible\} \{ \"Content\" \}
+button class:disabled=\{count == 0\} on:click=\{count -= 1\} \{ \"-\" \}"
+        }
+        div class="callout-tip" {
+            "Multiple "
+            code { "class:" }
+            " attributes can coexist on the same element. The class-toggle logic in "
+            code { "bindAttrs()" }
+            " is tree-shaken when unused."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Debounced events "
+            span class="version-tag" { "v1.3.0" }
+        }
+        p {
+            "Add "
+            code { "|debounce" }
+            " after the event type to wrap the handler in a 300 ms "
+            code { "setTimeout" }
+            ". The handler only fires after 300 ms of inactivity."
+        }
+        pre class="code-block" {
+"// Search field — avoids an API call on every keystroke
+input on:input|debounce=\{search = event.target.value\}
+
+// Works with any event type
+input on:keyup|debounce=\{query = event.target.value\}"
+        }
+        div class="callout-tip" {
+            "Useful for search inputs, list filters, or any handler that should wait for a pause in user activity."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Parameterized routes "
+            span class="version-tag" { "v1.1.0" }
+        }
         p {
             "Route segments prefixed with "
             code { ":" }
             " capture dynamic values. Access them in views with "
-            code { "{$route.paramName}" }
+            code { "\{$route.paramName\}" }
             "."
         }
         pre class="code-block" {
@@ -217,20 +499,246 @@ app MyApp \{
 // src/pages/post.webc
 page \"post\" \{
     h1 \"Article: \{$route.slug\}\"
-    p  \"Reading post ID: \{$route.slug\}\"
 \}
 
-// Navigation to a parameterized route
+// Navigate to a parameterized route
 link to=\"/post/hello-world\" \{ \"Hello World\" \}
 button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
         }
-        p {
+        div class="callout" {
             "The compiler generates a "
             code { "ROUTES[]" }
-            " array with RegExp patterns. "
+            " array with RegExp patterns and a "
             code { "ROUTE_PARAMS" }
-            " is updated on every navigation and at page load. "
-            "Both arrays are tree-shaken when no parameterized routes are declared."
+            " object updated on every navigation. Both are tree-shaken when no parameterized routes are declared."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "DOM references "
+            span class="version-tag" { "v1.4.0" }
+        }
+        p {
+            code { "ref:name=true" }
+            " registers a direct reference to the element in "
+            code { "refs['name']" }
+            " after "
+            code { "DOMContentLoaded" }
+            ". No "
+            code { "querySelector" }
+            " needed — useful for focus management and imperative DOM calls."
+        }
+        pre class="code-block" {
+"component SearchBar \{
+    state \{ query: String = \"\" \}
+    on:mount \{
+        refs['searchInput'].focus();
+    \}
+    view \{
+        input ref:searchInput=true
+              on:input=\{query = event.target.value\}
+              placeholder=\"Search...\"
+    \}
+\}"
+        }
+        div class="callout" {
+            "The HTML attribute "
+            code { "data-webcore-ref=\"name\"" }
+            " is emitted on the element. "
+            code { "const refs = \{\}" }
+            " is declared at block scope and populated in "
+            code { "DOMContentLoaded" }
+            ". Tree-shaken via "
+            code { "has_refs" }
+            " flag — zero overhead when unused."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Dynamic inline styles "
+            span class="version-tag" { "v1.4.0" }
+        }
+        p {
+            code { "style:prop=\{expr\}" }
+            " binds a CSS property to a reactive expression. Applied via "
+            code { "el.style.setProperty(...)" }
+            " in "
+            code { "bindAttrs()" }
+            ". Dashes in property names are preserved."
+        }
+        pre class="code-block" {
+"div style:color=\{textColor\} \{ \"Colored text\" \}
+div style:background-color=\{bg\}
+    style:font-size=\{size\}
+    \{ \"Multiple style bindings\" \}
+
+// Coexists with static style and class:
+div style=\"padding: 1rem\"
+    style:color=\{textColor\}
+    class:active=\{isOpen\}
+    \{ \"Content\" \}"
+        }
+        div class="callout-tip" {
+            "Emits "
+            code { "data-webcore-style-color=\"myColor\"" }
+            " on the element. Tree-shaken via "
+            code { "has_style_binding" }
+            " flag. Can coexist with static "
+            code { "style=\"...\"" }
+            " and "
+            code { "class:" }
+            " on the same element."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Slot default content "
+            span class="version-tag" { "v1.4.0" }
+        }
+        p {
+            "Layouts can define fallback content for named slots. If the page fills the slot, the page content is used; otherwise the layout's default content is shown."
+        }
+        pre class="code-block" {
+"// Layout with default sidebar content
+layout AppLayout \{
+    aside \{
+        slot sidebar \{
+            p \"Default navigation\"
+            link to=\"/\" \{ \"Home\" \}
+        \}
+    \}
+    main \{ slot content \}
+\}
+
+// Page A — overrides sidebar
+page \"dashboard\" \{
+    slot sidebar \{
+        nav \{ link to=\"/settings\" \{ \"Settings\" \} \}
+    \}
+    h1 \"Dashboard\"
+\}
+
+// Page B — uses default sidebar
+page \"about\" \{
+    h1 \"About\"
+\}"
+        }
+        div class="callout" {
+            "Before v1.4.0, unfilled named slots were silently dropped. The default "
+            code { "content" }
+            " slot still uses the page body as-is."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "CSS transitions "
+            span class="version-tag" { "v1.4.0" }
+        }
+        p {
+            code { "webc:transition=\"name\"" }
+            " adds enter/leave CSS animations to a conditional element. Works with "
+            code { "@if" }
+            " blocks — the element enters with an enter animation and leaves with an exit animation."
+        }
+        pre class="code-block" {
+"// Fade transition (opacity 0→1)
+@if isOpen \{
+    div webc:transition=\"fade\" \{
+        p \"This panel fades in and out\"
+    \}
+\}
+
+// Slide transition (translateY -10px→0)
+@if showPanel \{
+    div webc:transition=\"slide\" \{
+        p \"This panel slides down\"
+    \}
+\}"
+        }
+        div class="callout" {
+            "Built-in transitions: "
+            code { "fade" }
+            " (opacity) and "
+            code { "slide" }
+            " (translateY). The "
+            code { "data-webcore-transition=\"name\"" }
+            " HTML attribute is emitted; JS injects the CSS and uses "
+            code { "requestAnimationFrame" }
+            " + "
+            code { "transitionend" }
+            ". Tree-shaken via "
+            code { "has_transition" }
+            " flag."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Optimized images "
+            span class="version-tag" { "v1.5.0" }
+        }
+        p {
+            "The "
+            code { "webc:img" }
+            " directive on an "
+            code { "img" }
+            " element triggers a full compile-time transformation: lazy loading, async decoding and real dimensions read from "
+            code { "public/" }
+            " — preventing layout shift (CLS). Zero JS emitted."
+        }
+        pre class="code-block" {
+"// webc:img is stripped from the HTML output
+img webc:img src=\"/hero.png\" alt=\"Hero\"
+img webc:img src=\"/logo.svg\" alt=\"Logo\" class=\"logo\"
+
+// Compiled output:
+// <img src=\"/assets/hero.png\" loading=\"lazy\" decoding=\"async\"
+//      width=\"1200\" height=\"630\" alt=\"Hero\">"
+        }
+        div class="callout" {
+            "If "
+            code { "alt" }
+            " is missing the compiler emits "
+            code { "warning[a11y]: <img> with webc:img is missing alt attribute" }
+            ". Compilation continues — it is a warning, not an error. Dimensions are read at build time via the "
+            code { "imagesize" }
+            " crate (no full image decode)."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Image fingerprinting "
+            span class="version-tag" { "v1.5.0" }
+        }
+        p {
+            "At "
+            code { "webc build" }
+            ", every image in "
+            code { "public/" }
+            " receives a FNV-1a 32-bit content hash in its filename. All "
+            code { "src" }
+            " and "
+            code { "url(...)" }
+            " references in generated HTML and CSS are rewritten automatically."
+        }
+        pre class="code-block" {
+"// public/ → dist/assets/
+logo.png          →  logo.a3f9c1b2.png
+hero.jpg          →  hero.d4e2f1a0.jpg
+icons/arrow.svg   →  icons/arrow.7b3c9e4d.svg
+
+// Covered extensions:
+// .png  .jpg  .jpeg  .gif  .webp  .svg  .ico  .avif"
+        }
+        div class="callout-tip" {
+            "Always-on — no configuration needed. The browser can cache images indefinitely ("
+            code { "Cache-Control: max-age=31536000, immutable" }
+            "). When image content changes, the filename changes too, so the new version is fetched automatically."
         }
     }
 }

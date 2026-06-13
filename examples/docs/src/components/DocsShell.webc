@@ -1,0 +1,102 @@
+component DocsShell {
+    on:mount {
+        window.__docsEnhance = () => {
+            // ── Active nav link based on current path ────────────────────────
+            const path = window.location.pathname;
+            document.querySelectorAll('.site-nav a').forEach(a => {
+                a.classList.remove('active');
+                const href = a.getAttribute('href');
+                if ((path === '/' && href === '/') ||
+                    (href !== '/' && path.startsWith(href)))
+                    a.classList.add('active');
+            });
+
+            // ── Copy-to-clipboard on code blocks ─────────────────────────────
+            // data-copy-done prevents duplicate buttons after SPA navigation
+            document.querySelectorAll('.code-block:not([data-copy-done])').forEach(block => {
+                block.setAttribute('data-copy-done', '1');
+                const wrap = document.createElement('div');
+                wrap.className = 'code-wrap';
+                block.parentNode.insertBefore(wrap, block);
+                const header = document.createElement('div');
+                header.className = 'code-header';
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.textContent = 'Copy';
+                btn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(block.textContent).then(() => {
+                        btn.textContent = '✓ Copied';
+                        btn.classList.add('copied');
+                        setTimeout(() => {
+                            btn.textContent = 'Copy';
+                            btn.classList.remove('copied');
+                        }, 2000);
+                    }).catch(() => {
+                        btn.textContent = 'Error';
+                        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                    });
+                });
+                header.appendChild(btn);
+                wrap.appendChild(header);
+                wrap.appendChild(block);
+            });
+
+            // ── Anchor links on section headings ─────────────────────────────
+            document.querySelectorAll('.doc-section h2:not([data-anchor-done])').forEach(h2 => {
+                h2.setAttribute('data-anchor-done', '1');
+                const id = h2.textContent.trim().toLowerCase()
+                    .replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-').replace(/-+$/, '');
+                h2.id = id;
+                const a = document.createElement('a');
+                a.href = '#' + id;
+                a.className = 'anchor-link';
+                a.setAttribute('aria-label', 'Link to section');
+                a.textContent = '#';
+                h2.appendChild(a);
+            });
+
+            // ── Prev / Next page navigation ───────────────────────────────────
+            document.querySelectorAll('.page-nav-dynamic').forEach(el => el.remove());
+            const ORDER = ['/', '/syntax', '/components', '/features', '/examples'];
+            const LABELS = { '/': 'Home', '/syntax': 'Syntax', '/components': 'Components', '/features': 'Features', '/examples': 'Examples' };
+            const idx = ORDER.indexOf(path);
+            if (idx >= 0) {
+                const nav = document.createElement('nav');
+                nav.className = 'page-nav-dynamic';
+                if (idx > 0) {
+                    const p = ORDER[idx - 1];
+                    nav.innerHTML += `<a class="page-nav-link page-nav-prev" href="${p}" onclick="webcore_navigate('${p}');return false;">← ${LABELS[p]}</a>`;
+                }
+                if (idx < ORDER.length - 1) {
+                    const n = ORDER[idx + 1];
+                    nav.innerHTML += `<a class="page-nav-link page-nav-next" href="${n}" onclick="webcore_navigate('${n}');return false;">${LABELS[n]} →</a>`;
+                }
+                const main = document.querySelector('.site-main');
+                if (main) main.appendChild(nav);
+            }
+        };
+
+        // Run immediately after DOMContentLoaded
+        window.__docsEnhance();
+
+        // Re-run after every SPA navigation (nav() replaces <main> inside .docs-shell)
+        const shell = document.querySelector('.docs-shell');
+        if (shell) {
+            new MutationObserver(() => {
+                requestAnimationFrame(() => window.__docsEnhance());
+            }).observe(shell, { childList: true });
+        }
+
+        // ── Scroll-to-top button ──────────────────────────────────────────────
+        const topBtn = document.createElement('button');
+        topBtn.className = 'scroll-top';
+        topBtn.textContent = '↑';
+        topBtn.setAttribute('aria-label', 'Scroll to top');
+        document.body.appendChild(topBtn);
+        window.addEventListener('scroll', () => {
+            topBtn.classList.toggle('visible', window.scrollY > 400);
+        }, { passive: true });
+        topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    }
+    view { }
+}

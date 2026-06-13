@@ -2,6 +2,7 @@
 
 use crate::ast::*;
 use crate::codegen::codegen_css::generate_scope_id;
+use std::path::Path;
 
 // Options passed from the build to influence the page shell
 #[derive(Debug, Clone)]
@@ -112,7 +113,7 @@ pub fn generate_hybrid_index(
     html.push_str("</head>\n<body>\n");
 
     // Generate layout shell (without page content, just the structure)
-    let (layout_content, all_handlers) = generate_layout_shell(layout, document)?;
+    let (layout_content, all_handlers) = generate_layout_shell(layout, document, None)?;
     html.push_str(&layout_content);
 
     // Content area will be added by the layout shell
@@ -125,6 +126,7 @@ pub fn generate_hybrid_index(
         handlers: all_handlers,
     })
 }
+
 
 pub fn generate_spa_html(
     document: &WebCoreDocument,
@@ -155,7 +157,7 @@ pub fn generate_spa_html(
     html.push_str("</head>\n<body>\n");
 
     // Generate layout shell (without page content, just the structure)
-    let (layout_content, mut all_handlers) = generate_layout_shell(layout, document)?;
+    let (layout_content, mut all_handlers) = generate_layout_shell(layout, document, None)?;
     html.push_str(&layout_content);
 
     // Add routing container
@@ -163,7 +165,7 @@ pub fn generate_spa_html(
 
     // Generate all pages as hidden divs
     for (page_name, page) in &document.pages {
-        let (page_html, handlers) = generate_page_content(page, document)?;
+        let (page_html, handlers) = generate_page_content(page, document, None)?;
         html.push_str(&format!(
             "    <div id=\"page-{}\" data-route=\"/{}\">\n",
             page_name.to_lowercase(),
@@ -177,7 +179,7 @@ pub fn generate_spa_html(
     // Generate all page components as hidden divs
     for (component_name, component) in &document.components {
         if component_name.ends_with("Page") {
-            let (page_html, handlers) = generate_component_content(component, document)?;
+            let (page_html, handlers) = generate_component_content(component, document, None)?;
             let route_name = component_name.replace("Page", "").to_lowercase();
             html.push_str(&format!(
                 "    <div id=\"page-{}\" data-route=\"/{}\">\n",
@@ -204,6 +206,15 @@ pub fn generate_page_content_only(
     document: &WebCoreDocument,
     page_name: &str,
     options: &HtmlPageOptions,
+) -> Result<HtmlGenerationResult, String> {
+    generate_page_content_only_with_root(document, page_name, options, None)
+}
+
+pub fn generate_page_content_only_with_root(
+    document: &WebCoreDocument,
+    page_name: &str,
+    options: &HtmlPageOptions,
+    project_root: Option<&Path>,
 ) -> Result<HtmlGenerationResult, String> {
     // Find the page
     let page = document
@@ -237,7 +248,7 @@ pub fn generate_page_content_only(
 
     // Generate layout content, replacing slots with page content
     let (layout_content, handlers) =
-        generate_layout_with_page_and_components(layout, page, document)?;
+        generate_layout_with_page_and_components(layout, page, document, project_root)?;
     html.push_str(&layout_content);
 
     html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
@@ -283,7 +294,7 @@ pub fn generate_html(
 
     // Generate layout content, replacing slots with page content
     let (layout_content, handlers) =
-        generate_layout_with_page_and_components(layout, page, document)?;
+        generate_layout_with_page_and_components(layout, page, document, None)?;
     html.push_str(&layout_content);
 
     html.push_str("  <script src=\"/assets/webcore.js\"></script>\n");
@@ -313,6 +324,20 @@ fn resolve_slots(
                         resolved.extend_from_slice(content);
                     }
                     // unnamed named slot with no provision → empty (no comment noise)
+                }
+            }
+            Element::SlotContent { name, content, span: _ } => {
+                // SlotContent in a layout = slot position with default content
+                if let Some(page_content) = slot_map.get(name.as_str()) {
+                    // Page provided content → use it (override default)
+                    resolved.extend_from_slice(page_content);
+                } else if name == "content" {
+                    // Default content slot → use page's non-slot elements
+                    resolved.extend_from_slice(default_content);
+                } else {
+                    // Named slot with no page content → render layout's default
+                    let resolved_defaults = resolve_slots(content, slot_map, default_content);
+                    resolved.extend(resolved_defaults);
                 }
             }
             Element::Tag {
@@ -416,12 +441,13 @@ fn generate_layout_with_page_and_components(
     layout: &Layout,
     page: &Page,
     document: &WebCoreDocument,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let prefix = safe_id_prefix(&page.name);
     let (named_slots, default_content) = separate_slot_content(&page.content);
     let resolved = resolve_slots(&layout.content, &named_slots, &default_content);
     let mut counter = 0usize;
-    generate_elements_with_scope_and_counter(&resolved, document, None, &mut counter, &prefix)
+    generate_elements_with_scope_and_counter(&resolved, document, None, &mut counter, &prefix, project_root)
 }
 
 fn generate_elements_with_scope_and_counter(
@@ -430,13 +456,14 @@ fn generate_elements_with_scope_and_counter(
     scope_id: Option<&str>,
     counter: &mut usize,
     prefix: &str,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let mut result = String::new();
     let mut all_handlers = Vec::new();
 
     for element in elements {
         let (element_html, handlers) =
-            generate_element_with_scope(element, document, counter, scope_id, prefix)?;
+            generate_element_with_scope(element, document, counter, scope_id, prefix, project_root)?;
         result.push_str(&element_html);
         result.push('\n');
         all_handlers.extend(handlers);
@@ -486,6 +513,7 @@ fn expand_bind_attrs(attributes: &[Attribute]) -> Vec<Attribute> {
 /// - Event handler attributes (`on:click` → `onclick="webcore_handle_click(...)"`)
 /// - Validation data attributes (`validate:required` → `data-webcore-validate-required`)
 /// - SPA-aware `<a href>` with `onclick="webcore_navigate(...)"` for internal links
+#[allow(clippy::too_many_arguments)]
 fn generate_tag_element(
     name: &str,
     attributes: &[Attribute],
@@ -494,12 +522,13 @@ fn generate_tag_element(
     counter: &mut usize,
     scope_id: Option<&str>,
     prefix: &str,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let mut result = String::new();
     let mut handlers = Vec::new();
     if name == "text" {
         let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-            content, document, scope_id, counter, prefix,
+            content, document, scope_id, counter, prefix, project_root,
         )?;
         return Ok((content_html, content_handlers));
     }
@@ -518,9 +547,12 @@ fn generate_tag_element(
         result.push_str(&format!(" data-v=\"{}\"", sid));
     }
 
-    // Mark elements that have dynamic (expression) attribute bindings
+    // Mark elements that have dynamic (expression) attribute bindings via data-webcore-attr-*
+    // (class: bindings use data-webcore-class-* and are NOT marked with data-webcore-bound)
     if attributes.iter().any(|a| {
-        !a.name.starts_with("on:") && matches!(&a.value, AttributeValue::Expression(_))
+        !a.name.starts_with("on:")
+            && !a.name.starts_with("class:")
+            && matches!(&a.value, AttributeValue::Expression(_))
     }) {
         result.push_str(" data-webcore-bound");
     }
@@ -540,10 +572,81 @@ fn generate_tag_element(
         }
     }
 
+    // webc:img — smart image defaults (Feature A)
+    // Detect on the *original* tag name (before link→a mapping) AND mapped name
+    let is_img = name == "img";
+    let has_webc_img = is_img && attributes.iter().any(|a| a.name == "webc:img");
+    if has_webc_img {
+        // Emit a11y warning if alt is absent
+        let has_alt = attributes.iter().any(|a| a.name == "alt");
+        if !has_alt {
+            eprintln!("warning[a11y]: <img> with webc:img is missing alt attribute");
+        }
+        // Inject loading="lazy" if not already present
+        if !attributes.iter().any(|a| a.name == "loading") {
+            result.push_str(" loading=\"lazy\"");
+        }
+        // Inject decoding="async" if not already present
+        if !attributes.iter().any(|a| a.name == "decoding") {
+            result.push_str(" decoding=\"async\"");
+        }
+        // Read image dimensions at compile time
+        if let Some(root) = project_root {
+            let src_val = attributes.iter().find(|a| a.name == "src").and_then(|a| {
+                if let AttributeValue::String(v) = &a.value { Some(v.as_str()) } else { None }
+            });
+            if let Some(src) = src_val {
+                let rel = src.trim_start_matches('/');
+                let img_path = root.join("public").join(rel);
+                if img_path.exists() {
+                    if let Ok(sz) = imagesize::size(&img_path) {
+                        result.push_str(&format!(" width=\"{}\" height=\"{}\"", sz.width, sz.height));
+                    }
+                }
+            }
+        }
+    }
+
     // Generate attributes
     for attr in attributes {
         // Skip validate:* here — converted below after the loop
         if attr.name.starts_with("validate:") {
+            continue;
+        }
+        // Skip webc:img — it's a compiler directive, not a real HTML attribute
+        if attr.name == "webc:img" {
+            continue;
+        }
+        // Skip on:event|debounce="N" modifier-only attributes (just a delay hint, no handler)
+        if attr.name.starts_with("on:") && attr.name.contains("|debounce") {
+            if let AttributeValue::String(_) = &attr.value {
+                // This is purely a delay specifier — skip it (handled in JS codegen)
+                continue;
+            }
+        }
+        // ref:name=true → data-webcore-ref="name"
+        if attr.name.starts_with("ref:") {
+            let ref_name = attr.name.strip_prefix("ref:").unwrap_or("");
+            result.push_str(&format!(" data-webcore-ref=\"{}\"", html_escape(ref_name)));
+            continue;
+        }
+        // webc:transition="name" → data-webcore-transition="name"
+        if attr.name == "webc:transition" {
+            if let AttributeValue::String(value) = &attr.value {
+                result.push_str(&format!(" data-webcore-transition=\"{}\"", html_escape(value)));
+            }
+            continue;
+        }
+        // style:prop={expr} → data-webcore-style-prop="expr"
+        if attr.name.starts_with("style:") {
+            let prop_name = attr.name.strip_prefix("style:").unwrap_or("");
+            if let AttributeValue::Expression(expr) = &attr.value {
+                result.push_str(&format!(
+                    " data-webcore-style-{}=\"{}\"",
+                    prop_name,
+                    html_escape(expr)
+                ));
+            }
             continue;
         }
         match &attr.value {
@@ -559,9 +662,25 @@ fn generate_tag_element(
             }
             AttributeValue::Boolean(false) => {}
             AttributeValue::Expression(expr) => {
-                if attr.name.starts_with("on:") {
+                if attr.name.starts_with("class:") {
+                    // Conditional class binding: class:name={expr} → data-webcore-class-name="expr"
+                    let class_name = attr.name.strip_prefix("class:").unwrap_or("");
+                    result.push_str(&format!(
+                        " data-webcore-class-{}=\"{}\"",
+                        class_name,
+                        html_escape(expr)
+                    ));
+                } else if attr.name.starts_with("on:") {
                     // Event handler: on:click={ count += 1 }
-                    let event_type = attr.name.strip_prefix("on:").unwrap_or("click");
+                    // Check for debounce modifier in event name
+                    let raw_event_type = attr.name.strip_prefix("on:").unwrap_or("click");
+                    let (event_type, debounce_ms) = if let Some(pos) = raw_event_type.find("|debounce") {
+                        let base = &raw_event_type[..pos];
+                        (base, Some(300u32))
+                    } else {
+                        (raw_event_type, None)
+                    };
+
                     *counter += 1;
                     let handler_id = format!("{}btn{}", prefix, counter);
 
@@ -572,20 +691,31 @@ fn generate_tag_element(
                         }
                     }
 
-                    // Add handler to our collection
+                    // Add handler to our collection (with debounce info encoded in event_type if needed)
+                    let mapped_event_type = if let Some(ms) = debounce_ms {
+                        format!("{}|debounce={}", event_type, ms)
+                    } else {
+                        event_type.to_string()
+                    };
                     handlers.push(HandlerMapping {
                         id: handler_id.clone(),
-                        event_type: event_type.to_string(),
+                        event_type: mapped_event_type,
                         expression: expr.clone(),
                     });
 
-                    // Use native HTML5 event attributes with simple IDs
-                    match event_type {
-                        "click" => result.push_str(&format!(" id=\"{}\" onclick=\"webcore_handle_click('{}'); return false;\"", handler_id, handler_id)),
-                        "submit" => result.push_str(&format!(" id=\"{}\" onsubmit=\"webcore_handle_submit('{}'); return false;\"", handler_id, handler_id)),
-                        "change" => result.push_str(&format!(" id=\"{}\" onchange=\"webcore_handle_change('{}')\"", handler_id, handler_id)),
-                        "input" => result.push_str(&format!(" id=\"{}\" oninput=\"webcore_handle_input('{}')\"", handler_id, handler_id)),
-                        _ => result.push_str(&format!(" id=\"{}\" on{}=\"webcore_handle_event('{}', '{}')\"", handler_id, event_type, event_type, handler_id)),
+                    // For debounced handlers, use a data attribute approach — JS codegen
+                    // will emit the debounce wrapper. We still emit the element id.
+                    if debounce_ms.is_some() {
+                        result.push_str(&format!(" id=\"{}\"", handler_id));
+                    } else {
+                        // Use native HTML5 event attributes with simple IDs
+                        match event_type {
+                            "click" => result.push_str(&format!(" id=\"{}\" onclick=\"webcore_handle_click('{}'); return false;\"", handler_id, handler_id)),
+                            "submit" => result.push_str(&format!(" id=\"{}\" onsubmit=\"webcore_handle_submit('{}'); return false;\"", handler_id, handler_id)),
+                            "change" => result.push_str(&format!(" id=\"{}\" onchange=\"webcore_handle_change('{}')\"", handler_id, handler_id)),
+                            "input" => result.push_str(&format!(" id=\"{}\" oninput=\"webcore_handle_input('{}')\"", handler_id, handler_id)),
+                            _ => result.push_str(&format!(" id=\"{}\" on{}=\"webcore_handle_event('{}', '{}')\"", handler_id, event_type, event_type, handler_id)),
+                        }
                     }
                 } else {
                     // Dynamic attribute: bound at runtime via bindAttrs()
@@ -675,7 +805,7 @@ fn generate_tag_element(
 
     result.push('>');
     let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-        content, document, scope_id, counter, prefix,
+        content, document, scope_id, counter, prefix, project_root,
     )?;
     result.push_str(&content_html);
     result.push_str(&format!("</{}>", mapped_name));
@@ -686,6 +816,7 @@ fn generate_tag_element(
 /// Render a component call site: resolve the component definition, substitute props,
 /// apply the component's CSS scope, and recursively generate the view.
 /// Falls back to rendering as a plain HTML element if the component is unknown.
+#[allow(clippy::too_many_arguments)]
 fn generate_component_element(
     name: &str,
     attributes: &[Attribute],
@@ -694,6 +825,7 @@ fn generate_component_element(
     counter: &mut usize,
     scope_id: Option<&str>,
     prefix: &str,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     // Find the component definition
     if let Some(component) = document.components.get(name) {
@@ -739,6 +871,7 @@ fn generate_component_element(
             Some(&component_scope),
             counter,
             prefix,
+            project_root,
         )
     } else {
         // Component not found, generate as HTML element
@@ -780,7 +913,7 @@ fn generate_component_element(
 
         result.push('>');
         let (content_html, content_handlers) = generate_elements_with_scope_and_counter(
-            content, document, scope_id, counter, prefix,
+            content, document, scope_id, counter, prefix, project_root,
         )?;
         result.push_str(&content_html);
         result.push_str(&format!("</{}>", name));
@@ -794,6 +927,7 @@ fn generate_element_with_scope(
     counter: &mut usize,
     scope_id: Option<&str>,
     prefix: &str,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     match element {
         Element::Text(text, _span) => Ok((html_escape(text), Vec::new())),
@@ -803,11 +937,11 @@ fn generate_element_with_scope(
             content,
             ..
         } =>
-            generate_tag_element(name, attributes, content, document, counter, scope_id, prefix),
+            generate_tag_element(name, attributes, content, document, counter, scope_id, prefix, project_root),
         Element::Slot(name, _span) => Ok((format!("<!-- Slot: {} -->", name), Vec::new())),
         Element::SlotContent { content, .. } => {
             // SlotContent consumed by slot matching; render children as fallback
-            generate_elements_with_scope_and_counter(content, document, scope_id, counter, prefix)
+            generate_elements_with_scope_and_counter(content, document, scope_id, counter, prefix, project_root)
         }
         Element::Component {
             name,
@@ -815,7 +949,7 @@ fn generate_element_with_scope(
             content,
             ..
         } =>
-            generate_component_element(name, attributes, content, document, counter, scope_id, prefix),
+            generate_component_element(name, attributes, content, document, counter, scope_id, prefix, project_root),
         Element::Interpolation(expr, _span) => Ok((
             format!(
                 "<span data-webcore-interpolation=\"{}\"></span>",
@@ -829,7 +963,7 @@ fn generate_element_with_scope(
                 html_escape(field)
             );
             let (content_html, handlers) = generate_elements_with_scope_and_counter(
-                content, document, scope_id, counter, prefix,
+                content, document, scope_id, counter, prefix, project_root,
             )?;
             html.push_str(&content_html);
             html.push_str("</div>\n");
@@ -861,7 +995,7 @@ fn generate_element_with_scope(
             result.push_str(&open);
             result.push('\n');
             let (content_html, handlers) = generate_elements_with_scope_and_counter(
-                content, document, scope_id, counter, prefix,
+                content, document, scope_id, counter, prefix, project_root,
             )?;
             result.push_str(&content_html);
             result.push_str("</template>\n");
@@ -894,6 +1028,7 @@ fn generate_element_with_scope(
                 scope_id,
                 counter,
                 prefix,
+                project_root,
             )?;
             result.push_str(&then_html);
             result.push_str("</div>\n");
@@ -914,6 +1049,7 @@ fn generate_element_with_scope(
                     scope_id,
                     counter,
                     prefix,
+                    project_root,
                 )?;
                 result.push_str(&else_html);
                 result.push_str("</div>\n");
@@ -1142,6 +1278,7 @@ fn safe_id_prefix(name: &str) -> String {
 fn generate_layout_shell(
     layout: &Layout,
     document: &WebCoreDocument,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let mut result = String::new();
     let mut all_handlers = Vec::new();
@@ -1177,13 +1314,13 @@ fn generate_layout_shell(
                     }
                 }
                 let (element_html, handlers) =
-                    generate_element_with_scope(element, document, &mut counter, None, "ly")?;
+                    generate_element_with_scope(element, document, &mut counter, None, "ly", project_root)?;
                 result.push_str(&element_html);
                 all_handlers.extend(handlers);
             }
             _ => {
                 let (element_html, handlers) =
-                    generate_element_with_scope(element, document, &mut counter, None, "ly")?;
+                    generate_element_with_scope(element, document, &mut counter, None, "ly", project_root)?;
                 result.push_str(&element_html);
                 result.push('\n');
                 all_handlers.extend(handlers);
@@ -1197,6 +1334,7 @@ fn generate_layout_shell(
 fn generate_page_content(
     page: &Page,
     document: &WebCoreDocument,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let prefix = safe_id_prefix(&page.name);
     let mut result = String::new();
@@ -1205,7 +1343,7 @@ fn generate_page_content(
 
     for element in &page.content {
         let (html, handlers) =
-            generate_element_with_scope(element, document, &mut counter, None, &prefix)?;
+            generate_element_with_scope(element, document, &mut counter, None, &prefix, project_root)?;
         result.push_str(&html);
         result.push('\n');
         all_handlers.extend(handlers);
@@ -1217,6 +1355,7 @@ fn generate_page_content(
 fn generate_component_content(
     component: &Component,
     document: &WebCoreDocument,
+    project_root: Option<&Path>,
 ) -> Result<(String, Vec<HandlerMapping>), String> {
     let scope_id = generate_scope_id(&component.name);
     let prefix = safe_id_prefix(&component.name);
@@ -1226,7 +1365,7 @@ fn generate_component_content(
 
     for element in &component.view {
         let (html, handlers) =
-            generate_element_with_scope(element, document, &mut counter, Some(&scope_id), &prefix)?;
+            generate_element_with_scope(element, document, &mut counter, Some(&scope_id), &prefix, project_root)?;
         result.push_str(&html);
         result.push('\n');
         all_handlers.extend(handlers);
@@ -1242,6 +1381,7 @@ mod tests {
     fn make_button_page(page_name: &str) -> Page {
         Page {
             name: page_name.to_string(),
+            head: None,
             content: vec![Element::Tag {
                 name: "button".to_string(),
                 attributes: vec![Attribute {
@@ -1335,6 +1475,7 @@ mod tests {
             "test".to_string(),
             Page {
                 name: "test".to_string(),
+                head: None,
                 content: vec![Element::Tag {
                     name: "div".to_string(),
                     attributes: vec![Attribute {
@@ -1394,6 +1535,7 @@ mod tests {
             "test".to_string(),
             Page {
                 name: "test".to_string(),
+                head: None,
                 content: vec![Element::Tag {
                     name: "button".to_string(),
                     attributes: vec![Attribute {

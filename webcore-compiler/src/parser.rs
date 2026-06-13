@@ -1,8 +1,8 @@
 //! Parser for .webc files using Pest PEG grammar
 
 use crate::ast::{
-    App, Attribute, AttributeValue, Component, ComputedVar, Element, Layout, Page, Prop, Span,
-    StateVar, StyleItem, StyleProperty, StyleRule, WebCoreDocument,
+    App, Attribute, AttributeValue, Component, ComputedVar, Element, HeadBlock, HttpBlock, Layout,
+    Page, Prop, Span, StateVar, StyleItem, StyleProperty, StyleRule, WebCoreDocument,
 };
 use pest::Parser;
 use pest_derive::Parser;
@@ -225,18 +225,104 @@ fn parse_page(pair: pest::iterators::Pair<Rule>) -> Result<Page, ParseError> {
         .ok_or_else(|| ParseError::with_span("Expected page name", span))?;
     let name = extract_string_literal(name_token.as_str());
 
+    let mut head: Option<HeadBlock> = None;
     let mut content = Vec::new();
-    for elem in inner {
-        if elem.as_rule() == Rule::element {
-            content.push(parse_element(elem)?);
+    for item in inner {
+        match item.as_rule() {
+            Rule::head_block => {
+                head = Some(parse_head_block(item)?);
+            }
+            Rule::element => {
+                content.push(parse_element(item)?);
+            }
+            _ => {}
         }
     }
 
     Ok(Page {
         name,
+        head,
         content,
         span,
     })
+}
+
+fn parse_head_block(pair: pest::iterators::Pair<Rule>) -> Result<HeadBlock, ParseError> {
+    let mut title: Option<String> = None;
+    let mut metas: Vec<(String, String)> = Vec::new();
+
+    for item in pair.into_inner() {
+        match item.as_rule() {
+            Rule::head_title => {
+                if let Some(s) = item.into_inner().next() {
+                    title = Some(extract_string_literal(s.as_str()));
+                }
+            }
+            Rule::head_meta => {
+                let mut parts = item.into_inner();
+                let key = parts
+                    .next()
+                    .map(|p| p.as_str().to_string())
+                    .unwrap_or_default();
+                let val = parts
+                    .next()
+                    .map(|p| extract_string_literal(p.as_str()))
+                    .unwrap_or_default();
+                metas.push((key, val));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(HeadBlock { title, metas })
+}
+
+fn parse_http_block(pair: pest::iterators::Pair<Rule>) -> Result<HttpBlock, ParseError> {
+    let mut method = String::new();
+    let mut url = String::new();
+    let mut into = String::new();
+
+    for field in pair.into_inner() {
+        if field.as_rule() == Rule::http_field {
+            let mut parts = field.into_inner();
+            let field_name = parts
+                .next()
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_default();
+            let field_value = parts
+                .next()
+                .map(|p| {
+                    // http_field_value wraps either string_literal or identifier
+                    let inner = p.into_inner().next();
+                    if let Some(inner_pair) = inner {
+                        match inner_pair.as_rule() {
+                            Rule::string_literal => extract_string_literal(inner_pair.as_str()),
+                            _ => inner_pair.as_str().to_string(),
+                        }
+                    } else {
+                        String::new()
+                    }
+                })
+                .unwrap_or_default();
+
+            match field_name.as_str() {
+                "get" => {
+                    method = "GET".to_string();
+                    url = field_value;
+                }
+                "post" => {
+                    method = "POST".to_string();
+                    url = field_value;
+                }
+                "into" => {
+                    into = field_value;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(HttpBlock { method, url, into })
 }
 
 fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, ParseError> {
@@ -256,6 +342,7 @@ fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, Parse
         computed: Vec::new(),
         mount_body: None,
         destroy_body: None,
+        http: None,
         view: Vec::new(),
         style: Vec::new(),
         span,
@@ -280,6 +367,9 @@ fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, Parse
                 Rule::on_destroy_block => {
                     component.destroy_body = Some(parse_on_mount_block(section)?);
                 }
+                Rule::http_block => {
+                    component.http = Some(parse_http_block(section)?);
+                }
                 Rule::view_block => {
                     for elem in section.into_inner() {
                         if elem.as_rule() == Rule::element {
@@ -296,6 +386,30 @@ fn parse_component(pair: pest::iterators::Pair<Rule>) -> Result<Component, Parse
                 }
                 _ => {}
             }
+        }
+    }
+
+    // Auto-inject `loading` and `error` state vars when an http block is present.
+    // This saves the developer from having to declare them manually; if they already
+    // declared their own, those declarations take precedence (we only add the missing ones).
+    if component.http.is_some() {
+        let has_loading = component.state.iter().any(|v| v.name == "loading");
+        let has_error = component.state.iter().any(|v| v.name == "error");
+        if !has_loading {
+            component.state.push(StateVar {
+                name: "loading".to_string(),
+                type_: "Boolean".to_string(),
+                default_value: Some("true".to_string()),
+                span,
+            });
+        }
+        if !has_error {
+            component.state.push(StateVar {
+                name: "error".to_string(),
+                type_: "String".to_string(),
+                default_value: Some("".to_string()),
+                span,
+            });
         }
     }
 
@@ -771,8 +885,8 @@ fn parse_tag(pair: pest::iterators::Pair<Rule>) -> Result<Element, ParseError> {
 /// So each attribute pair has exactly two inner pairs:
 /// 1. `attr_name`  — the raw attribute name string (e.g. `class`, `on:click`, `validate:required`)
 /// 2. `attr_value` — one of: `expression_attr` (wraps `expression_content`),
-///                            `string_literal` (wraps `string_inner`),
-///                            or a bare boolean token `true`/`false`
+///    `string_literal` (wraps `string_inner`),
+///    or a bare boolean token `true`/`false`
 fn parse_attribute(pair: pest::iterators::Pair<Rule>) -> Result<Attribute, ParseError> {
     let span = Span::from_pest(pair.as_span());
     let mut inner = pair.into_inner();
