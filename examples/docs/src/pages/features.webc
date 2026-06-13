@@ -129,6 +129,17 @@ p \"Counter: \{count\}\"
 <div data-webcore-if=\"count > 0\" style=\"display:none\">...</div>
 <div data-webcore-else=\"count > 0\" style=\"display:block\">...</div>"
         }
+        p {
+            "Since v2.1, the SSG evaluator also resolves property accesses on the initial state: "
+            code { "items.length" }
+            ", "
+            code { "name.toUpperCase()" }
+            ", "
+            code { "name.toLowerCase()" }
+            ", "
+            code { "label.trim()" }
+            "."
+        }
         div class="callout-tip" {
             strong { "Zero JS on first paint: " }
             "The server sends fully populated HTML. The runtime attaches to existing DOM nodes via "
@@ -290,6 +301,91 @@ const S = new State();
             " in "
             code { "codegen/js/" }
             " walks the AST once before code generation and sets boolean flags per feature. Each emitter checks its flag before writing — unused helpers are never serialised to the output file."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "$watch — reactive side-effect observers "
+            span class="version-tag" { "v2.1.0" }
+        }
+        p {
+            code { "$watch varName => \{ body \}" }
+            " runs a pure side-effect whenever a state variable changes, without triggering a DOM re-render. "
+            "Ideal for localStorage persistence, analytics, or external synchronisation."
+        }
+        pre class="code-block" {
+"component Settings \{
+    state \{
+        theme: String = \"dark\"
+        volume: Number = 80
+    \}
+
+    $watch theme => \{
+        localStorage.setItem(\"theme\", theme)
+        document.documentElement.setAttribute(\"data-theme\", theme)
+    \}
+
+    $watch volume => \{
+        audioContext.setVolume(volume / 100)
+    \}
+
+    view \{
+        select bind:value=\{theme\} \{
+            option value=\"dark\" \{ \"Dark\" \}
+            option value=\"light\" \{ \"Light\" \}
+        \}
+    \}
+\}"
+        }
+        div class="callout" {
+            strong { "vs $effect: " }
+            code { "$watch" }
+            " targets a single named variable and never binds the DOM. "
+            code { "$effect" }
+            " auto-tracks all variables read inside the block and updates interpolations/attributes."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Compile-time prop validation "
+            span class="version-tag" { "v2.1.0" }
+        }
+        p {
+            "When a component has a "
+            code { "props \{\}" }
+            " block, the compiler emits a "
+            code { "warning[props]" }
+            " on stderr for any unknown prop passed at a call site. The build continues — warnings are non-blocking."
+        }
+        pre class="code-block" {
+"component Button \{
+    props \{ label: String \}
+    view \{ button \"\{label\}\" \}
+\}
+
+// Usage — typo in prop name
+Button label=\"OK\" colr=\"red\" \{\}
+// warning[props]: component 'Button' received unknown prop 'colr' — it will be ignored"
+        }
+        div class="callout" {
+            strong { "Excluded from checking: " }
+            "Directive prefixes "
+            code { "on:" }
+            ", "
+            code { "webc:" }
+            ", "
+            code { "class:" }
+            ", "
+            code { "style:" }
+            ", "
+            code { "ref:" }
+            ", "
+            code { "bind:" }
+            ", "
+            code { "client:" }
+            " are always allowed regardless of the props declaration."
         }
     }
 }

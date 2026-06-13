@@ -111,7 +111,17 @@ pub(super) fn handle_validation_attr(attr: &Attribute) -> Option<String> {
             }
             "pattern" => {
                 let (pat, msg) = v.split_once(',').unwrap_or((v.as_str(), ""));
-                write!(out, " data-webcore-validate-pattern=\"{}\"", html_escape(pat.trim())).unwrap();
+                let pat = pat.trim();
+                // Heuristic: warn if the pattern contains nested quantifiers
+                // like `(a+)+` or `(x*)+` which cause catastrophic backtracking.
+                if pat.contains(")+") || pat.contains(")*") || pat.contains(")+?") {
+                    eprintln!(
+                        "warning[security]: validate:pattern=\"{pat}\" may contain nested \
+                         quantifiers — this can cause catastrophic regex backtracking (ReDoS) \
+                         in the browser. Consider using a simpler pattern."
+                    );
+                }
+                write!(out, " data-webcore-validate-pattern=\"{}\"", html_escape(pat)).unwrap();
                 if !msg.is_empty() {
                     write!(out, " data-webcore-validate-pattern-msg=\"{}\"", html_escape(msg.trim())).unwrap();
                 }

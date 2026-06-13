@@ -5,6 +5,24 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.1.0]
+
+### Ajouts
+
+- **`$watch varName => { body }`** — nouvelle directive dans les composants pour observer les changements d'état sans effets DOM ; `S.on('var', var => { body })` est enregistré au `DOMContentLoaded`
+- **`on:click` avec objets littéraux** — `on:click={handler({key: val})}` est désormais valide ; `expression_content` utilise un matching d'accolades équilibrées à la place du simple `!"}"` ; `expression_attr = { "{" ~ expression_content ~ "}" }` est inchangé
+- **`@for key={expr}` — expressions complexes** — la syntaxe `key={item.id + "-" + item.type}` est désormais valide en plus de `key=item.id` ; le runtime JS utilise `new Function(iN, ...)` pour les clés non-triviales
+- **SSG — expressions étendues** — `eval_expr_with_locale` supporte désormais `items.length`, `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; le pré-rendu SSG est plus complet
+- **Validation des props à la compilation** — passer une prop non déclarée à un composant produit `warning[props]: component 'X' received unknown prop 'y'` sur stderr
+- **Imports de données à la compilation** — `import posts from "data/posts.json"` (JSON ou TOML) ; le fichier est lu à la compilation et injecté via `S.setQ()` avant `DOMContentLoaded` ; disponible dans toutes les interpolations et expressions `@for` ; TOML converti automatiquement en JSON
+- **`@for webc:transition="fade"`** — animations d'entrée/sortie sur les listes réactives ; `webc-list-fade-enter` et `webc-list-slide-enter` intégrés ; fonctionne avec et sans `key=` ; les sorties utilisent `transitionend` pour retirer l'élément après l'animation
+
+### Corrections
+
+- `@for key` — l'expression de clé peut maintenant contenir des espaces et des opérateurs grâce à la syntaxe `key={...}` ; l'ancienne syntaxe `key=path` est conservée
+
+---
+
 ## [2.0.0]
 
 ### Rupture avec v1.x

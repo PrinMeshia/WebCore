@@ -33,6 +33,11 @@ pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String,
         }
     }
 
+    // Data imports are available as initial state for SSG
+    for (name, json) in &document.data_imports {
+        state.entry(name.clone()).or_insert_with(|| json.trim().to_string());
+    }
+
     state
 }
 
@@ -146,6 +151,39 @@ pub(crate) fn eval_expr_with_locale(
             return Some(format!("{}", n as i64));
         }
         return Some(format!("{n}"));
+    }
+
+    // Property access: items.length, name.toUpperCase(), etc.
+    // Use rfind so `a.b.length` finds the last dot correctly.
+    if let Some(dot_pos) = expr.rfind('.') {
+        let obj_part = expr[..dot_pos].trim();
+        let prop = expr[dot_pos + 1..].trim();
+        // Skip $store.x / $route.x / $query.x — handled elsewhere
+        if !obj_part.starts_with('$') {
+            if let Some(obj_val) = eval_expr_with_locale(obj_part, state, locales, locale) {
+                let t = obj_val.trim();
+                return match prop {
+                    "length" => {
+                        if t == "[]" || t.is_empty() {
+                            Some("0".to_string())
+                        } else if t.starts_with('[') && t.ends_with(']') {
+                            let inner = &t[1..t.len() - 1];
+                            if inner.trim().is_empty() {
+                                Some("0".to_string())
+                            } else {
+                                Some(inner.split(',').count().to_string())
+                            }
+                        } else {
+                            Some(obj_val.chars().count().to_string())
+                        }
+                    }
+                    "toUpperCase()" => Some(obj_val.to_uppercase()),
+                    "toLowerCase()" => Some(obj_val.to_lowercase()),
+                    "trim()" => Some(obj_val.trim().to_string()),
+                    _ => None,
+                };
+            }
+        }
     }
 
     None

@@ -153,6 +153,8 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         layouts: HashMap::new(),
         pages: HashMap::new(),
         components: HashMap::new(),
+        imports: Vec::new(),
+        data_imports: HashMap::new(),
     };
 
     // Load app.webc first
@@ -164,6 +166,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
             parser::parse_webc(&content).map_err(|e| format!("Parse error in app.webc:\n{e}"))?;
         document.app = parsed.app;
         document.store.extend(parsed.store);
+        document.imports.extend(parsed.imports);
     }
 
     // Load layouts
@@ -183,6 +186,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         for (name, component) in parsed.components {
             document.components.insert(name, component);
         }
+        document.imports.extend(parsed.imports);
         Ok(())
     })?;
 
@@ -196,6 +200,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         for (name, component) in parsed.components {
             document.components.insert(name, component);
         }
+        document.imports.extend(parsed.imports);
         Ok(())
     })?;
 
@@ -209,6 +214,46 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         }
         Ok(())
     })?;
+
+    // Resolve data imports (JSON / TOML) from the src/ directory
+    let src_root = Path::new("src");
+    // Canonical base for path-traversal detection — must exist at build time.
+    let canonical_src = fs::canonicalize(src_root)
+        .map_err(|e| format!("Cannot resolve src/ directory: {e}"))?;
+
+    for import in &document.imports {
+        if document.data_imports.contains_key(&import.name) {
+            continue;
+        }
+        let data_path = src_root.join(&import.path);
+
+        // Canonicalize resolves `..` segments; if the result escapes src/ it's
+        // a path-traversal attempt and we refuse to read the file.
+        let canonical_data = match fs::canonicalize(&data_path) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("warning[import]: data file '{}' not found (import '{}')", import.path, import.name);
+                continue;
+            }
+        };
+        if !canonical_data.starts_with(&canonical_src) {
+            return Err(format!(
+                "Security: import path '{}' escapes the src/ directory — only files within src/ are allowed",
+                import.path
+            ));
+        }
+
+        let raw = fs::read_to_string(&canonical_data)
+            .map_err(|e| format!("Failed to read import '{}': {e}", data_path.display()))?;
+        let json = if import.path.ends_with(".toml") {
+            toml_to_json_string(&raw)
+                .ok_or_else(|| format!("Failed to convert TOML to JSON for import '{}'", import.name))?
+        } else {
+            raw.trim().to_string()
+        };
+        println!("📦 Imported data: {} ← {}", import.name, import.path);
+        document.data_imports.insert(import.name.clone(), json);
+    }
 
     Ok(document)
 }
@@ -603,4 +648,43 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
     print_dist_tree(dist_dir, config.mode == "prod");
     print_bundle_analysis(&final_js);
     Ok(())
+}
+
+// ── TOML → JSON conversion ────────────────────────────────────────────────────
+
+fn toml_to_json_string(toml_src: &str) -> Option<String> {
+    let table: toml::Value = toml::from_str(toml_src).ok()?;
+    toml_value_to_json(&table)
+}
+
+fn toml_value_to_json(v: &toml::Value) -> Option<String> {
+    match v {
+        toml::Value::String(s) => Some(format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        )),
+        toml::Value::Integer(n) => Some(n.to_string()),
+        toml::Value::Float(f) => Some(f.to_string()),
+        toml::Value::Boolean(b) => Some(b.to_string()),
+        toml::Value::Datetime(dt) => Some(format!("\"{}\"", dt)),
+        toml::Value::Array(arr) => {
+            let items: Option<Vec<String>> = arr.iter().map(toml_value_to_json).collect();
+            Some(format!("[{}]", items?.join(",")))
+        }
+        toml::Value::Table(map) => {
+            let entries: Option<Vec<String>> = map
+                .iter()
+                .map(|(k, v)| {
+                    toml_value_to_json(v).map(|jv| {
+                        format!(
+                            "\"{}\":{}",
+                            k.replace('\\', "\\\\").replace('"', "\\\""),
+                            jv
+                        )
+                    })
+                })
+                .collect();
+            Some(format!("{{{}}}", entries?.join(",")))
+        }
+    }
 }

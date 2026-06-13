@@ -35,6 +35,7 @@ fn parse_for_loop(inner: Pair<Rule>) -> Result<Element, ParseError> {
     // Optional index variable: @for item, i in items
     let mut index: Option<String> = None;
     let mut key: Option<String> = None;
+    let mut list_transition: Option<String> = None;
     let mut iterable = String::new();
 
     for part in parts.by_ref() {
@@ -44,10 +45,25 @@ fn parse_for_loop(inner: Pair<Rule>) -> Result<Element, ParseError> {
                 index = Some(part.as_str().to_string());
             }
             Rule::for_key_decl => {
-                key = part
-                    .into_inner()
-                    .find(|p| p.as_rule() == Rule::for_key_expr)
-                    .map(|p| p.as_str().to_string());
+                // Both key=path and key={expr} forms — inner is for_key_expr or for_key_inner
+                for p in part.into_inner() {
+                    match p.as_rule() {
+                        Rule::for_key_expr | Rule::for_key_inner => {
+                            key = Some(p.as_str().trim().to_string());
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Rule::for_transition_decl => {
+                // webc:transition="name" — inner is string_literal
+                for p in part.into_inner() {
+                    if p.as_rule() == Rule::string_literal {
+                        list_transition = Some(extract_string_literal(p.as_str()));
+                        break;
+                    }
+                }
             }
             Rule::expression => {
                 iterable = part.as_str().trim().to_string();
@@ -69,6 +85,7 @@ fn parse_for_loop(inner: Pair<Rule>) -> Result<Element, ParseError> {
         index,
         iterable,
         key,
+        list_transition,
         content,
         span,
     })

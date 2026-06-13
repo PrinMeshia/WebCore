@@ -155,6 +155,11 @@ div class=\{dynamicClass\} \{ \}"
     article \"\{post.title\}\"
 \}
 
+// Complex key expression (v2.1)
+@for item key=\{item.category + \":\" + item.id\} in items \{
+    li \"\{item.name\}\"
+\}
+
 // Validation error block
 @error \"email\" \{
     span class=\"error\" \"Invalid email\"
@@ -168,7 +173,9 @@ div class=\{dynamicClass\} \{ \}"
             code { "item.id" }
             " or "
             code { "item.slug" }
-            ". Added nodes are inserted, removed ones deleted, unchanged ones stay — preserving focus and animation state."
+            " for simple paths, or "
+            code { "key={expr}" }
+            " for computed keys (v2.1). Added nodes are inserted, removed ones deleted, unchanged ones stay — preserving focus and animation state."
         }
     }
 
@@ -241,7 +248,7 @@ div class=\{dynamicClass\} \{ \}"
             code { "on:<type>=\{expr\}" }
             " on any element. Multiple instructions can be separated by "
             code { ";" }
-            "."
+            ". Balanced braces inside the expression are allowed — object literals work directly (v2.1)."
         }
         pre class="code-block" {
 "button on:click=\{count += 1\}                    \{ \"+\" \}
@@ -254,6 +261,9 @@ button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
 
 // Multi-instruction handler
 button on:click=\{items = [...items, newItem]; draft = \"\"\} \{ \"Add\" \}
+
+// Object literal inline (v2.1 — no helper needed)
+button on:click=\{items = [...items, \{text: draft, done: false\}]; draft = \"\"\} \{ \"Add\" \}
 
 // Inter-component event
 button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}"

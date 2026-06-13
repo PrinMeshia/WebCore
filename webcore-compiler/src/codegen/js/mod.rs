@@ -156,6 +156,11 @@ pub(crate) fn generate_runtime_js_with_vars(
     js.push_str(&emit_state_class(features.has_refs));
     js.push('\n');
 
+    // ── Data imports (build-time JSON/TOML → S.setQ) ─────────────────────────
+    for (name, json) in &document.data_imports {
+        writeln!(js, "S.setQ('{}',{});", name, json.trim()).unwrap();
+    }
+
     // ── State initialisation ─────────────────────────────────────────────────
     for component in document.components.values() {
         for state_var in &component.state {
@@ -341,8 +346,8 @@ pub(crate) fn generate_runtime_js_with_vars(
     } else {
         ""
     };
-    let transition_css_inject = if features.has_transition {
-        ";document.head.insertAdjacentHTML('beforeend','<style>.webc-fade-enter{opacity:0;transition:opacity 250ms ease}.webc-fade-enter-to{opacity:1}.webc-fade-leave{opacity:1;transition:opacity 250ms ease}.webc-fade-leave-to{opacity:0}.webc-slide-enter{transform:translateY(-6px);opacity:0;transition:transform 200ms ease,opacity 200ms ease}.webc-slide-enter-to{transform:none;opacity:1}.webc-slide-leave{transition:transform 200ms ease,opacity 200ms ease}.webc-slide-leave-to{transform:translateY(-6px);opacity:0}</style>')"
+    let transition_css_inject = if features.has_transition || features.has_list_transition {
+        ";document.head.insertAdjacentHTML('beforeend','<style>.webc-fade-enter{opacity:0;transition:opacity 250ms ease}.webc-fade-enter-to{opacity:1}.webc-fade-leave{opacity:1;transition:opacity 250ms ease}.webc-fade-leave-to{opacity:0}.webc-slide-enter{transform:translateY(-6px);opacity:0;transition:transform 200ms ease,opacity 200ms ease}.webc-slide-enter-to{transform:none;opacity:1}.webc-slide-leave{transition:transform 200ms ease,opacity 200ms ease}.webc-slide-leave-to{transform:translateY(-6px);opacity:0}.webc-list-fade-enter{opacity:0;transition:opacity 200ms ease}.webc-list-fade-enter-to{opacity:1}.webc-list-fade-leave{opacity:1;transition:opacity 200ms ease}.webc-list-fade-leave-to{opacity:0}.webc-list-slide-enter{transform:translateY(-4px);opacity:0;transition:transform 150ms ease,opacity 150ms ease}.webc-list-slide-enter-to{transform:none;opacity:1}.webc-list-slide-leave{transition:transform 150ms ease,opacity 150ms ease}.webc-list-slide-leave-to{transform:translateY(-4px);opacity:0}</style>')"
     } else {
         ""
     };
@@ -354,6 +359,13 @@ pub(crate) fn generate_runtime_js_with_vars(
     write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}").unwrap();
     for body in &mount_bodies {
         write!(js, ";(()=>{{{}}})()", body.trim()).unwrap();
+    }
+    // $watch registrations — S.on / STORE.on listeners registered at DOMContentLoaded
+    for component in document.components.values() {
+        for watch in &component.watches {
+            let state_obj = if watch.is_store { "STORE" } else { "S" };
+            write!(js, ";{state_obj}.on('{}',{}=>{{{}}})", watch.var_name, watch.var_name, watch.body.trim()).unwrap();
+        }
     }
     for listener in &comp_listeners {
         let compiled = compile_expression_full(&listener.expression, state_vars);
