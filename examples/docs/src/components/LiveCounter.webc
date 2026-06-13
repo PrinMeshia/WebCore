@@ -6,16 +6,6 @@ component LiveCounter {
     computed {
         doubled = count * 2
     }
-
-    $watch count => {
-        localStorage.setItem("demo_count", count)
-    }
-
-    on:mount {
-        const saved = localStorage.getItem("demo_count")
-        if (saved !== null) S.set("count", +saved)
-    }
-
     view {
         div class="demo-box" {
             p class="demo-label" { "Live Demo — Reactive Counter" }

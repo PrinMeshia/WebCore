@@ -5,21 +5,71 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.4.0]
+
+### Ajouts (v2.4.0)
+
+- **Critical CSS inline (prod)** — en mode `prod`, chaque page reçoit dans son `<head>` un `<style>` contenant uniquement le CSS dont elle a besoin (styles globaux + composants réellement utilisés, collectés récursivement) ; la feuille `theme.css` complète est chargée en différé (`media="print"` + swap `onload`, fallback `<noscript>`) ; élimine le CSS render-blocking — gain direct sur le First Contentful Paint ; le lien différé et le fallback reçoivent hash `?v=` et SRI comme avant
+- **Collections SSG** — `"/post/:slug": PostPage each posts` dans le bloc `routes {}` : une page statique est générée par élément de l'import de données lié (`import posts from "data/posts.json"`) ; le champ correspondant au paramètre (`slug`) détermine le chemin de sortie (`dist/post/<slug>/index.html`) et `{$route.slug}` est pré-rendu dans le HTML ; transforme WebCore en vrai générateur de site statique (blog, docs, portfolio) ; sécurité : les valeurs contenant `/`, `\`, `..` ou vides sont rejetées (le champ devient un nom de répertoire)
+- **Résolution des imports de données câblée au build** — les déclarations `import name from "file.json"` parsées depuis `app.webc`, layouts, composants et pages sont désormais réellement résolues par `webc build` : lecture du fichier, validation JSON/TOML, conversion TOML→JSON (crate `serde_json`), injection `S.setQ(name, data)` ; les chemins canonicalisés doivent rester dans le répertoire projet
+
+### Corrections (v2.4.0)
+
+- **Hash + SRI sur `<link rel="preload">`** — le patch cherchait `href="..." as="script"` alors que la balise est émise `as="script" href="..."` ; le hint preload ne recevait donc jamais son `?v=hash` ni son attribut `integrity` ; corrigé
+- **Exemple `docs`** — `"style {}"` littéral dans `syntax.webc` était interprété comme interpolation vide ; échappé en `"style \{\}"`
+
+### Améliorations
+
+- 10 nouveaux tests — 128 tests au total
+
+---
+
+## [2.3.0]
+
+### Ajouts (v2.3.0)
+
+- **Subresource Integrity (SRI)** — en mode `prod`, les balises `<script>` et `<link rel="stylesheet">` reçoivent automatiquement un attribut `integrity="sha256-<base64>"` + `crossorigin="anonymous"` ; les hash sont calculés avec SHA-256 via la crate `sha2` ; les hint `<link rel="preload">` reçoivent également leur SRI
+- **Zero-JS elision** — les pages purement statiques (sans état réactif, sans boucle, sans interpolation, sans événements, sans composants réactifs) n'émettent plus de `<script defer>` ni de `<link rel="preload">` dans le `<head>` ; réduit le poids et les requêtes réseau pour les pages de contenu
+
+### Corrections de sécurité (v2.3.0)
+
+- **Limite de profondeur d'imbrication** — le parser rejette désormais tout document dont les éléments dépassent 128 niveaux d'imbrication avec un message d'erreur explicite ; protège contre les "nesting bombs" qui provoquaient un stack overflow pendant la compilation
+- **Escape JS des URLs de navigation** — dans les balises `<a onclick="webcore_navigate(...)">`, les apostrophes et backslashes sont maintenant échappés dans le chemin JS (`\'`, `\\`) ; empêche une injection JS si le chemin contient ces caractères
+
+---
+
 ## [2.1.0]
 
 ### Ajouts
 
-- **`$watch varName => { body }`** — nouvelle directive dans les composants pour observer les changements d'état sans effets DOM ; `S.on('var', var => { body })` est enregistré au `DOMContentLoaded`
-- **`on:click` avec objets littéraux** — `on:click={handler({key: val})}` est désormais valide ; `expression_content` utilise un matching d'accolades équilibrées à la place du simple `!"}"` ; `expression_attr = { "{" ~ expression_content ~ "}" }` est inchangé
-- **`@for key={expr}` — expressions complexes** — la syntaxe `key={item.id + "-" + item.type}` est désormais valide en plus de `key=item.id` ; le runtime JS utilise `new Function(iN, ...)` pour les clés non-triviales
-- **SSG — expressions étendues** — `eval_expr_with_locale` supporte désormais `items.length`, `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; le pré-rendu SSG est plus complet
-- **Validation des props à la compilation** — passer une prop non déclarée à un composant produit `warning[props]: component 'X' received unknown prop 'y'` sur stderr
-- **Imports de données à la compilation** — `import posts from "data/posts.json"` (JSON ou TOML) ; le fichier est lu à la compilation et injecté via `S.setQ()` avant `DOMContentLoaded` ; disponible dans toutes les interpolations et expressions `@for` ; TOML converti automatiquement en JSON
-- **`@for webc:transition="fade"`** — animations d'entrée/sortie sur les listes réactives ; `webc-list-fade-enter` et `webc-list-slide-enter` intégrés ; fonctionne avec et sans `key=` ; les sorties utilisent `transitionend` pour retirer l'élément après l'animation
+- **`$watch varName => { body }`** — nouvelle directive dans les composants pour observer les changements d'état sans effet DOM direct ; émet `S.on('varName', varName => { body })` dans le bloc `DOMContentLoaded` ; permet d'exécuter du code réactif (logs, analytics, synchronisation) quand une variable change
+- **`on:click` avec objets littéraux imbriqués** — `on:click={handler({key: val})}` est maintenant supporté ; `expression_content` utilise une règle récursive `expr_brace_seq` qui gère les accolades imbriquées arbitrairement ; `on:click={x = {val: 1}.val}` parse correctement
+- **`@for key={expr}` — expressions de clé complexes** — en plus de `key=item.id`, la syntaxe `key={item.id + "-" + item.type}` permet des expressions arbitraires comme clé de diffing DOM ; le parser détecte `for_key_braced` vs `for_key_expr` automatiquement
+- **`@for N..M` — syntaxe de plage** — `@for i in 0..5 { ... }` itère `i` de 0 à 4 ; détecté à la compilation via le pattern `N..M` dans l'itérable ; émet `data-webcore-for-range="0..5"` ; le runtime JS génère le tableau `["0","1","2","3","4"]` sans donnée d'état
+- **Expressions SSG étendues** — `eval_expr_with_locale` supporte maintenant : `items.length` (nombre d'éléments d'un tableau ou longueur d'une chaîne), `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; élimine les valeurs vides au pré-rendu SSG
+- **Validation des props à la compilation** — si un composant reçoit un prop non déclaré dans son bloc `props {}`, un avertissement `warning[props]: component 'X' received unknown prop 'y'` est émis sur stderr ; avertissement uniquement (la compilation continue)
+- **Imports de données build-time (JSON/TOML)** — `import posts from "data/posts.json"` dans un fichier `.webc` injecte les données à la compilation ; les fichiers JSON sont validés et émis comme `S.setQ("posts", <json>)` dans le runtime ; les fichiers TOML sont convertis en JSON via la crate `toml` ; sécurité : les chemins qui sortent du répertoire projet sont refusés
+
+### Améliorations
+
+- 5 nouveaux tests — 118 tests au total
+
+---
+
+## [2.2.0]
+
+### Ajouts
+
+- **CSS `@keyframes`** — les blocs `@keyframes` sont désormais supportés dans les blocs `style {}` des composants ; les keyframes sont émis globaux (non scopés) car ils sont référencés par nom depuis la propriété `animation:` ; le parser, l'AST (`StyleItem::Keyframes`, `KeyframeStep`), la grammaire PEG et le codegen CSS sont tous mis à jour
+- **Préchargement `<link rel="preload">`** — le shell HTML émet `<link rel="preload" as="script" href="/assets/webcore.js">` dans le `<head>` pour les pages interactives ; accélère le chargement initial en parallélisant le téléchargement du runtime JS
+- **`<script defer>`** — toutes les balises `<script src="webcore.js">` utilisent désormais l'attribut `defer` ; le script ne bloque plus le parsing HTML et s'exécute après le DOM
+- **Hash CSS** — `theme.css` reçoit désormais un paramètre de version `?v=<hash>` comme `webcore.js` ; casse le cache navigateur à chaque modification du CSS
+- **Minification HTML (prod)** — en mode `prod`, les commentaires HTML et les espaces inter-balises sont supprimés ; réduit la taille des fichiers HTML distribués
+- **Élision du scope CSS pour composants sans style** — les composants sans bloc `style {}` n'émettent plus d'attribut `data-v="..."` sur leurs éléments ; réduit le bruit HTML et la taille des pages
 
 ### Corrections
 
-- `@for key` — l'expression de clé peut maintenant contenir des espaces et des opérateurs grâce à la syntaxe `key={...}` ; l'ancienne syntaxe `key=path` est conservée
+- **Avertissement ReDoS** — `validate:pattern` émet un avertissement `warning[security]` à la compilation si le pattern contient des quantificateurs imbriqués (`)+`, `)*`) qui peuvent causer un backtracking catastrophique dans le moteur regex du navigateur
 
 ---
 
@@ -40,17 +90,11 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Refactorisation
 
-- **Arborescence `src/` réorganisée** en modules thématiques :
-  - `core/` — primitives compilateur sans I/O (`ast`, `error`, `ssg`, `theme`, `utils`, `css_processor`)
-  - `parser/` — `declarations`, `directives`, `elements`
-  - `codegen/` — `css.rs`, `html/` (`mod`, `attrs`, `props`, `component`), `js/` (`mod`, `runtime`, `events`, `dom`)
-  - `cli/` — `build`, `serve`, `check`, `assets` (pipeline CLI)
-  - `tests/` — tests golden scindés par domaine (`html`, `js`, `css`, `ssg`, `i18n`, `features`, `errors`)
-  - `main.rs` réduit à un point d'entrée minimal (38 lignes)
-- `CompileError` : enum typée remplaçant `Result<T, String>` dans tout le codegen ; `CompileErrors` agrège plusieurs erreurs
+- Modules JS scindés : `js_runtime.rs`, `js_events.rs`, `js_dom.rs`
+- Modules parser scindés : `parser/elements.rs`, `parser/directives.rs`, `parser/declarations.rs`
+- `CompileError` : enum typée remplaçant `Result<T, String>` dans tout le codegen
 - `attr_names.rs` : constantes centralisées pour tous les attributs `data-webcore-*`
-- Macro `write!()` / `writeln!()` : élimine les allocations `String` intermédiaires dans les émetteurs HTML/CSS/JS
-- Helpers partagés (`html_escape`, `html_unescape`) extraits dans `core/utils.rs`
+- Macro `write!()` : élimine les allocations `String` intermédiaires dans les émetteurs HTML/CSS/JS
 - Substitution O(n) des props : `HashMap<&str, (bool, &str)>` construit une seule fois
 - Validation CSS : avertissement sur les noms de propriétés CSS inconnus (les variables `--custom-var` sont toujours autorisées)
 

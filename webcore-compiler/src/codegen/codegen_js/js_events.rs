@@ -123,13 +123,15 @@ pub(super) fn replace_utils_short(expr: &str) -> String {
 /// Replace `$store.varname` (sentinel: `__STORE_varname__`) then local vars, then restore.
 /// The sentinel approach prevents local-var replacement from touching store references.
 pub(super) fn replace_store_and_local(expr: &str, state_vars: &HashSet<String>) -> String {
-    let re_store = Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)").expect("hardcoded $store.var regex is always valid");
+    let re_store = Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)")
+        .expect("hardcoded $store.var regex is always valid");
     // Step 1: sentinel so local-var replacement can't touch store refs
     let sentineled = re_store.replace_all(expr, "__STORE_$1__").to_string();
     // Step 2: replace local state vars  (_ is a word char → \bcount\b won't match inside __STORE_count__)
     let with_local = replace_vars_short(&sentineled, state_vars);
     // Step 3: restore sentinels → STORE.get('...')
-    let re_sent = Regex::new(r"__STORE_([a-zA-Z_][a-zA-Z0-9_]*)__").expect("hardcoded store-sentinel regex is always valid");
+    let re_sent = Regex::new(r"__STORE_([a-zA-Z_][a-zA-Z0-9_]*)__")
+        .expect("hardcoded store-sentinel regex is always valid");
     re_sent
         .replace_all(&with_local, "STORE.get('$1')")
         .to_string()
@@ -230,7 +232,11 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
     // Multi-statement: split on ; and compile each independently
     // e.g. `items = [...items, draft]; draft = ""`
     if compiled.contains(';') {
-        let parts: Vec<&str> = compiled.split(';').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = compiled
+            .split(';')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
         if parts.len() > 1 {
             return parts
                 .iter()

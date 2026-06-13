@@ -4,7 +4,7 @@
 //! (`RuntimeFeatures`), collects lifecycle hook bodies, and gathers
 //! component-level event-listener registrations.
 
-use crate::core::ast::{Element, AttributeValue, WebCoreDocument};
+use crate::ast::{AttributeValue, Element, WebCoreDocument};
 
 /// Component-level event listener: emitted by `on:eventName={expr}` on a component call.
 pub struct EventListenerMapping {
@@ -36,8 +36,6 @@ pub(super) struct RuntimeFeatures {
     pub has_style_binding: bool,
     /// Any element has a `webc:transition` attribute
     pub has_transition: bool,
-    /// Any `@for` loop has a `webc:transition` attribute
-    pub has_list_transition: bool,
 }
 
 pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
@@ -49,13 +47,12 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                     f.has_query_params = true;
                 }
             }
-            Element::For { content, iterable, list_transition, .. } => {
+            Element::For {
+                content, iterable, ..
+            } => {
                 f.has_for = true;
                 if iterable.contains("$query.") {
                     f.has_query_params = true;
-                }
-                if list_transition.is_some() {
-                    f.has_list_transition = true;
                 }
                 detect_features_in_elements(content, f);
             }
@@ -241,7 +238,9 @@ fn collect_event_listeners_from_elements(
                 }
                 collect_event_listeners_from_elements(content, out);
             }
-            Element::Tag { content, .. } | Element::For { content, .. } => collect_event_listeners_from_elements(content, out),
+            Element::Tag { content, .. } | Element::For { content, .. } => {
+                collect_event_listeners_from_elements(content, out)
+            }
             Element::If {
                 then_branch,
                 else_branch,
@@ -261,7 +260,9 @@ fn collect_event_listeners_from_elements(
 }
 
 /// Collect component-level event listeners from the full document.
-pub(super) fn collect_component_event_listeners(document: &WebCoreDocument) -> Vec<EventListenerMapping> {
+pub(super) fn collect_component_event_listeners(
+    document: &WebCoreDocument,
+) -> Vec<EventListenerMapping> {
     let mut out = Vec::new();
     for page in document.pages.values() {
         collect_event_listeners_from_elements(&page.content, &mut out);

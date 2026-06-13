@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 2.0.0 |
+| **Version** | 2.4.0 |
 | **Status** | Stable |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 105 unit tests |
+| **Tests** | 128 unit tests |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -81,6 +81,24 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 - **CSS nesting**: `&:hover { }`, `& > span { }`, `&::before { }` are valid inside `style {}` blocks; flattened to valid scoped CSS at emit time (v2.0.0)
 - **Error aggregation**: `webc build` collects ALL errors and reports them in a single pass, just like the Rust compiler (v2.0.0)
 - **Bundle analysis report**: after a successful `webc build`, a table shows which runtime features are included vs. tree-shaken with estimated byte sizes (v2.0.0)
+- **`$watch varName => { body }`**: observe state changes without a direct DOM side-effect; emits `S.on('varName', varName => { body })` in `DOMContentLoaded`; useful for analytics, logging, and sync (v2.1.0)
+- **`@for N..M` — numeric range**: `@for i in 0..5 { }` iterates `i` from 0 to 4; emits `data-webcore-for-range`; runtime generates the array without state data; tree-shaken (v2.1.0)
+- **Build-time data imports**: `import posts from "data/posts.json"` — JSON/TOML files loaded at compile time and injected as `S.setQ(name, data)`; path validated via `canonicalize()` (v2.1.0)
+- **Nested object literals in `on:click`**: `on:click={handler({key: val})}` — arbitrarily nested braces in event expressions via recursive `expr_brace_seq` rule (v2.1.0)
+- **Extended SSG expressions**: `eval_expr_with_locale` supports `.length`, `.toUpperCase()`, `.toLowerCase()`, `.trim()` on state variables — eliminates empty values at pre-render time (v2.1.0)
+- **Compile-time prop validation**: `warning[props]: component 'X' received unknown prop 'y'` emitted on stderr when a component receives an undeclared prop; compilation continues (v2.1.0)
+- **`@keyframes` in `style {}`**: `@keyframes` blocks supported inside components; emitted as global (unscoped) so they can be referenced by `animation:` properties; parser, AST and CSS codegen updated (v2.2.0)
+- **`<script defer>` + `<link rel="preload">`**: runtime script no longer blocks HTML parsing; preload hint in `<head>` parallelises the JS download (v2.2.0)
+- **CSS hash**: `theme.css` receives `?v=<hash>` like `webcore.js` — automatic cache-busting on every modification (v2.2.0)
+- **HTML minification (prod)**: comments and inter-tag whitespace removed in `prod` mode; reduces distributed page sizes (v2.2.0)
+- **CSS scope elision**: components without a `style {}` block no longer emit `data-v="..."` on their elements — cleaner and lighter HTML output (v2.2.0)
+- **ReDoS warning**: `validate:pattern` with nested quantifiers (`)+`, `)*`) emits `warning[security]` at compile time — prevents catastrophic backtracking (v2.2.0)
+- **SRI — Subresource Integrity**: in `prod` mode, `<script>` and `<link rel="stylesheet">` tags receive `integrity="sha256-..."` + `crossorigin="anonymous"`; SHA-256 hash computed by the compiler (v2.3.0)
+- **Zero-JS elision**: purely static pages (no state, no loops, no events) no longer emit `<script defer>` or `<link rel="preload">` — zero JS for content-only pages (v2.3.0)
+- **Nesting depth limit**: the parser rejects documents whose elements exceed 128 nesting levels — protects against "nesting bombs" (v2.3.0)
+- **Navigation URL JS escaping**: apostrophes and backslashes in `<a onclick="webcore_navigate(...)">` paths are now escaped — prevents JS injection (v2.3.0)
+- **Critical CSS inline**: in `prod` mode each page's CSS (global + components actually used) is inlined in `<style>`; `theme.css` loads deferred (`media="print"` + `onload`) — zero render-blocking CSS (v2.4.0)
+- **SSG collections**: `"/post/:slug": PostPage each posts` — one static page generated per item of a data import; `{$route.slug}` pre-rendered; output paths validated against path traversal (v2.4.0)
 
 ---
 
@@ -366,31 +384,20 @@ webc check
 file.webc
     └── Pest Parser
            └── AST (apps · layouts · pages · components)
-                  ├── codegen/css.rs   →  scoped CSS (data-v)
-                  ├── codegen/html/    →  semantic HTML
-                  └── codegen/js/      →  ES2022+ runtime (fine-grained signals)
+                  ├── codegen_html.rs  →  semantic HTML
+                  ├── codegen_css.rs   →  scoped CSS (data-v)
+                  └── codegen_js.rs    →  ES2022+ runtime
 ```
 
-**Generated JS runtime — fine-grained signals (v2.0 excerpt):**
+**Generated JS runtime (excerpt):**
 
 ```js
-let __wcfx = null;                         // currently running effect
-class State {
-  #d = new Map(); #l = new Map(); #s = new Map();   // data · listeners · deps
-  get(k) {                                 // automatic dependency tracking
-    if (__wcfx) (this.#s.get(k) ?? this.#s.set(k, new Set()).get(k)).add(__wcfx);
-    return this.#d.get(k);
-  }
-  set(k, v) {                              // re-runs only the affected effects
-    if (Object.is(this.#d.get(k), v)) return;
-    this.#d.set(k, v);
-    [...(this.#s.get(k) ?? [])].forEach(f => f());
-  }
+class State { #d = new Map(); #l = new Map();
+  set(k, v) { this.#d.set(k, v); this.#l.get(k)?.forEach(f => f(v)) }
+  get(k)    { return this.#d.get(k) }
+  on(k, f)  { (this.#l.get(k) ?? this.#l.set(k, []).get(k)).push(f) }
 }
-function $effect(fn) {                      // replaces VARS.forEach(v => S.on(v, fn))
-  const r = () => { const p = __wcfx; __wcfx = r; try { fn() } finally { __wcfx = p } };
-  r();
-}
+const S = new State();
 ```
 
 ---
@@ -402,36 +409,17 @@ Webcore/
 ├── webcore-compiler/
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs              # CLI entry point
-│       ├── grammar.pest         # PEG grammar
-│       ├── core/                # Compiler primitives (no I/O)
-│       │   ├── ast.rs           #   AST types
-│       │   ├── error.rs         #   Error types (CompileError)
-│       │   ├── ssg.rs           #   SSG pre-rendering
-│       │   ├── theme.rs         #   Theme support
-│       │   ├── utils.rs         #   Shared helpers (html_escape…)
-│       │   └── css_processor.rs #   CSS post-processing
-│       ├── parser/              # Pest → AST
-│       │   ├── declarations.rs  #   app · layout · page · component · store
-│       │   ├── directives.rs    #   @for · @if · @switch · @error
-│       │   └── elements.rs      #   tags · components · attributes
-│       ├── codegen/
-│       │   ├── attr_names.rs    #   data-webcore-* constants
-│       │   ├── css.rs           #   scoped CSS (data-v) + nesting
-│       │   ├── html/            #   semantic HTML
-│       │   │   ├── attrs.rs     #     on: · class: · style: · ref: · validate:
-│       │   │   ├── props.rs     #     prop substitution
-│       │   │   └── component.rs #     component rendering
-│       │   └── js/              #   ES2022+ runtime (signals)
-│       │       ├── runtime.rs   #     State · $effect · evalCond
-│       │       ├── events.rs    #     event handlers
-│       │       └── dom.rs       #     DOM init · HTTP · tree-shaking
-│       ├── cli/                 # CLI pipeline
-│       │   ├── build.rs         #   webc build (+ bundle analysis)
-│       │   ├── serve.rs         #   webc serve (HMR via WebSocket)
-│       │   ├── check.rs         #   webc check (cycles · types)
-│       │   └── assets.rs        #   fingerprinting · copy · rewrite
-│       └── tests/               # Golden tests by domain (html · js · css…)
+│       ├── main.rs           # CLI: build, dev
+│       ├── grammar.pest      # PEG grammar
+│       ├── parser.rs         # Pest → AST
+│       ├── ast.rs            # AST types
+│       ├── errors.rs         # Error handling
+│       ├── css_processor.rs  # CSS post-processing
+│       ├── theme.rs          # Theme support
+│       └── codegen/
+│           ├── codegen_html.rs
+│           ├── codegen_css.rs
+│           └── codegen_js.rs
 └── .github/
     └── workflows/
         └── ci.yml
@@ -608,6 +596,59 @@ cargo fmt
 
 - [x] **`webc:img` — optimized images** — `img webc:img src="/hero.png" alt="Hero"` compiles to `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">`; dimensions read from `public/` at compile time (prevents CLS); `warning[a11y]` emitted when `alt` is missing; `webc:img` stripped from HTML output; zero JS emitted; uses `imagesize` crate
 - [x] **Image fingerprinting** — every image in `public/` gets a FNV-1a 32-bit content hash at `webc build` (`logo.png` → `logo.a3f9c1b2.png`); extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif`; all HTML and CSS references updated automatically; perfect cache busting, no configuration required
+
+---
+
+### ✅ v2.0.0 — Fine-grained signals, HMR & security (complete)
+
+- [x] **Fine-grained signals (`$effect`)** — automatic dependency tracking; components only re-render when their actual dependencies change; **breaking change** from v1.x
+- [x] **HMR** — `webc serve` watches files and reloads via WebSocket — no configuration needed
+- [x] **Path traversal security** — `resolve_safe_path()`: `canonicalize()` + `starts_with(dist_root)` check; 403 returned for URLs outside `dist/`
+- [x] **Cycle detection** — `webc check` detects circular component references and reports the full cycle
+- [x] **Error aggregation** — all errors collected and reported in a single pass
+- [x] **CSS nesting** — `&:hover`, `& > span`, `&::before` flattened to valid scoped CSS
+- [x] **Bundle analysis report** — table of included vs. tree-shaken runtime features printed after every build
+
+---
+
+### ✅ v2.1.0 — Advanced reactivity & data (complete)
+
+- [x] **`$watch`** — `$watch varName => { body }`: reactive observer without a DOM side-effect; `S.on('varName', fn)` in `DOMContentLoaded`
+- [x] **Nested object literals in `on:click`** — `on:click={handler({key: val})}` via recursive `expr_brace_seq` rule in the grammar
+- [x] **Complex `@for key={expr}`** — arbitrary expression as DOM diffing key (`key={item.id + "-" + item.type}`)
+- [x] **`@for N..M` — numeric range** — `@for i in 0..5` emits `data-webcore-for-range`; runtime generates the array without state data
+- [x] **Extended SSG expressions** — `.length`, `.toUpperCase()`, `.toLowerCase()`, `.trim()` in `eval_expr_with_locale`
+- [x] **Prop validation** — `warning[props]` when an undeclared prop is received; compilation continues
+- [x] **Build-time data imports** — `import name from "file.json"`; path validated via `canonicalize()`
+
+---
+
+### ✅ v2.2.0 — Performance & tooling (complete)
+
+- [x] **`@keyframes`** — `@keyframes` blocks in `style {}`; emitted as global (unscoped); parser, AST (`StyleItem::Keyframes`), grammar and codegen updated
+- [x] **`<script defer>` + preload** — non-blocking script; `<link rel="preload" as="script">` in `<head>` for parallel JS download
+- [x] **CSS hash** — `theme.css?v=<hash>` — automatic cache-busting like `webcore.js`
+- [x] **HTML minification (prod)** — comments and inter-tag whitespace removed in `prod` mode
+- [x] **CSS scope elision** — components without `style {}` no longer emit `data-v` — cleaner HTML output
+- [x] **ReDoS warning** — `validate:pattern` with `)+`/`)*` → `warning[security]` at compile time
+
+---
+
+### ✅ v2.3.0 — Security & zero-weight (complete)
+
+- [x] **SRI — Subresource Integrity** — `integrity="sha256-..."` + `crossorigin="anonymous"` on `<script>` and `<link>` in `prod` mode; SHA-256 hash computed by the compiler (`sha2` crate)
+- [x] **Zero-JS elision** — purely static pages emit no `<script defer>` or `<link rel="preload">` — zero JS requests for content-only pages
+- [x] **Nesting depth limit (128 levels)** — the parser rejects "nesting bombs" with an explicit error message
+- [x] **Navigation URL JS escaping** — apostrophes and backslashes in `<a onclick="webcore_navigate(...)">` paths are escaped
+
+---
+
+### ✅ v2.4.0 — Critical CSS & SSG collections (complete)
+
+- [x] **Critical CSS inline (prod)** — per-page CSS (global + components actually used, recursive collection) inlined in `<style>`; `theme.css` deferred via `media="print"` + `onload` swap + `<noscript>` fallback; hash and SRI preserved
+- [x] **SSG collections** — `"/post/:slug": PostPage each posts`: one static page per item of the bound data import; `{$route.slug}` pre-rendered; path values validated (rejects `/`, `\`, `..`)
+- [x] **Data import resolution** — `import name from "file.json"` actually resolved at build time (JSON/TOML → `S.setQ`) with path-traversal guard
+- [x] **Preload fix** — `?v=hash` + SRI now applied to the `<link rel="preload">` hint (attribute order corrected)
 
 ---
 

@@ -14,17 +14,24 @@
 //! 5. Generate `theme.css` + scoped component CSS
 //! 6. Write everything to `dist/`
 
+mod ast;
+mod build;
+mod check;
 mod cli;
 pub(crate) mod codegen {
     pub(crate) mod attr_names;
-    pub(crate) mod css;
-    pub(crate) mod html;
-    pub(crate) mod js;
+    pub(crate) mod codegen_css;
+    pub(crate) mod codegen_html;
+    pub(crate) mod codegen_js;
 }
-pub(crate) mod core;
+mod css_processor;
+pub(crate) mod error;
 mod parser;
+mod serve;
+mod ssg;
 #[cfg(test)]
 mod tests;
+mod theme;
 
 fn main() {
     cli::run();

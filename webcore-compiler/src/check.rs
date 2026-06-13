@@ -1,7 +1,6 @@
 //! Project validation: parse all sources and report issues without writing output.
 
-use crate::core::ast;
-use super::build;
+use crate::{ast, build};
 
 /// Validate the current project without generating any output files.
 ///
@@ -51,10 +50,18 @@ pub(crate) fn check_project() -> Result<(), String> {
                 ast::Element::Tag { content, .. }
                 | ast::Element::For { content, .. }
                 | ast::Element::SlotContent { content, .. }
-                | ast::Element::ErrorBlock { content, .. } => check_elements(content, document, issues),
-                ast::Element::If { then_branch, else_branch, .. } => {
+                | ast::Element::ErrorBlock { content, .. } => {
+                    check_elements(content, document, issues)
+                }
+                ast::Element::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
                     check_elements(then_branch, document, issues);
-                    if let Some(eb) = else_branch { check_elements(eb, document, issues); }
+                    if let Some(eb) = else_branch {
+                        check_elements(eb, document, issues);
+                    }
                 }
                 _ => {}
             }
@@ -77,7 +84,13 @@ pub(crate) fn check_project() -> Result<(), String> {
         issues: &mut Vec<String>,
     ) {
         for elem in elements {
-            if let ast::Element::Component { name, attributes, content, .. } = elem {
+            if let ast::Element::Component {
+                name,
+                attributes,
+                content,
+                ..
+            } = elem
+            {
                 if let Some(comp) = document.components.get(name) {
                     for attr in attributes {
                         if let ast::AttributeValue::String(val) = &attr.value {
@@ -106,10 +119,18 @@ pub(crate) fn check_project() -> Result<(), String> {
                 check_props(content, document, issues);
             } else {
                 match elem {
-                    ast::Element::Tag { content, .. } | ast::Element::For { content, .. } => check_props(content, document, issues),
-                    ast::Element::If { then_branch, else_branch, .. } => {
+                    ast::Element::Tag { content, .. } | ast::Element::For { content, .. } => {
+                        check_props(content, document, issues)
+                    }
+                    ast::Element::If {
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
                         check_props(then_branch, document, issues);
-                        if let Some(eb) = else_branch { check_props(eb, document, issues); }
+                        if let Some(eb) = else_branch {
+                            check_props(eb, document, issues);
+                        }
                     }
                     _ => {}
                 }
@@ -171,9 +192,12 @@ pub(crate) fn check_project() -> Result<(), String> {
     if issues.is_empty() {
         println!(
             "✅  {} page{}, {} component{}, {} layout{} — no issues found",
-            pages, if pages == 1 { "" } else { "s" },
-            components, if components == 1 { "" } else { "s" },
-            layouts, if layouts == 1 { "" } else { "s" },
+            pages,
+            if pages == 1 { "" } else { "s" },
+            components,
+            if components == 1 { "" } else { "s" },
+            layouts,
+            if layouts == 1 { "" } else { "s" },
         );
         Ok(())
     } else {
@@ -185,6 +209,10 @@ pub(crate) fn check_project() -> Result<(), String> {
         for issue in &issues {
             println!("{issue}");
         }
-        Err(format!("\n{} issue{} — fix before building", issues.len(), if issues.len() == 1 { "" } else { "s" }))
+        Err(format!(
+            "\n{} issue{} — fix before building",
+            issues.len(),
+            if issues.len() == 1 { "" } else { "s" }
+        ))
     }
 }
