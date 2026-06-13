@@ -1,11 +1,18 @@
-//! AST definition for WebCore with source positions
+//! AST definition for `WebCore` with source positions
 
 use std::collections::HashMap;
 
 /// Source location for error reporting
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Span {
+    /// Byte offset of the start of the span within the source file.
+    /// Not used by the current compiler but retained for future LSP/IDE integration
+    /// (go-to-definition, inline diagnostics, hover ranges, etc.).
+    #[allow(dead_code)]
     pub start: usize,
+    /// Byte offset of the end of the span within the source file.
+    /// Not used by the current compiler but retained for future LSP/IDE integration.
+    #[allow(dead_code)]
     pub end: usize,
     pub line: u32,
     pub col: u32,
@@ -31,6 +38,9 @@ impl Span {
         }
     }
 
+    /// Merge two spans into one covering both ranges.
+    /// Retained for future LSP/IDE integration (e.g. error range spanning multiple tokens).
+    #[allow(dead_code)]
     pub fn merge(self, other: Self) -> Self {
         Self {
             start: self.start.min(other.start),
@@ -62,10 +72,12 @@ pub struct WebCoreDocument {
 
 #[derive(Debug, Clone)]
 pub struct App {
+    #[allow(dead_code)]
     pub name: String,
     pub theme: Option<String>,
     pub layout: Option<String>,
     pub routes: HashMap<String, String>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -73,13 +85,35 @@ pub struct App {
 pub struct Layout {
     pub name: String,
     pub content: Vec<Element>,
+    #[allow(dead_code)]
     pub span: Span,
+}
+
+/// HTTP fetch block inside a component: `http { get: "/api/posts" into: posts }`
+#[derive(Debug, Clone)]
+pub struct HttpBlock {
+    #[allow(dead_code)]
+    pub method: String,
+    pub url: String,
+    pub into: String,
+}
+
+/// Head block inside a page: `head { title "..." meta key="value" }`
+#[derive(Debug, Clone)]
+pub struct HeadBlock {
+    #[allow(dead_code)]
+    pub title: Option<String>,
+    #[allow(dead_code)]
+    pub metas: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Page {
     pub name: String,
+    #[allow(dead_code)]
+    pub head: Option<HeadBlock>,
     pub content: Vec<Element>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -91,6 +125,7 @@ pub struct Component {
     pub computed: Vec<ComputedVar>,
     pub mount_body: Option<String>,
     pub destroy_body: Option<String>,
+    pub http: Option<HttpBlock>,
     pub view: Vec<Element>,
     pub style: Vec<StyleItem>,
     pub span: Span,
@@ -100,6 +135,7 @@ pub struct Component {
 pub struct Prop {
     pub name: String,
     pub type_: Option<String>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -107,6 +143,7 @@ pub struct Prop {
 pub struct ComputedVar {
     pub name: String,
     pub expr: String,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -115,6 +152,7 @@ pub struct StateVar {
     pub name: String,
     pub type_: String,
     pub default_value: Option<String>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -167,18 +205,71 @@ pub enum Element {
 }
 
 impl Element {
+    /// Returns the source span of this element (reserved for future LSP/IDE use).
+    #[allow(dead_code)]
     pub fn span(&self) -> Span {
         match self {
-            Element::Text(_, span) => *span,
-            Element::Tag { span, .. } => *span,
-            Element::Slot(_, span) => *span,
-            Element::SlotContent { span, .. } => *span,
-            Element::Component { span, .. } => *span,
-            Element::Interpolation(_, span) => *span,
-            Element::For { span, .. } => *span,
-            Element::If { span, .. } => *span,
-            Element::ErrorBlock { span, .. } => *span,
+            Element::Text(_, span)
+            | Element::Slot(_, span)
+            | Element::Interpolation(_, span)
+            | Element::Tag { span, .. }
+            | Element::SlotContent { span, .. }
+            | Element::Component { span, .. }
+            | Element::For { span, .. }
+            | Element::If { span, .. }
+            | Element::ErrorBlock { span, .. } => *span,
         }
+    }
+
+    /// Returns true if this is a Tag element (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn is_tag(&self) -> bool {
+        matches!(self, Element::Tag { .. })
+    }
+
+    /// Returns true if this is a Text element (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn is_text(&self) -> bool {
+        matches!(self, Element::Text(..))
+    }
+
+    /// Returns the direct children of this element, or an empty slice.
+    pub fn children(&self) -> &[Element] {
+        match self {
+            Element::Tag { content, .. }
+            | Element::Component { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::For { content, .. }
+            | Element::ErrorBlock { content, .. } => content,
+            Element::If { then_branch, .. } => then_branch,
+            _ => &[],
+        }
+    }
+}
+
+impl Component {
+    /// Returns true if this component has an HTTP block (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn has_http(&self) -> bool {
+        self.http.is_some()
+    }
+
+    /// Returns true if this component has computed vars (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn has_computed(&self) -> bool {
+        !self.computed.is_empty()
+    }
+
+    /// Returns true if this component has state vars (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn has_state(&self) -> bool {
+        !self.state.is_empty()
+    }
+
+    /// Returns true if this component is reactive (reserved for future LSP use).
+    #[allow(dead_code)]
+    pub fn is_reactive(&self) -> bool {
+        !self.state.is_empty() || !self.computed.is_empty()
     }
 }
 
@@ -200,6 +291,9 @@ pub enum AttributeValue {
 pub struct StyleRule {
     pub selector: String,
     pub properties: Vec<StyleProperty>,
+    /// Nested CSS rules, e.g. `&:hover { color: red; }` inside this rule.
+    pub nested: Vec<StyleRule>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -207,6 +301,7 @@ pub struct StyleRule {
 pub struct StyleProperty {
     pub name: String,
     pub value: String,
+    #[allow(dead_code)]
     pub span: Span,
 }
 
@@ -217,6 +312,7 @@ pub enum StyleItem {
     Media {
         query: String,
         rules: Vec<StyleRule>,
+        #[allow(dead_code)]
         span: Span,
     },
 }

@@ -1,75 +1,123 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v1.1.1 — Stable" }
+        div class="hero-badge" { "v2.0.0 — Stable" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }
         }
         p class="hero-sub" {
-            "WebCore unifies HTML, CSS and JavaScript into a single "
+            "WebCore compiles "
             code { ".webc" }
-            " syntax. The Rust compiler generates semantic HTML, "
-            "scoped CSS and a minimal reactive runtime — no framework, no bundler."
+            " files to semantic HTML, scoped CSS and a minimal reactive runtime."
+            " One language, one compiler, zero dependencies."
         }
         div class="hero-actions" {
             link to="/syntax" class="btn-hero-primary" { "Read the Docs" }
-            link to="/components" class="btn-hero-secondary" { "Component Model" }
+            link to="/examples" class="btn-hero-secondary" { "See Examples" }
         }
         div class="hero-snippet" {
             pre class="hero-code" {
 "component Counter \{
-    state  \{ count: Number = 0 \}
+    state   \{ count: Number = 0 \}
     computed \{ doubled = count * 2 \}
     view \{
         div \{
-            p \"Value: \{count\} * 2 = \{doubled\}\"
+            p \"Valeur : \{count\} — x2 : \{doubled\}\"
             button on:click=\{count += 1\} \{ \"+\" \}
+            button on:click=\{count = max(0, count-1)\} \{ \"−\" \}
         \}
     \}
-    style \{ div \{ display: flex; gap: 1rem; \} \}
+    style \{
+        .card \{
+            display: flex; gap: 1rem;
+            &:hover \{ box-shadow: 0 4px 16px rgba(91,74,247,0.2); \}
+        \}
+    \}
 \}"
             }
         }
     }
 
+    div class="stats-bar" {
+        div class="stat-item" {
+            span class="stat-num" { "Rust" }
+            span class="stat-desc" { "PEG compiler" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "105" }
+            span class="stat-desc" { "unit tests" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "$effect" }
+            span class="stat-desc" { "Signals fins" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "<5 KB" }
+            span class="stat-desc" { "JS runtime" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "zero" }
+            span class="stat-desc" { "dependencies" }
+        }
+        div class="stat-item" {
+            span class="stat-num" { "SSG" }
+            span class="stat-desc" { "pre-rendered" }
+        }
+    }
+
     section class="section" {
         h2 class="section-title" { "Why WebCore?" }
+        p class="section-sub" {
+            "One declarative syntax that replaces HTML templates, CSS modules, and JS reactivity boilerplate."
+        }
         div class="feature-grid" {
             FeatureCard
                 icon="⚡"
-                title="Zero runtime dependencies"
-                desc="The compiler emits only the JS helpers your document actually uses. Simple apps get a tiny bundle."
+                title="Tree-shaken runtime"
+                desc="The compiler emits only the JS helpers your document actually uses. Simple apps ship under 5 KB of script."
                 tag="Performance"
             {}
             FeatureCard
                 icon="🦀"
-                title="Rust-powered compiler"
-                desc="A Pest PEG grammar drives a fully typed AST. Errors include file, line, column and source context."
+                title="Rust + PEG parser"
+                desc="A Pest grammar drives a fully-typed AST. Build errors include file, line, column and a source caret."
                 tag="Reliability"
             {}
             FeatureCard
                 icon="🔒"
-                title="Scoped CSS by default"
-                desc="Each component gets a deterministic FNV-1a hash. Styles never leak across component boundaries."
+                title="Scoped CSS"
+                desc="Each component gets a deterministic FNV-1a hash. Styles never leak. No BEM, no CSS modules."
                 tag="Isolation"
             {}
             FeatureCard
                 icon="🌐"
-                title="SPA routing built-in"
-                desc="History API navigation with no full page reload. Routes are declared directly in the app block."
+                title="SPA routing"
+                desc="History API navigation with parameterised routes (/post/:slug). Declare routes in the app block."
                 tag="Routing"
             {}
             FeatureCard
                 icon="🎛️"
                 title="Reactive state"
-                desc="ES2022 private-field State class. Computed vars, lifecycle hooks, and inter-component events included."
+                desc="ES2022 private-field State. Computed vars, lifecycle hooks, inter-component events, global store."
                 tag="Reactivity"
             {}
             FeatureCard
                 icon="📦"
-                title="Static Site Generation"
-                desc="Initial state values are pre-rendered at compile time. No flash of unstyled or wrong content."
-                tag="SSG"
+                title="SSG + i18n + WASM"
+                desc="Pre-render initial values, ship translated strings from TOML, and call Rust WASM from any component."
+                tag="Features"
+            {}
+            FeatureCard
+                icon="✨"
+                title="Signaux réactifs fins"
+                desc="$effect(fn) track les dépendances automatiquement. Un composant ne se re-rend que quand ses données changent réellement."
+                tag="v2.0.0"
+            {}
+            FeatureCard
+                icon="🔥"
+                title="HMR — Hot reload"
+                desc="webc serve surveille vos fichiers et recharge le navigateur automatiquement via WebSocket. Aucune configuration."
+                tag="v2.0.0"
             {}
         }
     }
@@ -77,26 +125,25 @@ page "home" {
     section class="section" {
         h2 class="section-title" { "Try it live" }
         p class="section-sub" {
-            "This counter is a real "
+            "A real "
             code { "LiveCounter" }
-            " WebCore component — state, computed vars, "
+            " WebCore component — state, computed, "
             code { "@if" }
-            " directive and responsive styles."
+            " directive and responsive styles, all compiled to vanilla JS."
         }
         LiveCounter {}
     }
 
     section class="section" {
-        h2 class="section-title" { "Get started in seconds" }
+        h2 class="section-title" { "Get started" }
         div class="install-steps" {
             div class="install-step" {
                 span class="step-num" { "1" }
                 div {
-                    strong { "Clone and build" }
+                    strong { "Clone and build the compiler" }
                     pre class="inline-code" {
 "git clone https://github.com/PrinMeshia/Webcore.git
-cd Webcore/webcore-compiler
-cargo build --release"
+cd Webcore/webcore-compiler && cargo build --release"
                     }
                 }
             }
@@ -111,7 +158,7 @@ cargo build --release"
                 span class="step-num" { "3" }
                 div {
                     strong { "Start the dev server" }
-                    pre class="inline-code" { "cd my-app && webc dev 3000" }
+                    pre class="inline-code" { "cd my-app && webc serve" }
                 }
             }
         }

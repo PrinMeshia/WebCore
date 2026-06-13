@@ -1,0 +1,15 @@
+component AboutPage {
+  view {
+    h1 "À propos de WebCore"
+    p "WebCore est un langage ultra-déclaratif qui unifie HTML, CSS et JavaScript dans une syntaxe simple et moderne."
+    
+    h3 "Fonctionnalités"
+    ul {
+      li "Design tokens et composants"
+      li "State management réactif"
+      li "Event handlers déclaratifs"
+      li "Routing intégré"
+      li "Compilation optimisée"
+    }
+  }
+}

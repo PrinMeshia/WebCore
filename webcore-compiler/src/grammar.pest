@@ -25,12 +25,26 @@ store_decl = { "store" ~ "{" ~ state_def* ~ "}" }
 layout_decl = { "layout" ~ identifier ~ "{" ~ element* ~ "}" }
 
 // ============ PAGE DECLARATION ============
-page_decl = { "page" ~ string_literal ~ "{" ~ element* ~ "}" }
+page_decl = { "page" ~ string_literal ~ "{" ~ head_block? ~ element* ~ "}" }
+
+// ============ HEAD BLOCK (inside page) ============
+head_block = { "head" ~ "{" ~ head_item* ~ "}" }
+head_item  = _{ head_title | head_meta }
+head_title = { "title" ~ string_literal }
+head_meta  = { "meta" ~ meta_key ~ "=" ~ string_literal }
+// meta_key allows og:title, twitter:card etc. (colon-separated namespace)
+meta_key   = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ":")* }
 
 // ============ COMPONENT DECLARATION ============
 component_decl = { "component" ~ identifier ~ "{" ~ component_body ~ "}" }
 component_body = { component_section* }
-component_section = _{ props_block | state_block | computed_block | on_mount_block | on_destroy_block | view_block | style_block | element }
+component_section = _{ props_block | state_block | computed_block | on_mount_block | on_destroy_block | http_block | view_block | style_block | element }
+
+// ============ HTTP BLOCK (inside component) ============
+http_block       = { "http" ~ "{" ~ http_field* ~ "}" }
+http_field       = { http_field_name ~ ":" ~ http_field_value }
+http_field_name  = @{ ASCII_ALPHA+ }
+http_field_value = { string_literal | identifier }
 
 // Computed state block
 computed_block = { "computed" ~ "{" ~ computed_def* ~ "}" }
@@ -60,7 +74,9 @@ style_block = { "style" ~ "{" ~ style_item* ~ "}" }
 style_item = _{ media_block | style_rule }
 media_block = { "@media" ~ media_query ~ "{" ~ style_rule* ~ "}" }
 media_query = @{ (!"{" ~ ANY)+ }
-style_rule = { selector ~ "{" ~ style_property* ~ "}" }
+style_rule = { selector ~ "{" ~ (style_property | nested_rule)* ~ "}" }
+nested_rule = { nested_selector ~ "{" ~ style_property* ~ "}" }
+nested_selector = @{ "&" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")* }
 selector = @{ (ASCII_ALPHANUMERIC | "-" | "_" | "." | "#" | ":" | "[" | "]" | "=" | "\"" | " " | ">" | "+" | "~" | "*" | "(" | ")" | ",")+ }
 style_property = { property_name ~ ":" ~ property_value ~ ";"? }
 property_name = @{ (ASCII_ALPHA | "-")+ }
@@ -105,7 +121,7 @@ text_element = { string_with_interpolation }
 
 // ============ ATTRIBUTES ============
 attribute = { attr_name ~ "=" ~ attr_value }
-attr_name = @{ (ASCII_ALPHA | "_" | "-" | ":")+ }
+attr_name = @{ (ASCII_ALPHA | "_" | "-" | ":" | "|")+ }
 attr_value = { expression_attr | string_literal | "true" | "false" }
 expression_attr = { "{" ~ expression_content ~ "}" }
 expression_content = @{ (!"}" ~ ANY)* }

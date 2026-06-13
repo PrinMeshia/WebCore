@@ -6,10 +6,17 @@
     { "include": "#comments" },
     { "include": "#top-level-blocks" },
     { "include": "#directives" },
-    { "include": "#html-tags" },
+    { "include": "#webc-directives" },
+    { "include": "#ref-attrs" },
+    { "include": "#style-binding-attrs" },
+    { "include": "#debounce-event-attrs" },
+    { "include": "#lifecycle-event-attrs" },
     { "include": "#event-attrs" },
+    { "include": "#class-binding-attrs" },
     { "include": "#dynamic-attrs" },
     { "include": "#static-attrs" },
+    { "include": "#query-vars" },
+    { "include": "#html-tags" },
     { "include": "#interpolation" },
     { "include": "#strings" },
     { "include": "#numbers" },
@@ -63,6 +70,7 @@
           "end": "\\}",
           "patterns": [
             { "include": "#strings" },
+            { "include": "#head-block" },
             { "include": "#view-content" }
           ]
         },
@@ -78,6 +86,8 @@
             { "include": "#comments" },
             { "include": "#props-block" },
             { "include": "#state-block" },
+            { "include": "#computed-block" },
+            { "include": "#http-block" },
             { "include": "#view-block" },
             { "include": "#style-block" }
           ]
@@ -146,6 +156,71 @@
       ]
     },
 
+    "computed-block": {
+      "begin": "\\b(computed)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(=)\\s*(.+)",
+          "captures": {
+            "1": { "name": "variable.other.readwrite.webc" },
+            "2": { "name": "keyword.operator.assignment.webc" },
+            "3": { "name": "meta.embedded.expression.webc" }
+          }
+        }
+      ]
+    },
+
+    "http-block": {
+      "begin": "\\b(http)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(get|post|into)\\s*(:)\\s*(\"[^\"]*\"|[a-z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.other.http.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "string.quoted.double.webc" }
+          }
+        }
+      ]
+    },
+
+    "head-block": {
+      "begin": "\\b(head)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.webc" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(title)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "keyword.other.head.webc" },
+            "2": { "name": "string.quoted.double.webc" }
+          }
+        },
+        {
+          "match": "\\b(meta)\\s+([a-zA-Z_:][a-zA-Z0-9_:]*)\\s*(=)\\s*(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "keyword.other.head.webc" },
+            "2": { "name": "entity.other.attribute-name.webc" },
+            "3": { "name": "punctuation.separator.webc" },
+            "4": { "name": "string.quoted.double.webc" }
+          }
+        }
+      ]
+    },
+
     "view-block": {
       "begin": "\\b(view)\\s*\\{",
       "beginCaptures": {
@@ -165,24 +240,64 @@
       "contentName": "meta.embedded.css",
       "patterns": [
         { "include": "#comments" },
+        { "include": "#media-rule" },
+        { "include": "#css-rule" }
+      ]
+    },
+
+    "media-rule": {
+      "name": "meta.at-rule.media.css",
+      "begin": "(@media)\\s+([^{]+)\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.at-rule.media.css" },
+        "2": { "name": "meta.property-value.css" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#css-rule" }
+      ]
+    },
+
+    "css-rule": {
+      "name": "meta.rule.css",
+      "begin": "([&a-zA-Z*.:# ][a-zA-Z0-9_.#:& -]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.css" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#nested-css-rule" },
         {
-          "name": "meta.rule.css",
-          "begin": "([a-zA-Z*.:# ][a-zA-Z0-9_.#: -]*)\\s*\\{",
-          "beginCaptures": {
-            "1": { "name": "entity.other.attribute-name.css" }
-          },
-          "end": "\\}",
-          "patterns": [
-            {
-              "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
-              "captures": {
-                "1": { "name": "support.type.property-name.css" },
-                "2": { "name": "punctuation.separator.key-value.css" },
-                "3": { "name": "meta.property-value.css" },
-                "4": { "name": "punctuation.terminator.rule.css" }
-              }
-            }
-          ]
+          "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
+          "captures": {
+            "1": { "name": "support.type.property-name.css" },
+            "2": { "name": "punctuation.separator.key-value.css" },
+            "3": { "name": "meta.property-value.css" },
+            "4": { "name": "punctuation.terminator.rule.css" }
+          }
+        }
+      ]
+    },
+
+    "nested-css-rule": {
+      "name": "meta.rule.css.nested",
+      "begin": "(&[a-zA-Z0-9_.#:> *~+\\[\\]-]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.css.nested" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
+          "captures": {
+            "1": { "name": "support.type.property-name.css" },
+            "2": { "name": "punctuation.separator.key-value.css" },
+            "3": { "name": "meta.property-value.css" },
+            "4": { "name": "punctuation.terminator.rule.css" }
+          }
         }
       ]
     },
@@ -195,9 +310,16 @@
         { "include": "#link-tag" },
         { "include": "#component-use" },
         { "include": "#html-tags" },
+        { "include": "#webc-directives" },
+        { "include": "#ref-attrs" },
+        { "include": "#style-binding-attrs" },
+        { "include": "#debounce-event-attrs" },
+        { "include": "#lifecycle-event-attrs" },
         { "include": "#event-attrs" },
+        { "include": "#class-binding-attrs" },
         { "include": "#dynamic-attrs" },
         { "include": "#static-attrs" },
+        { "include": "#query-vars" },
         { "include": "#interpolation" },
         { "include": "#strings" },
         { "include": "#numbers" }
@@ -220,25 +342,139 @@
         },
         {
           "name": "meta.directive.for.webc",
-          "begin": "(@for)\\s+([a-z_][a-zA-Z0-9_]*)\\s+(in)\\s+([a-z_][a-zA-Z0-9_]*)",
+          "begin": "(@for)\\s+([a-z_][a-zA-Z0-9_]*)(?:\\s*,\\s*([a-z_][a-zA-Z0-9_]*))?\\s+(in)\\s+([a-z_][a-zA-Z0-9_.]*)",
           "beginCaptures": {
             "1": { "name": "keyword.control.webc" },
             "2": { "name": "variable.other.webc" },
-            "3": { "name": "keyword.control.webc" },
-            "4": { "name": "variable.other.webc" }
+            "3": { "name": "variable.other.webc" },
+            "4": { "name": "keyword.control.webc" },
+            "5": { "name": "variable.other.webc" }
           },
           "end": "(?<=\\})",
-          "patterns": [{ "include": "#view-content" }]
+          "patterns": [
+            {
+              "match": "\\b(key)\\s*(=)\\s*(\\{[^}]*\\})",
+              "captures": {
+                "1": { "name": "keyword.other.for-key.webc" },
+                "2": { "name": "punctuation.separator.webc" },
+                "3": { "name": "meta.embedded.expression.webc" }
+              }
+            },
+            { "include": "#view-content" }
+          ]
+        },
+        {
+          "name": "meta.directive.switch.webc",
+          "begin": "(@switch)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.webc" }
+          },
+          "end": "(?<=\\})",
+          "patterns": [
+            { "include": "#expression" },
+            {
+              "name": "meta.directive.case.webc",
+              "begin": "(@case|@default)\\b",
+              "beginCaptures": {
+                "1": { "name": "keyword.control.webc" }
+              },
+              "end": "(?<=\\})",
+              "patterns": [{ "include": "#view-content" }]
+            }
+          ]
+        },
+        {
+          "name": "meta.directive.error.webc",
+          "begin": "(@error)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.webc" }
+          },
+          "end": "(?<=\\})",
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#view-content" }
+          ]
         }
       ]
     },
 
-    "slot": {
-      "match": "\\b(slot)\\s+(content)\\b",
+    "webc-directives": {
+      "patterns": [
+        {
+          "name": "meta.attribute.webc-img.webc",
+          "match": "(webc:img)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.directive.webc" }
+          }
+        },
+        {
+          "name": "meta.attribute.webc-transition.webc",
+          "match": "(webc:transition)\\s*(=)\\s*(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "keyword.other.directive.webc" },
+            "2": { "name": "punctuation.separator.webc" },
+            "3": { "name": "string.quoted.double.webc" }
+          }
+        }
+      ]
+    },
+
+    "ref-attrs": {
+      "name": "meta.attribute.ref.webc",
+      "match": "(ref:[a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(true|false|\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "keyword.other.slot.webc" },
-        "2": { "name": "variable.other.webc" }
+        "1": { "name": "entity.other.attribute-name.ref.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
       }
+    },
+
+    "style-binding-attrs": {
+      "name": "meta.attribute.style-binding.webc",
+      "match": "(style:[a-zA-Z_-]+)\\s*(=)\\s*(\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.style-binding.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
+    "lifecycle-event-attrs": {
+      "name": "meta.attribute.lifecycle.webc",
+      "begin": "(on:mount|on:destroy)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.lifecycle.webc" },
+        "2": { "name": "punctuation.section.block.begin.webc" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.webc" }
+      },
+      "patterns": [
+        { "include": "#expression" }
+      ]
+    },
+
+    "slot": {
+      "patterns": [
+        {
+          "name": "meta.slot.content.webc",
+          "begin": "\\b(slot)\\s+([a-z_][a-zA-Z0-9_]*)\\s*\\{",
+          "beginCaptures": {
+            "1": { "name": "keyword.other.slot.webc" },
+            "2": { "name": "variable.other.webc" }
+          },
+          "end": "\\}",
+          "patterns": [{ "include": "#view-content" }]
+        },
+        {
+          "match": "\\b(slot)\\s+([a-z_][a-zA-Z0-9_]*)?\\b",
+          "captures": {
+            "1": { "name": "keyword.other.slot.webc" },
+            "2": { "name": "variable.other.webc" }
+          }
+        }
+      ]
     },
 
     "link-tag": {
@@ -279,7 +515,7 @@
       "patterns": [
         {
           "name": "meta.tag.html.webc",
-          "match": "\\b(div|span|p|h[1-6]|ul|ol|li|a|img|input|button|form|select|option|textarea|section|article|header|footer|nav|main|aside|figure|figcaption|label|table|thead|tbody|tr|th|td|pre|code|blockquote|hr|br|strong|em|small|sup|sub|mark|details|summary)\\b",
+          "match": "\\b(div|span|p|h[1-6]|ul|ol|li|a|img|input|button|form|select|option|textarea|section|article|header|footer|nav|main|aside|figure|figcaption|label|table|thead|tbody|tr|th|td|pre|code|blockquote|hr|br|strong|em|small|sup|sub|mark|details|summary|picture|source|video|audio|canvas|svg|path|circle|rect|line|polygon|polyline|ellipse|use|defs|g)\\b",
           "captures": {
             "1": { "name": "keyword.other.html-tag.webc" }
           }
@@ -287,11 +523,31 @@
       ]
     },
 
+    "debounce-event-attrs": {
+      "name": "meta.attribute.event.debounce.webc",
+      "match": "(on:[a-z]+\\|debounce(?:=[0-9]+)?)\\s*(=)?\\s*(\\{[^}]*\\})?",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.event.debounce.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
     "event-attrs": {
       "name": "meta.attribute.event.webc",
       "match": "(on:[a-z]+)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
         "1": { "name": "entity.other.attribute-name.event.webc" },
+        "2": { "name": "punctuation.separator.webc" },
+        "3": { "name": "meta.embedded.expression.webc" }
+      }
+    },
+
+    "class-binding-attrs": {
+      "name": "meta.attribute.class-binding.webc",
+      "match": "(class:[a-zA-Z_-]+)\\s*(=)\\s*(\\{[^}]*\\})",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.class-binding.webc" },
         "2": { "name": "punctuation.separator.webc" },
         "3": { "name": "meta.embedded.expression.webc" }
       }
@@ -325,6 +581,32 @@
       ]
     },
 
+    "query-vars": {
+      "patterns": [
+        {
+          "name": "variable.language.query.webc",
+          "match": "(\\$query\\.[a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "variable.language.query.webc" }
+          }
+        },
+        {
+          "name": "variable.language.store.webc",
+          "match": "(\\$store\\.[a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "variable.language.store.webc" }
+          }
+        },
+        {
+          "name": "variable.language.route.webc",
+          "match": "(\\$route\\.[a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "variable.language.route.webc" }
+          }
+        }
+      ]
+    },
+
     "interpolation": {
       "name": "meta.embedded.interpolation.webc",
       "begin": "\\{",
@@ -335,15 +617,20 @@
     "expression": {
       "patterns": [
         { "include": "#builtin-functions" },
+        { "include": "#query-vars" },
         { "include": "#numbers" },
         { "include": "#strings" },
         {
           "name": "keyword.operator.webc",
-          "match": "\\+\\=|\\-\\=|\\*\\=|\\/\\=|\\+|\\-|\\*|\\/|%|==|!=|>=|<=|>|<|&&|\\|\\||!"
+          "match": "\\+\\=|\\-\\=|\\*\\=|\\/\\=|\\+\\+|\\-\\-|\\+|\\-|\\*|\\/|%|===|!==|==|!=|>=|<=|>|<|&&|\\|\\||!"
         },
         {
           "name": "keyword.operator.assignment.webc",
-          "match": "(?<![=!<>])=(?!=)"
+          "match": "(?<![=!<>+\\-*\\/])=(?!=)"
+        },
+        {
+          "name": "keyword.operator.ternary.webc",
+          "match": "[?:]"
         },
         {
           "name": "variable.other.webc",
@@ -382,22 +669,26 @@
 
     "builtin-functions": {
       "name": "support.function.builtin.webc",
-      "match": "\\b(max|min|abs|webcore_navigate)(?=\\()"
+      "match": "\\b(max|min|abs|Math\\.floor|Math\\.ceil|Math\\.round|webcore_navigate|t|setLocale|emit)(?=\\()"
     },
 
     "keywords": {
       "patterns": [
         {
           "name": "keyword.control.webc",
-          "match": "\\b(app|layout|page|component|@if|@else|@for|in|slot)\\b"
+          "match": "\\b(app|layout|page|component|@if|@else|@for|in|slot|@switch|@case|@default|@error)\\b"
         },
         {
           "name": "keyword.other.section.webc",
-          "match": "\\b(props|state|view|style|routes|theme|layout)\\b"
+          "match": "\\b(props|state|view|style|routes|theme|layout|computed|http|head)\\b"
+        },
+        {
+          "name": "keyword.other.binding.webc",
+          "match": "\\b(bind:)(?=[a-z])"
         },
         {
           "name": "constant.language.webc",
-          "match": "\\b(true|false|root)\\b"
+          "match": "\\b(true|false|null|undefined|root)\\b"
         }
       ]
     }

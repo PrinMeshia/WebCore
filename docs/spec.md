@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 1.2.0 — Référence complète de la syntaxe `.webc`
+> Version : 2.0.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -26,8 +26,6 @@
 11. [Attributs](#attributs)
 12. [Événements](#événements)
 13. [Interpolation](#interpolation)
-12. [Événements](#événements)
-13. [Interpolation](#interpolation)
 14. [Directives de contrôle](#directives-de-contrôle)
 15. [Routage](#routage)
 16. [Slots](#slots)
@@ -37,10 +35,28 @@
 20. [Internationalisation (i18n)](#internationalisation-i18n)
 21. [SSG — Static Site Generation](#ssg--static-site-generation)
 22. [WebAssembly (WASM)](#webassembly-wasm)
-23. [Commande `webc check`](#commande-webc-check)
-24. [Limites actuelles (v1.2.0)](#limites-actuelles-v120)
-25. [Nouveautés v1.1.1](#nouveautés-v111)
-26. [Nouveautés v1.2.0](#nouveautés-v120)
+23. [Bloc `http { }` — Requêtes HTTP déclaratives](#bloc-http----requêtes-http-déclaratives)
+24. [Bloc `head { }` — Personnalisation du `<head>`](#bloc-head----personnalisation-du-head)
+25. [`$query.` — Paramètres query string](#query--paramètres-query-string)
+26. [`class:name` — Classes conditionnelles](#classname--classes-conditionnelles)
+27. [`on:event|debounce` — Handlers debouncés](#oneventdebounce--handlers-debouncés)
+28. [Commande `webc check`](#commande-webc-check)
+29. [`ref:name` — Références DOM directes](#refname--références-dom-directes)
+30. [`style:prop` — Styles inline dynamiques](#styleprop--styles-inline-dynamiques)
+31. [Contenu par défaut des slots](#contenu-par-défaut-des-slots)
+32. [`webc:transition` — Animations CSS](#webctransition--animations-css)
+33. [`webc:img` — Images optimisées](#webcimg--images-optimisées)
+34. [Fingerprinting des images](#fingerprinting-des-images)
+35. [Limites actuelles (v2.0.0)](#limites-actuelles-v200)
+36. [Nouveautés v1.1.1](#nouveautés-v111)
+37. [Nouveautés v1.2.0](#nouveautés-v120)
+38. [Nouveautés v1.3.0](#nouveautés-v130)
+39. [Nouveautés v1.4.0](#nouveautés-v140)
+40. [Nouveautés v1.5.0](#nouveautés-v150)
+41. [Nouveautés v2.0.0](#nouveautés-v200)
+42. [Signaux réactifs fins](#signaux-réactifs-fins)
+43. [CSS nesting](#css-nesting)
+44. [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
 
 ---
 
@@ -413,7 +429,6 @@ component Timer {
     on:mount {
         const id = setInterval(() => {
             S.set("elapsed", S.get("elapsed") + 1);
-            bind();
         }, 1000);
         window.__timerId = id;
     }
@@ -424,7 +439,7 @@ component Timer {
 ```
 
 - L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
-- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+- Depuis la v2.0, `S.set("varName", value)` met à jour le DOM **automatiquement** : les signaux à grain fin re-exécutent uniquement les effets (`$effect`) qui lisent cette variable. Aucun appel manuel à `bind()` n'est nécessaire (le rappeler ré-enregistrerait des effets en double).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
 - Le corps `on:mount { }` supporte les accolades imbriquées à **profondeur arbitraire** — les callbacks JS complexes (`setTimeout`, `setInterval`, `addEventListener` avec corps multi-ligne, objets littéraux) sont entièrement supportés.
 
@@ -439,7 +454,6 @@ component Timer {
     on:mount {
         window.__timerId = setInterval(() => {
             S.set("elapsed", S.get("elapsed") + 1);
-            bind();
         }, 1000);
     }
     on:destroy {
@@ -526,76 +540,6 @@ page "home" {
 
 Les événements sont dispatché sur `document` — ils sont **globaux**. Si plusieurs instances
 d'un composant émettent le même événement, tous les listeners le reçoivent.
-
----
-
-## Lifecycle hooks
-
-Les hooks de cycle de vie permettent d'exécuter du code JS brut à des moments précis
-du cycle de vie du composant.
-
-### `on:mount`
-
-S'exécute une fois dans `DOMContentLoaded`, après l'initialisation complète du runtime.
-Le corps est wrappé dans un IIFE pour isoler les variables locales.
-
-```webc
-component Timer {
-    state {
-        elapsed: Number = 0
-    }
-    on:mount {
-        const id = setInterval(() => {
-            S.set("elapsed", S.get("elapsed") + 1);
-            bind();
-        }, 1000);
-        window.__timerId = id;
-    }
-    view {
-        p "Temps écoulé : {elapsed}s"
-    }
-}
-```
-
-- L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
-- `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
-- Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
-
-### `on:destroy`
-
-S'exécute **avant chaque navigation SPA** (`nav()`) et sur l'événement `window.beforeunload`
-(fermeture ou rechargement de l'onglet).
-
-```webc
-component Timer {
-    state { elapsed: Number = 0 }
-    on:mount {
-        window.__timerId = setInterval(() => {
-            S.set("elapsed", S.get("elapsed") + 1);
-            bind();
-        }, 1000);
-    }
-    on:destroy {
-        clearInterval(window.__timerId);
-    }
-    view {
-        p "Temps : {elapsed}s"
-    }
-}
-```
-
-**Utilisation typique :** nettoyage de timers, annulation de requêtes, désenregistrement de listeners.
-
-Le runtime génère :
-```js
-const DESTROY_HOOKS = [
-    () => { clearInterval(window.__timerId); }
-];
-function runDestroyHooks() { DESTROY_HOOKS.forEach(h => h()); }
-```
-
-
-`runDestroyHooks()` est appelé en tête de `nav()` et dans `window.addEventListener('beforeunload', ...)`.
 
 ---
 
@@ -1065,7 +1009,7 @@ Le runtime généré contient uniquement les fonctions **réellement utilisées*
 
 | Fonction / Constante | Émise si… | Description |
 |---|---|---|
-| `class State` | Toujours | État réactif avec `S.get`, `S.set`, `S.setQ`, `S.on` |
+| `class State` + `$effect()` | Toujours | Signaux réactifs à grain fin — `S.get` track la dépendance, `S.set` ne re-exécute que les effets concernés (voir [Signaux réactifs fins](#signaux-réactifs-fins)) |
 | `COMPUTED` + `rebindComputed()` | `computed {}` présent | Variables dérivées |
 | `evalCond(expr)` | Interpolation, `@if`, `@for`, ou attributs dynamiques | Évaluation sécurisée des expressions |
 | `bind()` | Interpolation ou `computed {}` | Mise à jour des `data-webcore-interpolation` |
@@ -1082,13 +1026,16 @@ Le runtime généré contient uniquement les fonctions **réellement utilisées*
 **Exemple pour un composant simple sans `@for`, `@if`, ni validation :**
 
 ```js
-class State { #d=new Map(); #l=new Map();
-  set(k,v){ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) }
-  setQ(k,v){ this.#d.set(k,v) }
-  get(k){ return this.#d.get(k) }
+var __wcfx = null;                         // effet en cours (null hors d'un effet)
+class State {
+  #d = new Map(); #l = new Map(); #s = new Map();   // données · listeners · deps
+  get(k){ if(__wcfx){ if(!this.#s.has(k)) this.#s.set(k,new Set()); this.#s.get(k).add(__wcfx); } return this.#d.get(k); }
+  set(k,v){ if(Object.is(this.#d.get(k),v)) return; this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)); const e=[...(this.#s.get(k)??[])]; this.#s.get(k)?.clear(); e.forEach(f=>f()); }
+  setQ(k,v){ this.#d.set(k,v) }              // setter silencieux (computed)
   on(k,f){ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) }
 }
 const S = new State();
+function $effect(fn){ const r=()=>{ const p=__wcfx; __wcfx=r; try{fn();}finally{__wcfx=p;} }; r(); }
 // evalCond, bind — puis DOMContentLoaded
 ```
 
@@ -1384,6 +1331,184 @@ component Signer {
 
 ---
 
+## Bloc `http { }` — Requêtes HTTP déclaratives
+
+Le bloc `http` dans un composant déclenche un `fetch()` JSON automatiquement dans `DOMContentLoaded`.
+
+### Syntaxe
+
+```webc
+component NomComposant {
+    state { items: List = null }
+    http { get: "/api/endpoint"  into: items }
+    view { ... }
+}
+```
+
+- `get:` — URL cible (chaîne de caractères)
+- `into:` — nom de la variable du state qui reçoit la réponse JSON
+
+### Auto-injection de `loading` et `error`
+
+Lorsqu'un composant contient un bloc `http {}`, le parser **injecte automatiquement** dans son `state` :
+
+- `loading: Boolean = true` — mis à `false` après la réponse (succès ou erreur)
+- `error: String = ""` — contient le message d'erreur si la requête échoue
+
+Ces variables n'ont pas besoin d'être déclarées manuellement. Elles sont pleinement réactives.
+
+### Exemple complet
+
+```webc
+component Posts {
+    state { posts: List = null }
+    http { get: "/api/posts"  into: posts }
+    view {
+        @if loading { p "Chargement…" }
+        @if error   { p "Erreur : {error}" }
+        @for post in posts { li "{post.title}" }
+    }
+}
+```
+
+### Code généré
+
+```js
+(async()=>{
+  try {
+    const __r = await fetch("/api/posts");
+    if(!__r.ok) throw new Error(__r.statusText);
+    const __d = await __r.json();
+    S.set('posts', __d);
+    S.set('loading', false);
+    bind(); bindFor(); bindIf();
+  } catch(__e) {
+    S.set('error', __e.message);
+    S.set('loading', false);
+    bind(); bindIf();
+  }
+})();
+```
+
+---
+
+## Bloc `head { }` — Personnalisation du `<head>`
+
+Le bloc `head` dans une déclaration `page` permet de personnaliser le `<head>` HTML de cette page spécifiquement.
+
+### Syntaxe
+
+```webc
+page "article" {
+    head {
+        title "Mon Article"
+        meta description="Article de blog WebCore"
+        meta og:title="Mon Article"
+    }
+    h1 "Hello"
+}
+```
+
+- `title "..."` — génère `<title>Mon Article</title>` (override le titre global de `webc.toml`)
+- `meta name="valeur"` — génère `<meta name="name" content="valeur">`
+- `meta og:title="valeur"` — génère `<meta name="og:title" content="valeur">`
+
+Les autres éléments de la page (ici `h1 "Hello"`) vont dans le `<body>` normalement.
+
+---
+
+## `$query.` — Paramètres query string
+
+`$query.` donne accès aux paramètres de l'URL query string (`?key=value&...`).
+
+### Syntaxe
+
+```webc
+p "Recherche : {$query.search}"
+p "Page : {$query.page}"
+p "Tri : {$query.sort}"
+```
+
+### Tree-shaking
+
+Le compilateur n'émet `QUERY_PARAMS` que si au moins une référence `$query.` est présente dans le document :
+
+```js
+const QUERY_PARAMS = new Proxy({}, {
+    get: (_, k) => new URLSearchParams(location.search).get(String(k)) ?? ""
+});
+```
+
+Si aucune référence `$query.` n'est trouvée, ce code est absent du bundle — zéro overhead.
+
+### Utilisation typique
+
+```webc
+component SearchResults {
+    state { results: List = null }
+    http { get: "/api/search?q={$query.q}"  into: results }
+    view {
+        p "Résultats pour : {$query.q}"
+        @for item in results { li "{item.title}" }
+    }
+}
+```
+
+---
+
+## `class:name` — Classes conditionnelles
+
+`class:name={expr}` lie une classe CSS à une expression booléenne. La classe est ajoutée si l'expression est truthy, supprimée sinon.
+
+### Syntaxe
+
+```webc
+div class:active={isOpen} { "Contenu" }
+div class:active={isOpen} class:hidden={!visible} { "Contenu" }
+button class:disabled={count == 0} on:click={count -= 1} { "−" }
+```
+
+### Compilation
+
+`class:active={isOpen}` émet l'attribut HTML `data-webcore-class-active="isOpen"`.
+`bindAttrs()` évalue l'expression et appelle `el.classList.toggle("active", result)`.
+
+### Tree-shaking
+
+La logique de class-toggle dans `bindAttrs()` n'est émise que si au moins un attribut `class:` est présent dans le document.
+
+---
+
+## `on:event|debounce` — Handlers debouncés
+
+Le modificateur `|debounce` après le type d'événement enveloppe le handler dans un `setTimeout` de 300 ms. Le handler ne se déclenche qu'après 300 ms d'inactivité (si l'utilisateur cesse de taper/agir).
+
+### Syntaxe
+
+```webc
+input on:input|debounce={search = event.target.value}
+input on:keyup|debounce={query = event.target.value}
+```
+
+### Code généré
+
+```js
+el.addEventListener('input', (event) => {
+    clearTimeout(el.__debounce);
+    el.__debounce = setTimeout(() => {
+        S.set('search', event.target.value);
+    }, 300);
+});
+```
+
+### Cas d'usage
+
+- Champ de recherche : évite un appel API à chaque frappe
+- Filtrage de liste : recalcule uniquement après une pause de l'utilisateur
+- Compatible avec tout type d'événement : `on:input|debounce`, `on:keyup|debounce`, `on:change|debounce`, etc.
+
+---
+
 ## Commande `webc check`
 
 `webc check` valide le projet sans générer de fichiers de sortie.
@@ -1407,7 +1532,330 @@ Si tout est valide, il affiche `✓ projet valide` et quitte avec code 0.
 
 ---
 
-## Limites actuelles (v1.2.0)
+## `ref:name` — Références DOM directes
+
+L'attribut `ref:name=true` sur un élément enregistre une référence directe à ce nœud DOM dans l'objet `refs`, accessible après `DOMContentLoaded`.
+
+### Syntaxe
+
+```webc
+input ref:myInput=true
+button ref:submitBtn=true { "Envoyer" }
+```
+
+### Effet compilé
+
+L'élément reçoit l'attribut HTML `data-webcore-ref="name"` :
+
+```html
+<input data-webcore-ref="myInput">
+```
+
+Dans le runtime JS généré, `const refs = {}` est déclaré à la portée du bloc, et dans `DOMContentLoaded` :
+
+```js
+const refs = {};
+document.addEventListener('DOMContentLoaded', () => {
+    refs['myInput'] = document.querySelector('[data-webcore-ref="myInput"]');
+});
+```
+
+### Cas d'usage
+
+```webc
+component SearchBar {
+    state { query: String = "" }
+    on:mount {
+        refs['searchInput'].focus();
+    }
+    view {
+        input ref:searchInput=true
+              on:input={query = event.target.value}
+              placeholder="Rechercher..."
+    }
+}
+```
+
+- Accès direct à un élément sans `querySelector` dans le code utilisateur
+- Utile pour la gestion du focus, les appels de méthodes DOM (`scrollIntoView`, `select`, etc.)
+- Plusieurs références peuvent coexister sur des éléments différents
+
+### Tree-shaking
+
+Le flag `has_refs` est positionné lors du parsing. Si aucun `ref:` n'est présent dans le document, `const refs = {}` et le code d'enregistrement ne sont pas émis.
+
+---
+
+## `style:prop` — Styles inline dynamiques
+
+`style:prop={expr}` lie une propriété CSS inline à une expression réactive. La valeur est appliquée via `el.style.setProperty(...)` dans `bindAttrs()`.
+
+### Syntaxe
+
+```webc
+div style:color={myColor} { "Texte coloré" }
+div style:background-color={bg} style:font-size={size} { "Contenu" }
+```
+
+### Effet compilé
+
+`style:color={myColor}` émet l'attribut HTML `data-webcore-style-color="myColor"`.
+Les tirets dans le nom de propriété sont préservés (`background-color` reste `background-color`).
+
+```html
+<div data-webcore-style-color="myColor">Texte coloré</div>
+```
+
+`bindAttrs()` appelle :
+
+```js
+el.style.setProperty('color', evalCond(myColor, ...));
+el.style.setProperty('background-color', evalCond(bg, ...));
+```
+
+### Coexistence avec d'autres attributs
+
+`style:`, `style="..."` statique et `class:` peuvent coexister sur le même élément :
+
+```webc
+div style="padding: 1rem"
+    style:color={textColor}
+    class:active={isOpen}
+    { "Contenu" }
+```
+
+### Cas d'usage
+
+```webc
+component ColorPicker {
+    state {
+        hue:  Number = 200
+        sat:  Number = 80
+        lite: Number = 50
+    }
+    view {
+        div style:background-color={"hsl(" + hue + "," + sat + "%," + lite + "%)"}
+            { "Aperçu" }
+        input type="range" bind:value={hue}
+    }
+}
+```
+
+### Tree-shaking
+
+Le flag `has_style_binding` est positionné lors du parsing. La logique `style.setProperty` dans `bindAttrs()` n'est émise que si au moins un `style:` est présent dans le document.
+
+---
+
+## Contenu par défaut des slots
+
+Les layouts peuvent définir un contenu de repli pour les slots nommés. Ce contenu est utilisé lorsque la page ne fournit pas de contenu pour ce slot.
+
+### Syntaxe
+
+```webc
+layout DashLayout {
+    header { slot header }
+    aside  {
+        slot sidebar {
+            p "Navigation par défaut"
+            link to="/" { "Accueil" }
+        }
+    }
+    main { slot content }
+}
+```
+
+### Comportement
+
+- Si la page **remplit** le slot (`slot sidebar { ... }`) → le contenu de la page est utilisé
+- Si la page **ne remplit pas** le slot → le contenu par défaut du layout est utilisé
+- Le slot `content` (contenu principal) continue de fonctionner comme avant — il utilise le corps de la page
+
+### Exemple complet
+
+```webc
+// Layout avec sidebar par défaut
+layout AppLayout {
+    aside {
+        slot sidebar {
+            p "Sidebar par défaut"
+        }
+    }
+    main { slot content }
+}
+
+// Page A — fournit une sidebar
+page "dashboard" {
+    slot sidebar {
+        nav { link to="/settings" { "Paramètres" } }
+    }
+    h1 "Tableau de bord"
+}
+
+// Page B — n'a pas de sidebar → contenu par défaut utilisé
+page "about" {
+    h1 "À propos"
+}
+```
+
+### Historique
+
+Avant la v1.4.0, les slots nommés non remplis par une page étaient silencieusement supprimés — le contenu défini dans le layout pour ce slot était ignoré.
+
+---
+
+## `webc:transition` — Animations CSS
+
+L'attribut `webc:transition="name"` ajoute une animation CSS à un élément conditionnel. L'élément entre avec l'animation d'entrée et quitte avec l'animation de sortie lorsqu'un bloc `@if` change d'état.
+
+### Syntaxe
+
+```webc
+div webc:transition="fade" {
+    p "Contenu animé"
+}
+
+div webc:transition="slide" {
+    p "Glisse vers le bas à l'entrée"
+}
+```
+
+### Transitions intégrées
+
+| Nom | Entrée | Sortie |
+|---|---|---|
+| `fade` | opacité `0 → 1` | opacité `1 → 0` |
+| `slide` | `translateY(-10px) → 0` | `0 → translateY(-10px)` |
+
+### Fonctionnement avec `@if`
+
+```webc
+@if isOpen {
+    div webc:transition="fade" {
+        p "Ce panneau s'affiche en fondu"
+    }
+}
+```
+
+À l'entrée, l'élément apparaît avec l'animation d'entrée.
+À la sortie (quand `isOpen` devient `false`), l'animation de sortie est jouée, puis l'élément est retiré du DOM.
+
+### Implémentation
+
+L'attribut HTML `data-webcore-transition="name"` est émis sur l'élément :
+
+```html
+<div data-webcore-transition="fade">...</div>
+```
+
+Le runtime JS injecte le CSS des transitions et utilise `requestAnimationFrame` + `transitionend` pour synchroniser l'ajout et la suppression du DOM avec les animations CSS.
+
+```js
+// CSS injecté automatiquement (une seule fois)
+const style = document.createElement('style');
+style.textContent = `
+    [data-webcore-transition="fade"] { transition: opacity 0.2s ease; }
+    [data-webcore-transition="fade"].wc-enter { opacity: 0; }
+    [data-webcore-transition="fade"].wc-leave { opacity: 0; }
+`;
+document.head.appendChild(style);
+```
+
+### Tree-shaking
+
+Le flag `has_transition` est positionné lors du parsing. Si aucun `webc:transition` n'est présent, le CSS et la logique `requestAnimationFrame`/`transitionend` ne sont pas émis.
+
+---
+
+## `webc:img` — Images optimisées
+
+La directive `webc:img` sur un élément `img` déclenche une transformation compile-time complète : injection des attributs de chargement différé, lecture des dimensions réelles depuis `public/` et validation de l'accessibilité.
+
+### Syntaxe
+
+```webc
+img webc:img src="/hero.png" alt="Hero"
+img webc:img src="/logo.svg" alt="Logo" class="logo"
+```
+
+### Sortie compilée
+
+```html
+<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">
+```
+
+- `loading="lazy"` et `decoding="async"` sont **toujours** injectés sur tout `img` portant `webc:img`
+- `width` et `height` sont lus depuis le fichier réel dans `public/` — le crate `imagesize` extrait les dimensions sans décoder l'image entière
+- `src` pointe vers `dist/assets/` (le préfixe `/assets/` est appliqué automatiquement)
+- L'attribut `webc:img` est **supprimé** de la sortie HTML — ce n'est pas un attribut HTML valide
+
+### Avertissement `alt` manquant
+
+Si l'attribut `alt` est absent, le compilateur émet :
+
+```
+warning[a11y]: <img> with webc:img is missing alt attribute
+  --> src/pages/home.webc:12
+```
+
+La compilation continue normalement — c'est un avertissement, pas une erreur.
+
+### Comparaison avec un `<img>` ordinaire
+
+| | `img src="..."` | `img webc:img src="..."` |
+|---|---|---|
+| `loading="lazy"` | Manuel | Automatique |
+| `decoding="async"` | Manuel | Automatique |
+| `width` / `height` | Manuel (ou oublié) | Lu depuis `public/` |
+| Prévention du CLS | Non garantie | Garantie |
+| Avertissement `alt` | Non | Oui |
+
+### Aucun overhead runtime
+
+`webc:img` est une transformation **purement compile-time**. Aucun JS n'est émis dans le bundle — l'optimisation est intégralement réalisée par le compilateur Rust au moment du build.
+
+---
+
+## Fingerprinting des images
+
+À chaque `webc build`, toutes les images du dossier `public/` reçoivent un hash de contenu intégré dans leur nom de fichier. Les références dans les HTML et CSS générés sont mises à jour en conséquence.
+
+### Mécanisme
+
+```
+public/logo.png          →  dist/assets/logo.a3f9c1b2.png
+public/hero.jpg          →  dist/assets/hero.d4e2f1a0.jpg
+public/icons/arrow.svg   →  dist/assets/icons/arrow.7b3c9e4d.svg
+```
+
+### Extensions concernées
+
+`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif`
+
+### Algorithme de hachage
+
+FNV-1a 32 bits appliqué sur les **octets bruts** du fichier → 8 caractères hexadécimaux.
+Le même algorithme déterministe est utilisé pour les IDs de scope CSS (`data-v`).
+
+### Réécriture des références
+
+Toutes les occurrences de `logo.png` dans les fichiers `.html` et `.css` générés sont remplacées par `logo.a3f9c1b2.png` avant l'écriture sur disque. Cela couvre :
+
+- Les attributs `src` et `href` dans le HTML
+- Les propriétés `url(...)` dans le CSS (images de fond, etc.)
+
+### Cache-busting parfait
+
+Le navigateur peut mettre les images en cache avec une durée de vie indéfinie (`Cache-Control: max-age=31536000, immutable`). Lorsque le contenu d'une image change, son nom de fichier change → le navigateur télécharge automatiquement la nouvelle version.
+
+### Toujours actif
+
+Le fingerprinting est activé **par défaut**, quelle que soit la valeur de `mode` dans `webc.toml`. Aucune configuration n'est nécessaire.
+
+---
+
+## Limites actuelles (v2.0.0)
 
 | Limite | Contournement |
 |---|---|
@@ -1417,6 +1865,7 @@ Si tout est valide, il affiche `✓ projet valide` et quitte avec code 0.
 | `@for key=` : clé doit être un chemin simple (`item`, `item.id`) — pas d'expressions JS arbitraires | Pré-calculer la clé dans l'état avant la boucle |
 | Routes paramétrées : pas de routes imbriquées ni de regexp custom | Utiliser des routes à un seul segment dynamique par chemin |
 | Objets littéraux interdits dans les expressions `on:click` (accolades ambiguës) | Définir un helper `window.mkObj = ...` dans `on:mount` |
+| `webc:img` : un seul module `imagesize` — formats AVIF et JXL non supportés pour la lecture de dimensions | Spécifier `width` et `height` manuellement pour ces formats |
 
 ---
 
@@ -1546,3 +1995,149 @@ JS, CSS et assets publics dans `dist/assets/` ; HTML à la racine de `dist/`. Le
 ### CSS public minifié en mode prod
 
 Les fichiers `.css` dans `public/` sont désormais traités par LightningCSS quand `mode = "prod"` est activé dans `webc.toml`.
+
+---
+
+## Nouveautés v1.3.0
+
+### Bloc `http { }` — fetch déclaratif
+
+`http { get: "/url"  into: var }` dans un composant : déclenche un `fetch()` JSON dans `DOMContentLoaded`.
+`loading` et `error` sont auto-injectés dans le state. Voir [Bloc `http { }`](#bloc-http----requêtes-http-déclaratives).
+
+### Bloc `head { }` — personnalisation du `<head>`
+
+`head { title "..." meta name="..." }` dans une page : override le titre et ajoute des meta tags.
+Voir [Bloc `head { }`](#bloc-head----personnalisation-du-head).
+
+### `$query.` — paramètres query string
+
+`{$query.search}`, `{$query.page}` etc. — accès aux paramètres d'URL ; tree-shaké si inutilisé.
+Voir [`$query.`](#query--paramètres-query-string).
+
+### `class:name={expr}` — classes CSS conditionnelles
+
+`class:active={isOpen}` — active/désactive la classe selon l'expression ; géré par `bindAttrs()`.
+Voir [`class:name`](#classname--classes-conditionnelles).
+
+### `on:event|debounce` — handlers debouncés
+
+`on:input|debounce={expr}` — le handler ne se déclenche qu'après 300 ms d'inactivité.
+Voir [`on:event|debounce`](#oneventdebounce--handlers-debouncés).
+
+### Correction : auto-injection `loading` / `error`
+
+Les variables `loading` et `error` n'ont plus besoin d'être déclarées manuellement dans `state` lorsqu'un composant contient un bloc `http {}` — le parser les injecte automatiquement.
+
+---
+
+## Nouveautés v1.4.0
+
+### `ref:name=true` — Références DOM directes
+
+`input ref:myInput=true` enregistre l'élément dans `refs['myInput']` via `DOMContentLoaded`. Accès direct sans `querySelector` ; utile pour la gestion du focus et les manipulations DOM impératives. Tree-shaké via le flag `has_refs`.
+Voir [`ref:name`](#refname--références-dom-directes).
+
+### `style:prop={expr}` — Styles inline dynamiques
+
+`div style:color={myColor}` émet `data-webcore-style-color="myColor"` ; `bindAttrs()` appelle `el.style.setProperty('color', evalCond(myColor, ...))`. Peut coexister avec `style="..."` statique et `class:` sur le même élément. Tree-shaké via le flag `has_style_binding`.
+Voir [`style:prop`](#styleprop--styles-inline-dynamiques).
+
+### Contenu par défaut des slots
+
+`slot sidebar { p "Contenu par défaut" }` dans un layout — utilisé si la page ne remplit pas le slot. Les slots non remplis étaient précédemment supprimés silencieusement. Le slot `content` continue d'utiliser le corps de la page.
+Voir [Contenu par défaut des slots](#contenu-par-défaut-des-slots).
+
+### `webc:transition="name"` — Animations CSS sur les blocs conditionnels
+
+`div webc:transition="fade" { ... }` ou `div webc:transition="slide" { ... }` — transitions intégrées sur les blocs `@if` : `fade` (opacité 0→1) et `slide` (translateY -10px→0). Le JS injecte le CSS et utilise `requestAnimationFrame` + `transitionend`. Tree-shaké via le flag `has_transition`.
+Voir [`webc:transition`](#webctransition--animations-css).
+
+---
+
+## Nouveautés v1.5.0
+
+### `webc:img` — Images optimisées (compile-time)
+
+`img webc:img src="/hero.png" alt="Hero"` compile vers `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">`. Les attributs `loading="lazy"` et `decoding="async"` sont injectés automatiquement. Les dimensions `width`/`height` sont lues dans `public/` à la compilation via le crate `imagesize` (aucun décodage d'image complet). Si `alt` est absent, le compilateur émet `warning[a11y]: <img> with webc:img is missing alt attribute`. L'attribut `webc:img` est supprimé de la sortie HTML. Zéro JS émis — transformation purement compile-time.
+Voir [`webc:img`](#webcimg--images-optimisées).
+
+### Fingerprinting des images
+
+À chaque `webc build`, toutes les images dans `public/` reçoivent un hash de contenu FNV-1a 32 bits intégré dans leur nom : `logo.png` → `logo.a3f9c1b2.png`. Extensions concernées : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif`. Toutes les références dans les `.html` et `.css` générés sont mises à jour automatiquement. Toujours actif — aucune configuration nécessaire. Avantage : cache-busting parfait, le navigateur peut mettre les images en cache indéfiniment.
+Voir [Fingerprinting des images](#fingerprinting-des-images).
+
+---
+
+## Nouveautés v2.0.0
+
+- **Signaux réactifs fins** — voir section [Signaux réactifs fins](#signaux-réactifs-fins)
+- **HMR** — `webc serve` surveille et recharge automatiquement
+- **Path traversal corrigé** — `webc serve` retourne 403 pour les URLs hors `dist/`
+- **Détection de cycles** — `webc check` signale les références circulaires
+- **Agrégation des erreurs** — toutes les erreurs de build sont reportées ensemble
+- **CSS nesting** — voir section [CSS nesting](#css-nesting)
+- **Rapport bundle** — voir section [Rapport d'analyse du bundle](#rapport-danalyse-du-bundle)
+- **Réorganisation interne du compilateur** — `src/` regroupé en `core/`, `parser/`, `codegen/{html,js}/`, `cli/` et `tests/` par domaine
+
+## Signaux réactifs fins
+
+`$effect(fn)` remplace le pattern v1.x `VARS.forEach(v=>S.on(v,fn))`.
+
+```webc
+component Counter {
+    state { count: Number = 0 }
+    view {
+        button on:click={count++} { "+" }
+        p "{count}"
+    }
+}
+```
+
+À la compilation, le JS généré utilise `$effect` :
+```js
+$effect(() => {
+    el.textContent = S.get('count');
+});
+```
+
+Le tracking est automatique : l'effet est ré-exécuté uniquement quand `count` change.
+Aucune liste manuelle de dépendances nécessaire.
+
+## CSS nesting
+
+Les règles imbriquées sont supportées dans les blocs `style {}` :
+
+```webc
+component Card {
+    view { div class="card" { p "content" } }
+    style {
+        .card {
+            padding: 1rem;
+            &:hover { background: #f5f5f5; }
+            & > p { color: #333; }
+        }
+    }
+}
+```
+
+Le sélecteur `&` est remplacé par le sélecteur parent scopé à la compilation.
+La sortie CSS générée est du CSS valide aplati.
+
+## Rapport d'analyse du bundle
+
+Après `webc build`, le compilateur affiche un tableau récapitulatif :
+
+```
+Bundle Analysis:
+  ✓ state            312 b
+  ✓ signals ($effect) 428 b
+  ✓ dom init          89 b
+  ✓ bindFor          512 b
+  - bindIf           (tree-shaken)
+  - http             (tree-shaken)
+  ✓ router           634 b
+Total JS: 1.98 KB
+```
+
+Les fonctionnalités non utilisées sont tree-shaquées automatiquement : `http`, `bindIf`, `bindFor`, etc. n'apparaissent dans le bundle que si le projet les utilise.

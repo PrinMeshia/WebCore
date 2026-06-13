@@ -1,8 +1,8 @@
 {
   "name": "webcore-language",
   "displayName": "WebCore Language Support",
-  "description": "Syntax highlighting for .webc files (WebCore DSL)",
-  "version": "0.1.0",
+  "description": "Syntax highlighting and language support for .webc files (WebCore DSL) — v2.0.0",
+  "version": "2.0.0",
   "publisher": "webcore",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],
@@ -24,6 +24,12 @@
         "language": "webc",
         "scopeName": "source.webc",
         "path": "./syntaxes/webc.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "webc",
+        "path": "./snippets/webc.json"
       }
     ]
   }

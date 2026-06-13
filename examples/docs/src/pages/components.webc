@@ -2,21 +2,22 @@ page "components" {
     div class="page-header" {
         h1 { "Component Model" }
         p class="page-sub" {
-            "Props · State · Computed · Lifecycle · Events · Routes"
+            "Props · State · Computed · Lifecycle · Inter-component events · Scoped CSS"
         }
     }
 
     section class="doc-section" {
         h2 { "Anatomy of a component" }
+        p { "Every block is optional except " code { "view" } " — the HTML tree is required." }
         pre class="code-block" {
 "component MyComponent \{
-    props    \{ ... \}      // pass-in values
+    props    \{ ... \}      // pass-in values (static or reactive)
     state    \{ ... \}      // local reactive state
-    computed \{ ... \}      // derived values
+    computed \{ ... \}      // derived values, re-evaluated before each bind
     on:mount   \{ ... \}    // runs at DOMContentLoaded
-    on:destroy \{ ... \}    // runs before navigation / unload
-    view     \{ ... \}      // required -- the HTML tree
-    style    \{ ... \}      // scoped CSS
+    on:destroy \{ ... \}    // runs before SPA navigation / window.beforeunload
+    view     \{ ... \}      // required — the HTML tree
+    style    \{ ... \}      // scoped CSS (FNV-1a data-v hash)
 \}"
         }
     }
@@ -24,8 +25,12 @@ page "components" {
     section class="doc-section" {
         h2 { "Props" }
         p {
-            "Props are values passed into a component at call site. "
-            "They accept static strings or dynamic expressions."
+            "Props are values passed at call site. "
+            "Static props ("
+            code { "name=\"value\"" }
+            ") are substituted at compile time. Dynamic props ("
+            code { "name=\{expr\}" }
+            ") compile to reactive spans."
         }
         pre class="code-block" {
 "component Badge \{
@@ -33,42 +38,30 @@ page "components" {
     view  \{ span class=\{color\} \"Status: \{label\}\" \}
 \}
 
-// Static props
+// Static props — substituted at compile time
 Badge label=\"Active\" color=\"green\" \{\}
 
-// Dynamic props -- reactive
+// Dynamic props — reactive at runtime
 Badge label=\{statusMsg\} color=\{statusColor\} \{\}"
         }
         p {
-            "A static prop ("
-            code { "name=\"value\"" }
-            ") is substituted at compile time. "
-            "A dynamic prop ("
-            code { "name=\{expr\}" }
-            ") compiles to a reactive interpolation span."
+            "Compound expressions using a prop name also work:"
         }
-        p { "Compound expressions using a prop name also work (v1.1.0):" }
         pre class="code-block" {
 "component StepCounter \{
     props \{ step: Number \}
     view \{
-        // \{step + 1\} — prop used inside a compound expression
-        p \"Next step: \{step + 1\}\"
-        // class=\{color\} — prop used as a dynamic attribute
-        span class=\{color\} \"Status\"
+        p \"Next: \{step + 1\}\"        // compound expression
+        span class=\{color\} \"Status\" // prop as dynamic attribute
     \}
 \}
-
-// Call site
-StepCounter step=\"2\" color=\"green\" \{\}
-// Renders: \"Next step: (2) + 1\" (evaluated at runtime)
-//          <span class=\"green\">"
+StepCounter step=\"2\" color=\"green\" \{\}"
         }
     }
 
     section class="doc-section" {
         h2 { "State" }
-        p { "Local reactive state. Any assignment triggers a DOM update." }
+        p { "Local reactive state. Any assignment triggers a DOM update for bindings that depend on it." }
         pre class="code-block" {
 "state \{
     count:  Number  = 0
@@ -77,7 +70,7 @@ StepCounter step=\"2\" color=\"green\" \{\}
     items:  List    = []
 \}"
         }
-        p {
+        div class="callout" {
             "Types: "
             code { "Number" }
             " · "
@@ -86,6 +79,7 @@ StepCounter step=\"2\" color=\"green\" \{\}
             code { "Boolean" }
             " · "
             code { "List" }
+            ". The type annotation determines the SSG pre-render strategy."
         }
     }
 
@@ -104,16 +98,17 @@ StepCounter step=\"2\" color=\"green\" \{\}
     \}
     computed \{
         fullName = firstName + \" \" + lastName
-        initials = firstName + \".\" + lastName
+        initials = firstName[0] + \".\" + lastName[0]
     \}
     on:mount \{ firstName = \"Marie\" \}
     view \{ p \"Hello \{fullName\} (\{initials\})\" \}
 \}"
         }
-        p {
+        div class="callout-tip" {
+            strong { "No reactive loops: " }
             "Computed vars use "
             code { "S.setQ()" }
-            " (silent setter) — no listener triggers, no reactive loops."
+            " (silent setter) — state is updated without triggering listeners. Safe to derive from the same vars they depend on, with zero risk of infinite cycles."
         }
     }
 
@@ -121,15 +116,18 @@ StepCounter step=\"2\" color=\"green\" \{\}
         h2 { "Lifecycle — on:mount" }
         p {
             code { "on:mount \{ \}" }
-            " runs once in "
+            " runs once at "
             code { "DOMContentLoaded" }
-            ", after the runtime is ready. Wrapped in an IIFE for variable isolation."
+            ", after the reactive runtime is ready. Wrapped in an IIFE for variable isolation."
         }
         pre class="code-block" {
 "component Clock \{
     state \{ time: String = \"\" \}
     on:mount \{
-        const tick = () => \{ S.set(\"time\", new Date().toLocaleTimeString()); bind(); \};
+        const tick = () => \{
+            S.set(\"time\", new Date().toLocaleTimeString());
+            bind();
+        \};
         tick();
         window.__clockId = setInterval(tick, 1000);
     \}
@@ -148,20 +146,20 @@ StepCounter step=\"2\" color=\"green\" \{\}
             ". Use it to clean up timers, cancel requests, or deregister listeners."
         }
         pre class="code-block" {
-"// Runtime output (tree-shaken in)
+"// Compiled output (tree-shaken in only when used)
 const DESTROY_HOOKS = [
     () => \{ clearInterval(window.__clockId); \}
 ];
 function runDestroyHooks() \{ DESTROY_HOOKS.forEach(h => h()); \}
 window.addEventListener('beforeunload', runDestroyHooks);"
         }
-        p {
+        div class="callout-tip" {
             code { "DESTROY_HOOKS" }
             " and "
             code { "runDestroyHooks" }
             " are emitted only when at least one "
             code { "on:destroy" }
-            " block is present."
+            " block is present in the document — full tree-shaking."
         }
     }
 
@@ -169,7 +167,9 @@ window.addEventListener('beforeunload', runDestroyHooks);"
         h2 { "Inter-component events" }
         p {
             code { "emit(\"name\", data)" }
-            " dispatches a CustomEvent on document. Listen with "
+            " dispatches a "
+            code { "CustomEvent" }
+            " on document. Listen with "
             code { "on:name=\{handler\}" }
             " at the call site."
         }
@@ -182,16 +182,18 @@ component Notifier \{
     \}
 \}
 
-// Listening to events at call site
+// Call site — subscribe to events
 page \"home\" \{
     Notifier on:ping=\{total += 1\} on:reset=\{total = 0\} \{\}
     p \"Received \{total\} pings\"
 \}"
         }
-        p {
-            "Events are global (document). Payload accessible via "
+        div class="callout" {
+            "Events are dispatched on "
+            code { "document" }
+            " — they are global. The payload is accessible via "
             code { "e.detail" }
-            " in handler."
+            " in the handler expression."
         }
     }
 
@@ -200,7 +202,9 @@ page \"home\" \{
         p {
             "Every component gets a unique "
             code { "data-v" }
-            " attribute (FNV-1a hash). Media queries inside "
+            " attribute computed as a deterministic FNV-1a hash of the component name. "
+            code { "@media" }
+            " queries inside "
             code { "style \{ \}" }
             " are scoped automatically."
         }
@@ -221,7 +225,7 @@ page \"home\" \{
 
     section class="doc-section" {
         h2 { "Live demo" }
-        p { "The counter below is a live WebCore component with state, computed, and @if." }
+        p { "The counter below is a live WebCore component — state, computed, and " code { "@if" } " directive all active." }
         LiveCounter {}
     }
 }

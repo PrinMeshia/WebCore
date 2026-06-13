@@ -1,0 +1,17 @@
+layout MainLayout {
+  header {
+    Brand
+    nav {
+      a on:click={ webcore_navigate(root) } "Accueil"
+      a on:click={ webcore_navigate(/about) } "À propos"
+      a on:click={ webcore_navigate(/counter) } "Compteur"
+    }
+  }
+  main {
+    slot
+  }
+
+  footer {
+    text "© 2025 WebCore"
+  }
+}

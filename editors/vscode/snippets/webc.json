@@ -1,0 +1,261 @@
+{
+  "WebCore Component": {
+    "prefix": "component",
+    "body": [
+      "component ${1:MyComponent} {",
+      "\tprops {",
+      "\t\t${2:name}: ${3:String}",
+      "\t}",
+      "\tstate {",
+      "\t\t${4:count}: Number = 0",
+      "\t}",
+      "\tview {",
+      "\t\t${0}",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore component scaffold"
+  },
+  "WebCore Page": {
+    "prefix": "page",
+    "body": [
+      "page \"${1:home}\" {",
+      "\thead {",
+      "\t\ttitle \"${2:Page Title}\"",
+      "\t}",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore page with head block"
+  },
+  "WebCore Layout": {
+    "prefix": "layout",
+    "body": [
+      "layout ${1:MainLayout} {",
+      "\theader {",
+      "\t\t${2}",
+      "\t}",
+      "\tmain {",
+      "\t\tslot content",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore layout with named slot"
+  },
+  "WebCore App": {
+    "prefix": "app",
+    "body": [
+      "app ${1:MyApp} {",
+      "\tlayout: ${2:MainLayout}",
+      "\troutes {",
+      "\t\t\"/\": ${3:HomePage}",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore app declaration"
+  },
+  "@for loop": {
+    "prefix": "@for",
+    "body": [
+      "@for ${1:item} in ${2:items} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore for loop"
+  },
+  "@for loop with key": {
+    "prefix": "@fork",
+    "body": [
+      "@for ${1:item} in ${2:items} key={${1}.${3:id}} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore for loop with key (DOM diffing)"
+  },
+  "@for loop with index": {
+    "prefix": "@fori",
+    "body": [
+      "@for ${1:item}, ${2:i} in ${3:items} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore for loop with index"
+  },
+  "@if block": {
+    "prefix": "@if",
+    "body": [
+      "@if ${1:condition} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore conditional block"
+  },
+  "@if/@else block": {
+    "prefix": "@ife",
+    "body": [
+      "@if ${1:condition} {",
+      "\t${2}",
+      "} @else {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore if/else block"
+  },
+  "@switch block": {
+    "prefix": "@switch",
+    "body": [
+      "@switch ${1:value} {",
+      "\t@case ${2:\"a\"} {",
+      "\t\t${3}",
+      "\t}",
+      "\t@default {",
+      "\t\t${0}",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore switch block"
+  },
+  "http block": {
+    "prefix": "http",
+    "body": [
+      "http {",
+      "\tget: \"${1:/api/data}\"",
+      "\tinto: ${2:data}",
+      "}"
+    ],
+    "description": "WebCore HTTP fetch block"
+  },
+  "state block": {
+    "prefix": "state",
+    "body": [
+      "state {",
+      "\t${1:count}: ${2:Number} = ${3:0}",
+      "}"
+    ],
+    "description": "WebCore state block"
+  },
+  "computed block": {
+    "prefix": "computed",
+    "body": [
+      "computed {",
+      "\t${1:doubled} = ${2:count * 2}",
+      "}"
+    ],
+    "description": "WebCore computed/derived state"
+  },
+  "style block with nesting": {
+    "prefix": "style",
+    "body": [
+      "style {",
+      "\t.${1:container} {",
+      "\t\t${2:padding}: ${3:1rem};",
+      "\t\t&:hover {",
+      "\t\t\t${0}",
+      "\t\t}",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore style block with CSS nesting"
+  },
+  "webc:img": {
+    "prefix": "wimg",
+    "body": [
+      "img webc:img src=\"${1:/image.png}\" alt=\"${2:description}\""
+    ],
+    "description": "Optimized image (lazy load + dimensions + fingerprinting)"
+  },
+  "webc:transition": {
+    "prefix": "wtrans",
+    "body": [
+      "@if ${1:condition} {",
+      "\tdiv webc:transition=\"${2|fade,slide|}\" {",
+      "\t\t${0}",
+      "\t}",
+      "}"
+    ],
+    "description": "WebCore CSS transition on conditional block"
+  },
+  "ref: attribute": {
+    "prefix": "ref",
+    "body": [
+      "ref:${1:name}=true"
+    ],
+    "description": "WebCore direct DOM reference"
+  },
+  "style: binding": {
+    "prefix": "style:",
+    "body": [
+      "style:${1:color}={${2:myColor}}"
+    ],
+    "description": "WebCore dynamic inline style binding"
+  },
+  "class: binding": {
+    "prefix": "class:",
+    "body": [
+      "class:${1:active}={${2:isActive}}"
+    ],
+    "description": "WebCore conditional class binding"
+  },
+  "on:mount lifecycle": {
+    "prefix": "onmount",
+    "body": [
+      "on:mount {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore mount lifecycle hook"
+  },
+  "on:destroy lifecycle": {
+    "prefix": "ondestroy",
+    "body": [
+      "on:destroy {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "WebCore destroy lifecycle hook"
+  },
+  "slot with default content": {
+    "prefix": "slot",
+    "body": [
+      "slot ${1:name} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "Slot with default content (in layout) or slot provision (in page)"
+  },
+  "t() i18n": {
+    "prefix": "t(",
+    "body": [
+      "t(\"${1:key}\")"
+    ],
+    "description": "i18n translation key lookup"
+  },
+  "t() with param": {
+    "prefix": "tp(",
+    "body": [
+      "t(\"${1:key}\", ${2:param})"
+    ],
+    "description": "i18n translation with positional param or plural count"
+  },
+  "$store access": {
+    "prefix": "$store",
+    "body": [
+      "\\$store.${1:key}"
+    ],
+    "description": "Access global store value"
+  },
+  "$route param": {
+    "prefix": "$route",
+    "body": [
+      "\\$route.${1:param}"
+    ],
+    "description": "Access route parameter (e.g. /post/:slug → $route.slug)"
+  },
+  "$query param": {
+    "prefix": "$query",
+    "body": [
+      "\\$query.${1:param}"
+    ],
+    "description": "Access URL query string parameter"
+  }
+}
