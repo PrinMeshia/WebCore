@@ -14,6 +14,11 @@
 //! 5. Generate `theme.css` + scoped component CSS
 //! 6. Write everything to `dist/`
 
+// No panic on user input: every `.unwrap()` outside tests must be replaced by
+// error propagation, a guarded alternative, or an `.expect()` whose message
+// documents why it cannot fail (e.g. `write!` into a `String`).
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
+
 mod cli;
 pub(crate) mod codegen {
     pub(crate) mod attr_names;

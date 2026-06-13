@@ -2,7 +2,7 @@
 
 use crate::core::ast;
 use crate::parser;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -64,14 +64,14 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
     let mut document = ast::WebCoreDocument {
         app: None,
         store: Vec::new(),
-        locales: HashMap::new(),
+        locales: BTreeMap::new(),
         default_locale: default_locale.to_string(),
         wasm_module: None,
-        layouts: HashMap::new(),
-        pages: HashMap::new(),
-        components: HashMap::new(),
+        layouts: BTreeMap::new(),
+        pages: BTreeMap::new(),
+        components: BTreeMap::new(),
         imports: Vec::new(),
-        data_imports: HashMap::new(),
+        data_imports: BTreeMap::new(),
     };
 
     // Load app.webc first
@@ -143,7 +143,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
     // Load locale files from locales/ directory (flat TOML: key = "value")
     load_webc_dir(Path::new("locales"), "locales/", "toml", |path, source| {
         if let Some(code) = path.file_stem().and_then(|s| s.to_str()) {
-            let entries: HashMap<String, String> = toml::from_str(source)
+            let entries: BTreeMap<String, String> = toml::from_str(source)
                 .map_err(|e| format!("Failed to parse locale {}: {e}", path.display()))?;
             document.locales.insert(code.to_string(), entries);
             println!("🌍 Loaded locale: {code}");

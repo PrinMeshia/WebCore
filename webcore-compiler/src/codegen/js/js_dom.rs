@@ -116,10 +116,8 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                                 f.has_query_params = true;
                             }
                         }
-                        AttributeValue::String(s) => {
-                            if s.contains("$query.") {
-                                f.has_query_params = true;
-                            }
+                        AttributeValue::String(s) if s.contains("$query.") => {
+                            f.has_query_params = true;
                         }
                         _ => {}
                     }

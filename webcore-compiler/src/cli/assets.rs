@@ -1,7 +1,7 @@
 //! Asset pipeline: hashing, fingerprinting, SRI, copy, and HTML patching.
 
 use crate::core::css_processor;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -31,7 +31,11 @@ pub(super) fn sri_hash(data: &[u8]) -> String {
 /// Returns `(fnv_hex, Some(sri_string))` or `(fnv_hex, None)`.
 pub(super) fn hash_asset(data: &[u8], compute_sri: bool) -> (String, Option<String>) {
     let fnv = fnv1a_hash(data);
-    let sri = if compute_sri { Some(sri_hash(data)) } else { None };
+    let sri = if compute_sri {
+        Some(sri_hash(data))
+    } else {
+        None
+    };
     (fnv, sri)
 }
 
@@ -44,13 +48,13 @@ const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", 
 pub(crate) fn fingerprint_images(
     public_dir: &Path,
     assets_dir: &Path,
-) -> Result<HashMap<String, String>, String> {
-    let mut map: HashMap<String, String> = HashMap::new();
+) -> Result<BTreeMap<String, String>, String> {
+    let mut map: BTreeMap<String, String> = BTreeMap::new();
 
     fn walk(
         dir: &Path,
         assets_dir: &Path,
-        map: &mut HashMap<String, String>,
+        map: &mut BTreeMap<String, String>,
     ) -> Result<(), String> {
         let entries =
             fs::read_dir(dir).map_err(|e| format!("Failed to read {}: {e}", dir.display()))?;
@@ -96,7 +100,7 @@ pub(crate) fn fingerprint_images(
 /// Post-process all `.html` files under `dist_dir` and all `.css` files under
 /// `dist_dir/assets/`, replacing `/assets/<original>` references with
 /// `/assets/<hashed>`.
-pub(crate) fn rewrite_asset_refs(dist_dir: &Path, map: &HashMap<String, String>) {
+pub(crate) fn rewrite_asset_refs(dist_dir: &Path, map: &BTreeMap<String, String>) {
     // Rewrite HTML files (any depth)
     rewrite_in_dir(dist_dir, "html", map, false);
     // Rewrite CSS files in dist/assets/
@@ -106,7 +110,7 @@ pub(crate) fn rewrite_asset_refs(dist_dir: &Path, map: &HashMap<String, String>)
     }
 }
 
-fn rewrite_in_dir(dir: &Path, ext: &str, map: &HashMap<String, String>, css_mode: bool) {
+fn rewrite_in_dir(dir: &Path, ext: &str, map: &BTreeMap<String, String>, css_mode: bool) {
     let rewrite_file = |p: &Path| -> std::io::Result<()> {
         if p.extension().and_then(|e| e.to_str()) == Some(ext) {
             if let Ok(content) = fs::read_to_string(p) {

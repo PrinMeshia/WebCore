@@ -7,7 +7,7 @@ mod elements;
 use crate::core::ast::{Span, WebCoreDocument};
 use pest::Parser;
 use pest_derive::Parser;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
@@ -45,10 +45,7 @@ impl ParseError {
 }
 
 fn use_color() -> bool {
-    std::env::var("NO_COLOR").is_err()
-        && std::env::var("TERM")
-            .map(|t| t != "dumb")
-            .unwrap_or(true)
+    std::env::var("NO_COLOR").is_err() && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
 }
 
 /// Extract the first `expected …` clause from a Pest error message.
@@ -134,14 +131,14 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
     let mut document = WebCoreDocument {
         app: None,
         store: Vec::new(),
-        locales: HashMap::new(),
+        locales: BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
-        layouts: HashMap::new(),
-        pages: HashMap::new(),
-        components: HashMap::new(),
+        layouts: BTreeMap::new(),
+        pages: BTreeMap::new(),
+        components: BTreeMap::new(),
         imports: Vec::new(),
-        data_imports: HashMap::new(),
+        data_imports: BTreeMap::new(),
     };
 
     for pair in pairs {
@@ -184,7 +181,9 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                         } else {
                             path_raw
                         };
-                        document.imports.push(crate::core::ast::ImportDecl { name, path });
+                        document
+                            .imports
+                            .push(crate::core::ast::ImportDecl { name, path });
                     }
                     _ => {}
                 }

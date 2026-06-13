@@ -104,8 +104,7 @@ pub(super) fn parse_simple_assign(expr: &str) -> Option<(String, String)> {
             if !prev_is_op && !next_is_eq {
                 let var_name = expr[..i].trim();
                 let value = expr[i + 1..].trim();
-                if !var_name.is_empty()
-                    && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                if !var_name.is_empty() && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 {
                     return Some((var_name.to_string(), value.to_string()));
                 }
@@ -131,9 +130,8 @@ pub(super) fn replace_utils_short(expr: &str) -> String {
 /// The sentinel approach prevents local-var replacement from touching store references.
 /// The two hardcoded regexes are compiled once (OnceLock) for the process lifetime.
 pub(super) fn replace_store_and_local(expr: &str, vars: &CompiledVars) -> String {
-    let re_store = RE_STORE.get_or_init(|| {
-        Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)").expect("hardcoded regex")
-    });
+    let re_store = RE_STORE
+        .get_or_init(|| Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)").expect("hardcoded regex"));
     let re_sent = RE_SENT.get_or_init(|| {
         Regex::new(r"__STORE_([a-zA-Z_][a-zA-Z0-9_]*)__").expect("hardcoded regex")
     });

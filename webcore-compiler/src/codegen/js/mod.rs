@@ -31,8 +31,8 @@ mod js_dom;
 mod js_events;
 mod js_runtime;
 
-use crate::core::ast::WebCoreDocument;
 use crate::codegen::html::HandlerMapping;
+use crate::core::ast::WebCoreDocument;
 use js_dom::{
     collect_component_event_listeners, collect_on_destroy_bodies, collect_on_mount_bodies,
     detect_features, rebind_seq,
@@ -117,8 +117,8 @@ pub(crate) fn generate_runtime_js_with_vars(
     // for every expression in handlers, computed vars, listeners, etc.
     let compiled_vars = CompiledVars::new(state_vars);
 
-    let mut unique_handlers: std::collections::HashMap<&str, &HandlerMapping> =
-        std::collections::HashMap::new();
+    let mut unique_handlers: std::collections::BTreeMap<&str, &HandlerMapping> =
+        std::collections::BTreeMap::new();
     for handler in handlers {
         unique_handlers.insert(&handler.id, handler);
     }
@@ -130,8 +130,10 @@ pub(crate) fn generate_runtime_js_with_vars(
     let mut computed_entries: Vec<String> = Vec::new();
     for component in document.components.values() {
         for cv in &component.computed {
-            let compiled =
-                replace_utils_short(&js_events::replace_store_and_local(&cv.expr, &compiled_vars));
+            let compiled = replace_utils_short(&js_events::replace_store_and_local(
+                &cv.expr,
+                &compiled_vars,
+            ));
             computed_entries.push(format!("{{name:'{}',fn:()=>{}}}", cv.name, compiled));
         }
     }
@@ -166,19 +168,21 @@ pub(crate) fn generate_runtime_js_with_vars(
 
     // ── Data imports — emit as initial state before other state vars ─────────
     for (name, json) in &document.data_imports {
-        writeln!(js, "S.setQ({:?},{});", name, json).unwrap();
+        writeln!(js, "S.setQ({:?},{});", name, json).expect("write! to String is infallible");
     }
 
     // ── State initialisation ─────────────────────────────────────────────────
     for component in document.components.values() {
         for state_var in &component.state {
             let value = js_default_value(&state_var.type_, state_var.default_value.as_deref());
-            writeln!(js, "S.set('{}',{});", state_var.name, value).unwrap();
+            writeln!(js, "S.set('{}',{});", state_var.name, value)
+                .expect("write! to String is infallible");
         }
     }
     for store_var in &document.store {
         let value = js_default_value(&store_var.type_, store_var.default_value.as_deref());
-        writeln!(js, "STORE.set('{}',{});", store_var.name, value).unwrap();
+        writeln!(js, "STORE.set('{}',{});", store_var.name, value)
+            .expect("write! to String is infallible");
     }
 
     // ── VARS / STORE_VARS (only when needed by reactive binding) ─────────────
@@ -190,7 +194,8 @@ pub(crate) fn generate_runtime_js_with_vars(
 
     // ── Computed derived state ────────────────────────────────────────────────
     if has_computed {
-        writeln!(js, "const COMPUTED=[{}];", computed_entries.join(",")).unwrap();
+        writeln!(js, "const COMPUTED=[{}];", computed_entries.join(","))
+            .expect("write! to String is infallible");
         js.push_str("const rebindComputed=()=>COMPUTED.forEach(c=>S.setQ(c.name,c.fn()));\n\n");
     }
 
@@ -209,13 +214,14 @@ pub(crate) fn generate_runtime_js_with_vars(
             })
             .collect();
         locale_entries.sort();
-        writeln!(js, "const LOCALES={{{}}};", locale_entries.join(",")).unwrap();
+        writeln!(js, "const LOCALES={{{}}};", locale_entries.join(","))
+            .expect("write! to String is infallible");
         writeln!(
             js,
             "let LOCALE=\"{}\";",
             escape_js_str(&document.default_locale)
         )
-        .unwrap();
+        .expect("write! to String is infallible");
         // t(key) — simple lookup
         // t(key, n: number) — plural: looks for key_one / key_other, replaces {{count}}
         // t(key, arg) — positional: replaces {{0}} in the translation string
@@ -224,7 +230,7 @@ pub(crate) fn generate_runtime_js_with_vars(
             js,
             "const setLocale=l=>{{if(LOCALES[l]){{LOCALE=l;{all_rebinds}}}}};\n\n"
         )
-        .unwrap();
+        .expect("write! to String is infallible");
     }
 
     // ── QUERY_PARAMS Proxy (tree-shaken: only when $query. used) ─────────────
@@ -252,7 +258,8 @@ pub(crate) fn generate_runtime_js_with_vars(
             continue;
         }
         let compiled = compile_expression_full(&handler.expression, &compiled_vars);
-        writeln!(js, "{}(event){{{}}},", handler.id, compiled).unwrap();
+        writeln!(js, "{}(event){{{}}},", handler.id, compiled)
+            .expect("write! to String is infallible");
     }
     js.push_str("};\n\n");
 
@@ -274,7 +281,7 @@ pub(crate) fn generate_runtime_js_with_vars(
             write!(js,
                 "document.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{{const e=el.dataset.webcoreInterpolation,u=()=>{{{}el.textContent=String(evalCond(e)??'')}};$effect(u)}})}};\n\n",
                 recompute_in_u
-            ).unwrap();
+            ).expect("write! to String is infallible");
         } else {
             // only computed, no interpolations
             js.push_str("const bind=()=>rebindComputed();\n\n");
@@ -287,7 +294,8 @@ pub(crate) fn generate_runtime_js_with_vars(
             .iter()
             .map(|b| format!("()=>{{\n{}\n}}", b.trim()))
             .collect();
-        writeln!(js, "const DESTROY_HOOKS=[{}];", bodies.join(",")).unwrap();
+        writeln!(js, "const DESTROY_HOOKS=[{}];", bodies.join(","))
+            .expect("write! to String is infallible");
         js.push_str("const runDestroyHooks=()=>DESTROY_HOOKS.forEach(f=>f());\n\n");
     }
 
@@ -316,7 +324,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                     escape_js_str(&file),
                     params_js.join(",")
                 )
-                .unwrap();
+                .expect("write! to String is infallible");
             }
             routes_js.push_str("];\n");
             js.push_str(&routes_js);
@@ -335,12 +343,12 @@ pub(crate) fn generate_runtime_js_with_vars(
         } else {
             "toFile(p)"
         };
-        writeln!(js, "const file={file_expr};").unwrap();
+        writeln!(js, "const file={file_expr};").expect("write! to String is infallible");
         js.push_str("try{const html=await(await fetch('/'+file)).text();\n");
         js.push_str("const doc=new DOMParser().parseFromString(html,'text/html');\n");
         js.push_str("const main=doc.querySelector('main');\n");
         js.push_str("if(main)document.querySelector('main').replaceWith(main);\n");
-        write!(js, "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{all_rebinds};window.__wcAfterNav?.();}}catch(e){{location.href='/'+file}}}};\n\n").unwrap();
+        write!(js, "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{all_rebinds};window.__wcAfterNav?.();}}catch(e){{location.href='/'+file}}}};\n\n").expect("write! to String is infallible");
         js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
     }
 
@@ -363,7 +371,8 @@ pub(crate) fn generate_runtime_js_with_vars(
         js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest('[data-webcore-e]');if(!el||!H[el.id])return;const dwe=el.dataset.webcoreE;if(dwe!==t&&!dwe.startsWith(t+'|'))return;const mods=dwe.includes('|')?dwe.split('|').slice(1):[];if(mods.includes('self')&&e.target!==el)return;if(mods.includes('stop'))e.stopPropagation();if(p||mods.includes('prevent'))e.preventDefault();if(mods.includes('once')){if(el.dataset.webcoreOnced)return;el.dataset.webcoreOnced='1';}H[el.id](e);});\n");
         for et in &non_debounce_event_types {
             let prevent = matches!(et.as_str(), "click" | "submit");
-            writeln!(js, "D('{}',{});", et, if prevent { 1 } else { 0 }).unwrap();
+            writeln!(js, "D('{}',{});", et, if prevent { 1 } else { 0 })
+                .expect("write! to String is infallible");
         }
         js.push('\n');
     }
@@ -388,7 +397,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                 "Object.assign(globalThis,{{{}}});",
                 global_exports.join(",")
             )
-            .unwrap();
+            .expect("write! to String is infallible");
             js.push('\n');
         }
     }
@@ -419,14 +428,15 @@ pub(crate) fn generate_runtime_js_with_vars(
     // Swap deferred stylesheet (data-webcore-defer) to media="all" — CSP-safe alternative to onload=
     let css_defer_swap =
         ";document.querySelectorAll('link[data-webcore-defer]').forEach(l=>l.media='all')";
-    write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}{css_defer_swap}").unwrap();
+    write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}{css_defer_swap}").expect("write! to String is infallible");
     for body in &mount_bodies {
-        write!(js, ";(()=>{{\n{}\n}})()", body.trim()).unwrap();
+        write!(js, ";(()=>{{\n{}\n}})()", body.trim()).expect("write! to String is infallible");
     }
     // ── $watch hooks ─────────────────────────────────────────────────────────
     for comp in document.components.values() {
         for hook in &comp.watch_hooks {
-            write!(js, ";S.on('{}',{}=>{{{}}})", hook.var, hook.var, hook.body).unwrap();
+            write!(js, ";S.on('{}',{}=>{{{}}})", hook.var, hook.var, hook.body)
+                .expect("write! to String is infallible");
         }
     }
     for listener in &comp_listeners {
@@ -436,7 +446,7 @@ pub(crate) fn generate_runtime_js_with_vars(
             ";document.addEventListener('{}',e=>{{{}}})",
             listener.event_name, compiled
         )
-        .unwrap();
+        .expect("write! to String is infallible");
     }
     // ── Debounce event listeners ──────────────────────────────────────────────
     // Wire up debounce handlers: find the element by id and attach a debounced listener.
@@ -473,7 +483,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                 compiled,
                 if all_rebinds.is_empty() { String::new() } else { format!(";{all_rebinds}") },
                 delay_ms
-            ).unwrap();
+            ).expect("write! to String is infallible");
         }
     }
     // ── HTTP fetch blocks ─────────────────────────────────────────────────────
@@ -493,7 +503,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                     escape_js_str(into_var),
                     rb,
                     rb,
-                ).unwrap();
+                ).expect("write! to String is infallible");
             }
         }
     }

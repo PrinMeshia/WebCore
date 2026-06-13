@@ -49,7 +49,7 @@ pub(super) fn replace_identifier(src: &str, name: &str, replacement: &str) -> St
 /// or `None` if the expression is unchanged.
 pub(super) fn substitute_in_expr_combined(
     trimmed: &str,
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
+    combined: &std::collections::BTreeMap<&str, (bool, &str)>,
 ) -> Option<(bool, String)> {
     // Direct exact match — cheapest path
     if let Some(&(is_static, val)) = combined.get(trimmed) {
@@ -79,7 +79,7 @@ pub(super) fn substitute_in_expr_combined(
 /// Apply prop substitution to attribute values using the combined prop map.
 pub(super) fn substitute_props_in_attrs_combined(
     attributes: &[Attribute],
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
+    combined: &std::collections::BTreeMap<&str, (bool, &str)>,
 ) -> Vec<Attribute> {
     attributes
         .iter()
@@ -107,11 +107,11 @@ pub(super) fn substitute_props_in_attrs_combined(
 /// Avoids two separate O(n_props) iterations per expression for every element.
 pub(super) fn substitute_props(
     elements: &[Element],
-    static_props: &std::collections::HashMap<String, String>,
-    dynamic_props: &std::collections::HashMap<String, String>,
+    static_props: &std::collections::BTreeMap<String, String>,
+    dynamic_props: &std::collections::BTreeMap<String, String>,
 ) -> Vec<Element> {
     // Build combined map once for the entire subtree traversal.
-    let combined: std::collections::HashMap<&str, (bool, &str)> = static_props
+    let combined: std::collections::BTreeMap<&str, (bool, &str)> = static_props
         .iter()
         .map(|(k, v)| (k.as_str(), (true, v.as_str())))
         .chain(
@@ -128,7 +128,7 @@ pub(super) fn substitute_props(
 
 pub(super) fn substitute_props_elem_combined(
     element: &Element,
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
+    combined: &std::collections::BTreeMap<&str, (bool, &str)>,
 ) -> Element {
     match element {
         Element::Interpolation(expr, span) => {
@@ -216,7 +216,7 @@ pub(super) fn substitute_props_elem_combined(
 
 pub(super) fn elements_combined(
     elements: &[Element],
-    combined: &std::collections::HashMap<&str, (bool, &str)>,
+    combined: &std::collections::BTreeMap<&str, (bool, &str)>,
 ) -> Vec<Element> {
     elements
         .iter()

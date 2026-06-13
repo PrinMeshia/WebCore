@@ -131,11 +131,12 @@ fn warn_unknown_css_prop(prop_name: &str, context: &str) {
 
 fn emit_keyframes(name: &str, steps: &[KeyframeStep]) -> String {
     let mut css = String::new();
-    writeln!(css, "@keyframes {name} {{").unwrap();
+    writeln!(css, "@keyframes {name} {{").expect("write! to String is infallible");
     for step in steps {
-        writeln!(css, "  {} {{", step.selector).unwrap();
+        writeln!(css, "  {} {{", step.selector).expect("write! to String is infallible");
         for prop in &step.properties {
-            writeln!(css, "    {}: {};", prop.name, prop.value).unwrap();
+            writeln!(css, "    {}: {};", prop.name, prop.value)
+                .expect("write! to String is infallible");
         }
         css.push_str("  }\n");
     }
@@ -149,12 +150,13 @@ fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
 
     // Only emit parent block when it has direct properties
     if !rule.properties.is_empty() {
-        writeln!(css, "{indent}{scoped_selector} {{").unwrap();
+        writeln!(css, "{indent}{scoped_selector} {{").expect("write! to String is infallible");
         for prop in &rule.properties {
             warn_unknown_css_prop(&prop.name, &format!("[{}]", scope_id));
-            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value).unwrap();
+            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value)
+                .expect("write! to String is infallible");
         }
-        writeln!(css, "{indent}}}").unwrap();
+        writeln!(css, "{indent}}}").expect("write! to String is infallible");
     }
 
     // Flatten nested rules: `&:hover` → `<scoped_selector>:hover`
@@ -165,12 +167,13 @@ fn emit_scoped_rule(rule: &StyleRule, scope_id: &str, indent: &str) -> String {
         } else {
             format!("{} {}", scoped_selector, nested.selector)
         };
-        writeln!(css, "{indent}{flat_selector} {{").unwrap();
+        writeln!(css, "{indent}{flat_selector} {{").expect("write! to String is infallible");
         for prop in &nested.properties {
             warn_unknown_css_prop(&prop.name, &format!("[{}]", scope_id));
-            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value).unwrap();
+            writeln!(css, "{}  {}: {};", indent, prop.name, prop.value)
+                .expect("write! to String is infallible");
         }
-        writeln!(css, "{indent}}}").unwrap();
+        writeln!(css, "{indent}}}").expect("write! to String is infallible");
     }
 
     css
@@ -186,7 +189,7 @@ pub(crate) fn generate_scoped_css(component: &Component) -> String {
     let scope_id = generate_scope_id(&component.name);
     let mut css = String::new();
 
-    writeln!(css, "/* Component: {} */", component.name).unwrap();
+    writeln!(css, "/* Component: {} */", component.name).expect("write! to String is infallible");
 
     for item in &component.style {
         match item {
@@ -194,7 +197,7 @@ pub(crate) fn generate_scoped_css(component: &Component) -> String {
                 css.push_str(&emit_scoped_rule(rule, &scope_id, ""));
             }
             StyleItem::Media { query, rules, .. } => {
-                writeln!(css, "@media {query} {{").unwrap();
+                writeln!(css, "@media {query} {{").expect("write! to String is infallible");
                 for rule in rules {
                     css.push_str(&emit_scoped_rule(rule, &scope_id, "  "));
                 }
@@ -351,27 +354,27 @@ pub(crate) fn generate_theme_css(theme: &Theme) -> String {
 
     // Generate color variables
     for (key, value) in &theme.colors {
-        writeln!(css, "  --color-{key}: {value};").unwrap();
+        writeln!(css, "  --color-{key}: {value};").expect("write! to String is infallible");
     }
 
     // Generate font variables
     for (key, value) in &theme.fonts {
-        writeln!(css, "  --font-{key}: {value};").unwrap();
+        writeln!(css, "  --font-{key}: {value};").expect("write! to String is infallible");
     }
 
     // Generate spacing variables
     for (key, value) in &theme.spacing {
-        writeln!(css, "  --space-{key}: {value};").unwrap();
+        writeln!(css, "  --space-{key}: {value};").expect("write! to String is infallible");
     }
 
     // Generate radius variables
     for (key, value) in &theme.radius {
-        writeln!(css, "  --radius-{key}: {value};").unwrap();
+        writeln!(css, "  --radius-{key}: {value};").expect("write! to String is infallible");
     }
 
     // Generate breakpoint variables
     for (key, value) in &theme.breakpoints {
-        writeln!(css, "  --breakpoint-{key}: {value};").unwrap();
+        writeln!(css, "  --breakpoint-{key}: {value};").expect("write! to String is infallible");
     }
 
     css.push_str("}\n");

@@ -1,6 +1,6 @@
 //! AST definition for `WebCore` with source positions
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Source location for error reporting
 #[derive(Debug, Clone, Copy, Default)]
@@ -60,20 +60,20 @@ pub struct WebCoreDocument {
     pub app: Option<App>,
     pub store: Vec<StateVar>,
     /// Translations keyed by locale code then message key.
-    pub locales: HashMap<String, HashMap<String, String>>,
+    pub locales: BTreeMap<String, BTreeMap<String, String>>,
     /// Default locale code (e.g. "fr").  Empty string = no i18n configured.
     pub default_locale: String,
     /// Snake-case name of the compiled WASM package, if present.
     pub wasm_module: Option<String>,
-    pub layouts: HashMap<String, Layout>,
-    pub pages: HashMap<String, Page>,
-    pub components: HashMap<String, Component>,
+    pub layouts: BTreeMap<String, Layout>,
+    pub pages: BTreeMap<String, Page>,
+    pub components: BTreeMap<String, Component>,
     /// Build-time data imports (`import posts from "data/posts.json"`).
     #[allow(dead_code)]
     pub imports: Vec<ImportDecl>,
     /// Resolved data imports: name → JSON string.
     #[allow(dead_code)]
-    pub data_imports: HashMap<String, String>,
+    pub data_imports: BTreeMap<String, String>,
 }
 
 /// A `$watch varName => { body }` hook inside a component.
@@ -100,11 +100,11 @@ pub struct App {
     pub name: String,
     pub theme: Option<String>,
     pub layout: Option<String>,
-    pub routes: HashMap<String, String>,
+    pub routes: BTreeMap<String, String>,
     /// SSG collections: route path → data-import name.
     /// `"/post/:slug": PostPage each posts` → `{"/post/:slug": "posts"}`.
     /// At build time one static page is generated per item of the collection.
-    pub collections: HashMap<String, String>,
+    pub collections: BTreeMap<String, String>,
     #[allow(dead_code)]
     pub span: Span,
 }

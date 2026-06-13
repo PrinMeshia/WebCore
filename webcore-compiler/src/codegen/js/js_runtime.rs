@@ -2,6 +2,9 @@
 //!
 //! Each `emit_*` function returns a JS string fragment that is concatenated
 //! by `generate_runtime_js_with_vars` to form the full runtime.
+//!
+//! The contract between the generated HTML (`data-webcore-*` attributes) and
+//! these runtime functions is documented in `docs/runtime.md`.
 
 use super::js_dom::RuntimeFeatures;
 use std::collections::HashSet;
@@ -44,7 +47,7 @@ pub(super) fn emit_vars_array(
         .map(|v| format!("'{v}'"))
         .collect::<Vec<_>>()
         .join(",");
-    writeln!(js, "const VARS=[{vars_list}];").unwrap();
+    writeln!(js, "const VARS=[{vars_list}];").expect("write! to String is infallible");
 
     let mut sorted_store: Vec<_> = store_vars.iter().collect();
     sorted_store.sort();
@@ -53,7 +56,7 @@ pub(super) fn emit_vars_array(
         .map(|v| format!("'{v}'"))
         .collect::<Vec<_>>()
         .join(",");
-    writeln!(js, "const STORE_VARS=[{store_list}];").unwrap();
+    writeln!(js, "const STORE_VARS=[{store_list}];").expect("write! to String is infallible");
     js
 }
 

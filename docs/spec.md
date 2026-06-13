@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 2.6.0 — Référence complète de la syntaxe `.webc`
+> Version : 2.7.0 — Référence complète de la syntaxe `.webc`
 
 ---
 

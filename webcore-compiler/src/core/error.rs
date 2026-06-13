@@ -36,10 +36,7 @@ pub enum CompileError {
 }
 
 fn use_color() -> bool {
-    std::env::var("NO_COLOR").is_err()
-        && std::env::var("TERM")
-            .map(|t| t != "dumb")
-            .unwrap_or(true)
+    std::env::var("NO_COLOR").is_err() && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
 }
 
 impl std::fmt::Display for CompileError {
@@ -210,15 +207,15 @@ mod error_utils_tests {
 
     #[test]
     fn test_find_closest_match() {
-        let candidates = vec!["Button", "Card", "Input", "Modal"];
-        let result = find_closest_match("Buton", candidates.iter().map(|s| *s));
+        let candidates = ["Button", "Card", "Input", "Modal"];
+        let result = find_closest_match("Buton", candidates.iter().copied());
         assert_eq!(result, Some("Button".to_string()));
     }
 
     #[test]
     fn test_find_closest_no_match() {
-        let candidates = vec!["Button", "Card"];
-        let result = find_closest_match("XYZ", candidates.iter().map(|s| *s));
+        let candidates = ["Button", "Card"];
+        let result = find_closest_match("XYZ", candidates.iter().copied());
         assert_eq!(result, None);
     }
 }

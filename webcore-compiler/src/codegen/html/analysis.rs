@@ -115,10 +115,8 @@ pub(super) fn elements_need_js(elements: &[crate::core::ast::Element]) -> bool {
                     }
                 }
             }
-            Element::SlotContent { content, .. } => {
-                if elements_need_js(content) {
-                    return true;
-                }
+            Element::SlotContent { content, .. } if elements_need_js(content) => {
+                return true;
             }
             _ => {}
         }

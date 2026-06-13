@@ -1,28 +1,43 @@
-//! Static Site Generation: pre-render initial state values into HTML.
+//! Static Site Generation: compile-time evaluation of initial state values.
 //!
-//! Fills `<span data-webcore-interpolation="expr">` with the initial computed
-//! value and sets correct `display` style on `@if`/`@else` divs based on
-//! initial state — eliminating flash-of-wrong-content on first load.
+//! The HTML emitters fill `<span data-webcore-interpolation="expr">` with the
+//! initial computed value and set the correct `display` style on `@if`/`@else`
+//! divs (see `codegen/html/elements.rs`), eliminating flash-of-wrong-content
+//! on first load. This module provides the evaluation context they use.
 //!
 //! The JS runtime (`bindIf`, `bind`) overwrites these values reactively after
 //! `DOMContentLoaded`, so SSG is fully compatible with the existing runtime.
 
 use crate::core::ast::WebCoreDocument;
-use regex::Regex;
-use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::sync::OnceLock;
+use std::collections::BTreeMap;
 
-static RE_INTERP: OnceLock<Regex> = OnceLock::new();
-static RE_IF: OnceLock<Regex> = OnceLock::new();
-static RE_ELSE: OnceLock<Regex> = OnceLock::new();
+/// Compile-time evaluation context for SSG pre-rendering, passed (optionally)
+/// to the HTML generators. `state` already contains per-page additions such
+/// as `$route.<param>` values for SSG collections.
+pub(crate) struct SsgContext<'a> {
+    pub state: &'a BTreeMap<String, String>,
+    pub locales: &'a BTreeMap<String, BTreeMap<String, String>>,
+    pub locale: &'a str,
+}
+
+impl SsgContext<'_> {
+    /// Evaluate an interpolation expression to its initial text, if statically known.
+    pub(crate) fn eval_expr(&self, expr: &str) -> Option<String> {
+        eval_expr_with_locale(expr, self.state, self.locales, self.locale)
+    }
+
+    /// Evaluate an `@if` condition against the initial state, if statically known.
+    pub(crate) fn eval_cond(&self, cond: &str) -> Option<bool> {
+        eval_cond_initial(cond, self.state)
+    }
+}
 
 /// Collect the initial default value of every state/store variable.
 ///
 /// Store vars are inserted first; component-state vars use `entry().or_insert`
 /// so the first-seen value wins when multiple components declare the same name.
-pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String, String> {
-    let mut state: HashMap<String, String> = HashMap::new();
+pub(crate) fn build_initial_state(document: &WebCoreDocument) -> BTreeMap<String, String> {
+    let mut state: BTreeMap<String, String> = BTreeMap::new();
 
     for var in &document.store {
         if let Some(val) = &var.default_value {
@@ -41,43 +56,8 @@ pub(crate) fn build_initial_state(document: &WebCoreDocument) -> HashMap<String,
     state
 }
 
-/// Undo HTML entity encoding so we can evaluate the raw expression/condition.
-/// Single-pass scanner: finds `&` then checks the following bytes in-place.
-fn html_unescape(s: &str) -> String {
-    if !s.contains('&') {
-        return s.to_string();
-    }
-    let mut result = String::with_capacity(s.len());
-    let mut remaining = s;
-    while let Some(pos) = remaining.find('&') {
-        result.push_str(&remaining[..pos]);
-        remaining = &remaining[pos..];
-        if remaining.starts_with("&amp;") {
-            result.push('&');
-            remaining = &remaining[5..];
-        } else if remaining.starts_with("&lt;") {
-            result.push('<');
-            remaining = &remaining[4..];
-        } else if remaining.starts_with("&gt;") {
-            result.push('>');
-            remaining = &remaining[4..];
-        } else if remaining.starts_with("&quot;") {
-            result.push('"');
-            remaining = &remaining[6..];
-        } else if remaining.starts_with("&#x27;") {
-            result.push('\'');
-            remaining = &remaining[6..];
-        } else {
-            result.push('&');
-            remaining = &remaining[1..];
-        }
-    }
-    result.push_str(remaining);
-    result
-}
-
 /// Single-pass HTML escape for plain text (handles `&`, `<`, `>`).
-fn html_escape_text(text: &str) -> String {
+pub(crate) fn html_escape_text(text: &str) -> String {
     if !text.contains(['&', '<', '>']) {
         return text.to_string();
     }
@@ -94,7 +74,7 @@ fn html_escape_text(text: &str) -> String {
 }
 
 /// Resolve a single token (variable name or numeric literal) to f64.
-fn resolve_number(token: &str, state: &HashMap<String, String>) -> Option<f64> {
+fn resolve_number(token: &str, state: &BTreeMap<String, String>) -> Option<f64> {
     let token = token.trim();
     if let Ok(n) = token.parse::<f64>() {
         return Some(n);
@@ -109,7 +89,7 @@ fn resolve_number(token: &str, state: &HashMap<String, String>) -> Option<f64> {
 
 /// Evaluate a simple arithmetic expression (a ± b, a * b, literal, or variable).
 /// Returns `None` for anything more complex (function calls, nested parens, etc.).
-fn eval_number_expr(expr: &str, state: &HashMap<String, String>) -> Option<f64> {
+fn eval_number_expr(expr: &str, state: &BTreeMap<String, String>) -> Option<f64> {
     let expr = expr.trim();
     if let Some(n) = resolve_number(expr, state) {
         return Some(n);
@@ -137,7 +117,7 @@ fn eval_number_expr(expr: &str, state: &HashMap<String, String>) -> Option<f64> 
 ///
 /// The `cond` argument must already be HTML-unescaped.
 /// Returns `None` when the condition is too complex to evaluate statically.
-pub(crate) fn eval_cond_initial(cond: &str, state: &HashMap<String, String>) -> Option<bool> {
+pub(crate) fn eval_cond_initial(cond: &str, state: &BTreeMap<String, String>) -> Option<bool> {
     let cond = cond.trim();
 
     // Check multi-char operators before single-char ones to avoid mis-parsing.
@@ -173,8 +153,8 @@ pub(crate) fn eval_cond_initial(cond: &str, state: &HashMap<String, String>) -> 
 /// `locales` and `locale` are used for `t()` resolution; pass empty values if not applicable.
 pub(crate) fn eval_expr_with_locale(
     expr: &str,
-    state: &HashMap<String, String>,
-    locales: &HashMap<String, HashMap<String, String>>,
+    state: &BTreeMap<String, String>,
+    locales: &BTreeMap<String, BTreeMap<String, String>>,
     locale: &str,
 ) -> Option<String> {
     let expr = expr.trim();
@@ -246,107 +226,11 @@ pub(crate) fn eval_expr_with_locale(
     None
 }
 
-/// Post-process generated HTML to pre-render initial state (SSG) with i18n support.
-///
-/// Steps:
-/// 1. Fill empty `<span data-webcore-interpolation="expr"></span>` with the
-///    initial computed value (including `t("key")` translations).
-/// 2. Add `style="display:block/none"` to `<div data-webcore-if="...">` and
-///    `<div data-webcore-else="...">` so the correct branch is shown before JS
-///    runs `bindIf()` at `DOMContentLoaded`.
-pub(crate) fn apply_ssg_with_locales(
-    html: &str,
-    state: &HashMap<String, String>,
-    locales: &HashMap<String, HashMap<String, String>>,
-    default_locale: &str,
-) -> String {
-    let mut result = html.to_string();
-
-    // ── 1. Interpolation spans ───────────────────────────────────────────────
-    // Pattern matches the attribute + the closing ></span> of an empty span.
-    let interp_re = RE_INTERP.get_or_init(|| {
-        Regex::new(r#"(data-webcore-interpolation="([^"]+)")></span>"#).expect("hardcoded regex")
-    });
-    let mut out = String::new();
-    let mut last = 0usize;
-    for cap in interp_re.captures_iter(&result) {
-        let m = cap.get(0).unwrap();
-        out.push_str(&result[last..m.start()]);
-        let full_attr = &cap[1]; // data-webcore-interpolation="EXPR"
-        let raw_expr = &cap[2]; // the raw (HTML-escaped) expression
-        let expr = html_unescape(raw_expr);
-        if let Some(val) = eval_expr_with_locale(&expr, state, locales, default_locale) {
-            write!(out, "{}>{}</span>", full_attr, html_escape_text(&val)).unwrap();
-        } else {
-            out.push_str(m.as_str());
-        }
-        last = m.end();
-    }
-    out.push_str(&result[last..]);
-    result = out;
-
-    // ── 2. @if divs ─────────────────────────────────────────────────────────
-    let if_re = RE_IF.get_or_init(|| {
-        Regex::new(r#"<div data-webcore-if="([^"]+)"([^>]*)>"#).expect("hardcoded regex")
-    });
-    let mut out = String::new();
-    let mut last = 0usize;
-    for cap in if_re.captures_iter(&result) {
-        let m = cap.get(0).unwrap();
-        out.push_str(&result[last..m.start()]);
-        let raw_cond = &cap[1];
-        let rest_attrs = &cap[2];
-        let cond = html_unescape(raw_cond);
-        let style = match eval_cond_initial(&cond, state) {
-            Some(true) => " style=\"display:block\"",
-            Some(false) => " style=\"display:none\"",
-            None => "",
-        };
-        write!(
-            out,
-            r#"<div data-webcore-if="{raw_cond}"{rest_attrs}{style}>"#
-        )
-        .unwrap();
-        last = m.end();
-    }
-    out.push_str(&result[last..]);
-    result = out;
-
-    // ── 3. @else divs (inverted condition) ──────────────────────────────────
-    let else_re = RE_ELSE.get_or_init(|| {
-        Regex::new(r#"<div data-webcore-else="([^"]+)"([^>]*)>"#).expect("hardcoded regex")
-    });
-    let mut out = String::new();
-    let mut last = 0usize;
-    for cap in else_re.captures_iter(&result) {
-        let m = cap.get(0).unwrap();
-        out.push_str(&result[last..m.start()]);
-        let raw_cond = &cap[1];
-        let rest_attrs = &cap[2];
-        let cond = html_unescape(raw_cond);
-        let style = match eval_cond_initial(&cond, state) {
-            Some(true) => " style=\"display:none\"", // condition true → else hidden
-            Some(false) => " style=\"display:block\"", // condition false → else shown
-            None => "",
-        };
-        write!(
-            out,
-            r#"<div data-webcore-else="{raw_cond}"{rest_attrs}{style}>"#
-        )
-        .unwrap();
-        last = m.end();
-    }
-    out.push_str(&result[last..]);
-    result = out;
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn state(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    fn state(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -377,7 +261,7 @@ mod tests {
     fn test_eval_expr_direct_var() {
         let s = state(&[("count", "42")]);
         assert_eq!(
-            eval_expr_with_locale("count", &s, &HashMap::new(), ""),
+            eval_expr_with_locale("count", &s, &BTreeMap::new(), ""),
             Some("42".into())
         );
     }
@@ -386,52 +270,35 @@ mod tests {
     fn test_eval_expr_arithmetic() {
         let s = state(&[("count", "3")]);
         assert_eq!(
-            eval_expr_with_locale("count + 1", &s, &HashMap::new(), ""),
+            eval_expr_with_locale("count + 1", &s, &BTreeMap::new(), ""),
             Some("4".into())
         );
     }
 
     #[test]
-    fn test_apply_ssg_fills_interpolation() {
+    fn test_ssg_context_eval_expr() {
         let s = state(&[("count", "7")]);
-        let html = r#"<span data-webcore-interpolation="count"></span>"#;
-        let out = apply_ssg_with_locales(html, &s, &HashMap::new(), "");
-        assert!(
-            out.contains(r#"data-webcore-interpolation="count">7</span>"#),
-            "{}",
-            out
-        );
+        let locales = BTreeMap::new();
+        let ctx = SsgContext {
+            state: &s,
+            locales: &locales,
+            locale: "",
+        };
+        assert_eq!(ctx.eval_expr("count"), Some("7".into()));
+        assert_eq!(ctx.eval_expr("unknown"), None);
     }
 
     #[test]
-    fn test_apply_ssg_if_display_block() {
-        let s = state(&[("count", "5")]);
-        let html = r#"<div data-webcore-if="count &gt; 0">"#;
-        let out = apply_ssg_with_locales(html, &s, &HashMap::new(), "");
-        assert!(out.contains(r#"style="display:block""#), "{}", out);
-    }
-
-    #[test]
-    fn test_apply_ssg_if_display_none() {
+    fn test_ssg_context_eval_cond() {
         let s = state(&[("count", "0")]);
-        let html = r#"<div data-webcore-if="count &gt; 0">"#;
-        let out = apply_ssg_with_locales(html, &s, &HashMap::new(), "");
-        assert!(out.contains(r#"style="display:none""#), "{}", out);
-    }
-
-    #[test]
-    fn test_apply_ssg_else_inverted() {
-        let s = state(&[("count", "0")]);
-        let html = r#"<div data-webcore-else="count &gt; 0">"#;
-        let out = apply_ssg_with_locales(html, &s, &HashMap::new(), "");
-        assert!(out.contains(r#"style="display:block""#), "{}", out);
-    }
-
-    #[test]
-    fn test_apply_ssg_unknown_var_no_style() {
-        let s = state(&[]);
-        let html = r#"<div data-webcore-if="foo &gt; 0">"#;
-        let out = apply_ssg_with_locales(html, &s, &HashMap::new(), "");
-        assert!(!out.contains("style="), "{}", out);
+        let locales = BTreeMap::new();
+        let ctx = SsgContext {
+            state: &s,
+            locales: &locales,
+            locale: "",
+        };
+        assert_eq!(ctx.eval_cond("count > 0"), Some(false));
+        assert_eq!(ctx.eval_cond("count == 0"), Some(true));
+        assert_eq!(ctx.eval_cond("foo > 0"), None);
     }
 }

@@ -1,0 +1,94 @@
+name: Release
+
+# Builds the `webc` binary for Linux, macOS (Intel + Apple Silicon) and
+# Windows whenever a version tag (e.g. `2.7.0`) is pushed, and attaches the
+# archives to a GitHub release. Can also be run manually (workflow_dispatch)
+# to test the packaging without publishing.
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        working-directory: webcore-compiler
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: webcore-compiler
+          key: ${{ matrix.target }}
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p ../dist-pkg
+          cp target/${{ matrix.target }}/release/webcore-compiler ../dist-pkg/webc
+          cp ../LICENSE ../README.md ../dist-pkg/
+          tar -czf ../webc-${{ matrix.target }}.tar.gz -C ../dist-pkg webc LICENSE README.md
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist-pkg | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/webcore-compiler.exe ../dist-pkg/webc.exe
+          Copy-Item ../LICENSE,../README.md ../dist-pkg/
+          Compress-Archive -Path ../dist-pkg/webc.exe,../dist-pkg/LICENSE,../dist-pkg/README.md -DestinationPath ../webc-${{ matrix.target }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webc-${{ matrix.target }}
+          path: |
+            webc-${{ matrix.target }}.tar.gz
+            webc-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
