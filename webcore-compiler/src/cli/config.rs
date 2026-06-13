@@ -12,11 +12,14 @@ pub(crate) struct Config {
     pub(crate) mode: String,
     /// When true (and mode="prod"), a strict `Content-Security-Policy` meta tag is emitted.
     pub(crate) csp: bool,
+    /// Indent size for `webc fmt` (default: 4).
+    pub(crate) fmt_indent: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
 struct WebcToml {
     app: Option<AppSection>,
+    fmt: Option<FmtSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,6 +29,11 @@ struct AppSection {
     locale: Option<String>,
     mode: Option<String>,
     csp: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FmtSection {
+    indent: Option<usize>,
 }
 
 pub(crate) fn read_config() -> Result<Config, String> {
@@ -61,6 +69,7 @@ pub(crate) fn read_config() -> Result<Config, String> {
         .unwrap_or_else(|| app_lang.clone());
 
     let csp = parsed.app.as_ref().and_then(|a| a.csp).unwrap_or(false);
+    let fmt_indent = parsed.fmt.as_ref().and_then(|f| f.indent);
 
     Ok(Config {
         app_title,
@@ -68,7 +77,23 @@ pub(crate) fn read_config() -> Result<Config, String> {
         locale,
         mode,
         csp,
+        fmt_indent,
     })
+}
+
+/// Load config, returning defaults if webc.toml is missing.
+pub(crate) fn load_config() -> Result<Config, String> {
+    if !Path::new("webc.toml").exists() {
+        return Ok(Config {
+            app_title: "WebCore App".to_string(),
+            app_lang: "fr".to_string(),
+            locale: "fr".to_string(),
+            mode: "dev".to_string(),
+            csp: false,
+            fmt_indent: None,
+        });
+    }
+    read_config()
 }
 
 // ── WASM module detection ────────────────────────────────────────────────────

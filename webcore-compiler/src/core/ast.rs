@@ -165,6 +165,7 @@ pub struct Component {
 pub struct Prop {
     pub name: String,
     pub type_: Option<String>,
+    pub default_value: Option<String>,
     #[allow(dead_code)]
     pub span: Span,
 }
@@ -232,6 +233,11 @@ pub enum Element {
         content: Vec<Element>,
         span: Span,
     },
+    /// Fragment shorthand: <>...</> renders children inline with no wrapper tag
+    Fragment {
+        content: Vec<Element>,
+        span: Span,
+    },
 }
 
 impl Element {
@@ -247,7 +253,8 @@ impl Element {
             | Element::Component { span, .. }
             | Element::For { span, .. }
             | Element::If { span, .. }
-            | Element::ErrorBlock { span, .. } => *span,
+            | Element::ErrorBlock { span, .. }
+            | Element::Fragment { span, .. } => *span,
         }
     }
 
@@ -270,7 +277,8 @@ impl Element {
             | Element::Component { content, .. }
             | Element::SlotContent { content, .. }
             | Element::For { content, .. }
-            | Element::ErrorBlock { content, .. } => content,
+            | Element::ErrorBlock { content, .. }
+            | Element::Fragment { content, .. } => content,
             Element::If { then_branch, .. } => then_branch,
             _ => &[],
         }

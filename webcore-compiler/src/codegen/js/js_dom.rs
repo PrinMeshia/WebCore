@@ -126,7 +126,9 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                 }
                 detect_features_in_elements(content, f);
             }
-            Element::Component { content, .. } | Element::SlotContent { content, .. } => {
+            Element::Component { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::Fragment { content, .. } => {
                 detect_features_in_elements(content, f);
             }
             Element::ErrorBlock { content, .. } => {
@@ -251,7 +253,9 @@ fn collect_event_listeners_from_elements(
                     collect_event_listeners_from_elements(eb, out);
                 }
             }
-            Element::ErrorBlock { content, .. } | Element::SlotContent { content, .. } => {
+            Element::ErrorBlock { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::Fragment { content, .. } => {
                 collect_event_listeners_from_elements(content, out);
             }
             _ => {}

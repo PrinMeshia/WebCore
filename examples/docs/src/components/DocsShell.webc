@@ -162,18 +162,18 @@ component DocsShell {
             const LABELS = { '/': 'Home', '/syntax': 'Syntax', '/components': 'Components', '/features': 'Features', '/examples': 'Examples' };
             const idx = ORDER.indexOf(path);
             if (idx >= 0) {
-                const nav = document.createElement('nav');
-                nav.className = 'page-nav-dynamic';
+                const navEl = document.createElement('nav');
+                navEl.className = 'page-nav-dynamic';
                 if (idx > 0) {
                     const p = ORDER[idx - 1];
-                    nav.innerHTML += `<a class="page-nav-link page-nav-prev" href="${p}" onclick="webcore_navigate('${p}');return false;">← ${LABELS[p]}</a>`;
+                    navEl.innerHTML += `<a class="page-nav-link page-nav-prev" href="${p}" onclick="webcore_navigate('${p}');return false;">← ${LABELS[p]}</a>`;
                 }
                 if (idx < ORDER.length - 1) {
                     const n = ORDER[idx + 1];
-                    nav.innerHTML += `<a class="page-nav-link page-nav-next" href="${n}" onclick="webcore_navigate('${n}');return false;">${LABELS[n]} →</a>`;
+                    navEl.innerHTML += `<a class="page-nav-link page-nav-next" href="${n}" onclick="webcore_navigate('${n}');return false;">${LABELS[n]} →</a>`;
                 }
                 const main = document.querySelector('.site-main');
-                if (main) main.appendChild(nav);
+                if (main) main.appendChild(navEl);
             }
 
             // Rebuild sidebar
@@ -182,13 +182,8 @@ component DocsShell {
 
         window.__docsEnhance();
 
-        // Re-run after every SPA navigation
-        const shell = document.querySelector('.docs-shell');
-        if (shell) {
-            new MutationObserver(() => {
-                requestAnimationFrame(() => window.__docsEnhance());
-            }).observe(shell, { childList: true });
-        }
+        // Called by the router after every SPA navigation (window.__wcAfterNav hook)
+        window.__wcAfterNav = () => window.__docsEnhance?.();
 
         // Scroll-to-top button
         const topBtn = document.createElement('button');

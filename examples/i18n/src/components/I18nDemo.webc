@@ -4,62 +4,176 @@ component I18nDemo {
     }
 
     view {
-        div class="demo" {
+        div class="i18n-demo" {
 
-            div class="hero" {
-                h2 "{t("title")}"
-                p class="sub" { "{t("subtitle")}" }
-                div class="lang-btns" {
-                    button on:click={setLocale("en")} { "English" }
-                    button on:click={setLocale("fr")} { "Français" }
+            div class="i18n-hero" {
+                h1 class="i18n-title" { "{t("title")}" }
+                p class="i18n-sub" { "{t("subtitle")}" }
+                div class="lang-switcher" {
+                    button class="lang-btn" on:click={setLocale("en")} { "🇬🇧 English" }
+                    button class="lang-btn" on:click={setLocale("fr")} { "🇫🇷 Français" }
                 }
             }
 
-            div class="card" {
-                h3 "{t("greeting", "Alice")}"
-                p class="hint" { "t(\"greeting\", \"Alice\") — positional substitution via {{0}}" }
-            }
+            div class="demo-grid" {
 
-            div class="card" {
-                h3 "{t("items", count)}"
-                p class="hint" { "t(\"items\", count) — pluralization via _one / _other keys" }
-                div class="btns" {
-                    button on:click={count += 1} { "{t("add")}" }
-                    button on:click={count = 0}  { "{t("reset")}" }
+                div class="demo-card" {
+                    div class="demo-card-label" { "Param positionnel" }
+                    h3 class="demo-result" { "{t("greeting", "Alice")}" }
+                    code class="demo-source" { "t(\"greeting\", \"Alice\")" }
+                    p class="demo-hint" { "Substitution via " code { "\{\{0\}\}" } " dans les fichiers TOML." }
                 }
-                @if count > 0 {
-                    p class="count-badge" { "{count}" }
-                } @else {
-                    p class="empty" { "{t("cart_empty")}" }
-                }
-            }
 
+                div class="demo-card" {
+                    div class="demo-card-label" { "Pluralisation" }
+                    h3 class="demo-result" { "{t("items", count)}" }
+                    code class="demo-source" { "t(\"items\", count)" }
+                    p class="demo-hint" {
+                        "Clés "
+                        code { "_one" }
+                        " et "
+                        code { "_other" }
+                        " selon la valeur."
+                    }
+                    div class="demo-actions" {
+                        button class="action-btn" on:click={count += 1} { "{t("add")}" }
+                        button class="action-btn action-btn-ghost" on:click={count = 0} { "{t("reset")}" }
+                    }
+                    @if count > 0 {
+                        div class="count-display" { "{count}" }
+                    } @else {
+                        p class="count-empty" { "{t("cart_empty")}" }
+                    }
+                }
+
+            }
         }
     }
 
     style {
-        .demo      { max-width: 640px; margin: 2rem auto; padding: 1rem; }
-        .hero {
+        .i18n-demo {
+            max-width: 700px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xxl);
+        }
+        .i18n-hero { text-align: center; }
+        .i18n-title {
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            margin-bottom: var(--spacing-sm);
+            background: linear-gradient(135deg, var(--color-text), var(--color-muted));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .i18n-sub {
+            color: var(--color-muted);
+            font-size: 1rem;
+            margin-bottom: var(--spacing-xl);
+            line-height: 1.65;
+        }
+        .lang-switcher { display: flex; gap: var(--spacing-sm); justify-content: center; }
+        .lang-btn {
+            padding: 0.45rem 1.1rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-border);
+            background: var(--color-surface);
+            color: var(--color-muted);
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+            &:hover { border-color: var(--color-primary); color: var(--color-text); background: rgba(91,74,247,0.06); }
+        }
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--spacing-md);
+            align-items: start;
+        }
+        .demo-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
+        }
+        .demo-card-label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-primary);
+        }
+        .demo-result {
+            font-size: 1.3rem;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+        }
+        .demo-source {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--color-secondary);
+            background: var(--color-code-bg);
+            border: 1px solid var(--color-border);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+        }
+        .demo-hint {
+            font-size: 0.8rem;
+            color: var(--color-muted);
+            line-height: 1.6;
+            & code {
+                font-family: var(--font-mono);
+                background: rgba(255,255,255,0.06);
+                border: 1px solid rgba(255,255,255,0.08);
+                padding: 0 5px;
+                border-radius: var(--radius-sm);
+                font-size: 0.85em;
+                color: var(--color-secondary);
+            }
+        }
+        .demo-actions { display: flex; gap: var(--spacing-sm); }
+        .action-btn {
+            padding: 0.4rem 1rem;
+            border-radius: var(--radius-md);
+            border: none;
+            background: var(--color-primary);
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: opacity 0.15s, transform 0.1s;
+            &:hover { opacity: 0.85; transform: translateY(-1px); }
+        }
+        .action-btn-ghost {
+            background: transparent;
+            border: 1px solid var(--color-border);
+            color: var(--color-muted);
+            &:hover { color: var(--color-text); border-color: rgba(91,74,247,0.4); opacity: 1; }
+        }
+        .count-display {
+            font-size: 3.5rem;
+            font-weight: 900;
+            letter-spacing: -0.04em;
+            font-variant-numeric: tabular-nums;
+            background: linear-gradient(135deg, var(--color-primary), #818CF8);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            line-height: 1;
             text-align: center;
-            margin-bottom: 2rem;
-            & h2 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+            padding: var(--spacing-sm) 0;
         }
-        .sub       { color: #94a3b8; margin-bottom: 1rem; }
-        .lang-btns { display: flex; gap: 0.5rem; justify-content: center; }
-        .card {
-            background: #1e293b;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.25rem;
-            & h3 { margin: 0 0 0.4rem; font-size: 1.2rem; }
-        }
-        .hint      { color: #64748b; font-size: 0.85rem; font-family: monospace; margin: 0.3rem 0 0.8rem; }
-        .btns      { display: flex; gap: 0.5rem; }
-        .count-badge { font-size: 2rem; font-weight: bold; color: #3b82f6; margin: 0.5rem 0 0; }
-        .empty     { color: #64748b; font-style: italic; margin: 0.5rem 0 0; }
-        button {
-            padding: 0.4rem 0.9rem; cursor: pointer; border-radius: 4px; border: none; background: #3b82f6; color: #fff;
-            &:hover { background: #2563eb; }
+        .count-empty {
+            font-size: 0.85rem;
+            color: var(--color-muted);
+            font-style: italic;
+            text-align: center;
         }
     }
 }

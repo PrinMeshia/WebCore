@@ -6,134 +6,156 @@ component SignupForm {
     }
 
     view {
-        section class="form-section" {
-            h2 "Create an account"
-            p class="section-sub" { "All fields marked * are required." }
+        section class="form-card" {
+            div class="form-card-header" {
+                span class="form-icon" { "👤" }
+                div {
+                    h2 class="form-title" { "Créer un compte" }
+                    p class="form-sub" { "Tous les champs marqués * sont requis." }
+                }
+            }
 
             @if submitted {
                 div class="success-banner" {
                     span class="success-icon" { "✓" }
-                    p { "Welcome, " strong { "{username}" } "! Check " strong { "{email}" } " to confirm." }
+                    div {
+                        p class="success-title" { "Bienvenue, {username} !" }
+                        p class="success-body" { "Un email de confirmation a été envoyé à {email}." }
+                    }
                 }
             } @else {
                 form on:submit={submitted = true} {
                     div class="field" {
-                        label { "Username *" }
+                        label { "Nom d'utilisateur *" }
                         input type="text"
                               name="username"
-                              placeholder="at least 3 characters"
-                              validate:required="Username is required"
-                              validate:minlength="3,At least 3 characters"
+                              placeholder="au moins 3 caractères"
+                              validate:required="Le nom d'utilisateur est requis"
+                              validate:minlength="3,Au moins 3 caractères"
                               on:input={username = event.target.value}
-                        @error "username" {
-                            span class="err" { }
-                        }
+                        @error "username" { span class="err" { } }
                     }
-
                     div class="field" {
                         label { "Email *" }
                         input type="email"
                               name="email"
-                              placeholder="you@example.com"
-                              validate:required="Email is required"
-                              validate:email="Enter a valid email address"
+                              placeholder="vous@exemple.com"
+                              validate:required="L'email est requis"
+                              validate:email="Entrez une adresse email valide"
                               on:input={email = event.target.value}
-                        @error "email" {
-                            span class="err" { }
-                        }
+                        @error "email" { span class="err" { } }
                     }
-
                     div class="field" {
-                        label { "Password *" }
+                        label { "Mot de passe *" }
                         input type="password"
                               name="password"
-                              placeholder="8+ chars, one uppercase, one digit"
-                              validate:required="Password is required"
-                              validate:minlength="8,At least 8 characters"
-                              validate:pattern="^(?=.*[A-Z])(?=.*\\d).+$,Must contain an uppercase letter and a digit"
-                        @error "password" {
-                            span class="err" { }
-                        }
+                              placeholder="8+ car., une majuscule, un chiffre"
+                              validate:required="Le mot de passe est requis"
+                              validate:minlength="8,Au moins 8 caractères"
+                              validate:pattern="^(?=.*[A-Z])(?=.*\\d).+$,Doit contenir une majuscule et un chiffre"
+                        @error "password" { span class="err" { } }
                     }
-
                     div class="field" {
-                        label { "Website" }
+                        label { "Site web" }
                         input type="url"
                               name="website"
-                              placeholder="https://yoursite.com"
-                              validate:pattern="^https?://.+,Must start with http:// or https://"
-                        @error "website" {
-                            span class="err" { }
-                        }
+                              placeholder="https://monsite.com"
+                              validate:pattern="^https?://.+,Doit commencer par http:// ou https://"
+                        @error "website" { span class="err" { } }
                     }
-
-                    button type="submit" class="btn-primary" { "Create account →" }
+                    button type="submit" class="btn-submit" { "Créer le compte →" }
                 }
             }
         }
     }
 
     style {
-        .form-section {
-            max-width: 480px;
-            margin: 2rem auto;
-            padding: 2rem;
-            background: #1e293b;
-            border-radius: 10px;
-            border: 1px solid #334155;
+        .form-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xl);
+            position: relative;
+            overflow: hidden;
+            &::before {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 2px;
+                background: linear-gradient(90deg, var(--color-primary), #818CF8);
+            }
         }
-        h2 { margin: 0 0 0.25rem; font-size: 1.4rem; }
-        .section-sub { color: #64748b; font-size: 0.85rem; margin: 0 0 1.5rem; }
-        .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1.1rem; }
-        label { font-size: 0.85rem; font-weight: 600; color: #cbd5e1; }
+        .form-card-header { display: flex; align-items: flex-start; gap: var(--spacing-md); }
+        .form-icon {
+            font-size: 1.5rem;
+            width: 2.75rem;
+            height: 2.75rem;
+            background: rgba(91,74,247,0.08);
+            border: 1px solid rgba(91,74,247,0.18);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .form-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 2px; }
+        .form-sub { color: var(--color-muted); font-size: 0.82rem; }
+        .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--spacing-md); }
+        .field:last-child { margin-bottom: 0; }
+        label { font-size: 0.82rem; font-weight: 600; color: var(--color-text); }
         input {
-            padding: 0.5rem 0.75rem;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            color: #e2e8f0;
-            font-size: 0.95rem;
-            transition: border-color 0.15s;
-            &:focus { outline: none; border-color: #3b82f6; }
+            padding: 0.5rem 0.8rem;
+            background: var(--color-code-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            color: var(--color-text);
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            &:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(91,74,247,0.12); }
+            &::placeholder { color: var(--color-muted); }
         }
-        .err { font-size: 0.8rem; color: #f87171; min-height: 1rem; }
-        .btn-primary {
+        .err { font-size: 0.78rem; color: var(--color-danger); min-height: 1rem; }
+        .btn-submit {
             width: 100%;
             padding: 0.65rem;
-            background: #3b82f6;
+            background: linear-gradient(135deg, var(--color-primary), #818CF8);
             color: #fff;
             border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            font-weight: 700;
             cursor: pointer;
-            margin-top: 0.5rem;
-            transition: background 0.15s;
-            &:hover { background: #2563eb; }
+            transition: opacity 0.15s, transform 0.1s;
+            box-shadow: 0 4px 14px rgba(91,74,247,0.3);
+            &:hover { opacity: 0.9; transform: translateY(-1px); }
         }
         .success-banner {
             display: flex;
             align-items: flex-start;
-            gap: 0.75rem;
-            padding: 1rem 1.25rem;
-            background: #052e16;
-            border: 1px solid #16a34a;
-            border-radius: 8px;
-            & p { margin: 0; color: #86efac; line-height: 1.5; }
-            & strong { color: #4ade80; }
+            gap: var(--spacing-md);
+            padding: var(--spacing-md) var(--spacing-lg);
+            background: rgba(16,185,129,0.06);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: var(--radius-md);
         }
         .success-icon {
             flex-shrink: 0;
-            width: 1.5rem;
-            height: 1.5rem;
-            background: #16a34a;
+            width: 1.75rem;
+            height: 1.75rem;
+            background: var(--color-secondary);
             color: #fff;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             font-weight: 700;
         }
+        .success-title { font-weight: 700; color: var(--color-secondary); margin-bottom: 2px; font-size: 0.95rem; }
+        .success-body { font-size: 0.85rem; color: var(--color-muted); }
     }
 }

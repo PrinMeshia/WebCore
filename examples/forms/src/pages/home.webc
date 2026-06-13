@@ -1,4 +1,24 @@
 page "home" {
-    SignupForm {}
-    ContactForm {}
+    div class="forms-page" {
+        div class="forms-page-header" {
+            h1 class="forms-title" { "Formulaires & Validation" }
+            p class="forms-sub" {
+                "Validation déclarative avec "
+                code { "validate:required" }
+                ", "
+                code { "validate:email" }
+                ", "
+                code { "validate:minlength" }
+                ", "
+                code { "validate:pattern" }
+                " et blocs "
+                code { "@error" }
+                "."
+            }
+        }
+        div class="forms-grid" {
+            SignupForm {}
+            ContactForm {}
+        }
+    }
 }

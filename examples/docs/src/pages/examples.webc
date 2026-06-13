@@ -1,78 +1,143 @@
 page "examples" {
     div class="page-header" {
+        div class="page-header-badge" { "6 projets • open source" }
         h1 { "Examples" }
         p class="page-sub" {
-            "Full projects built with WebCore — run any of them locally with "
-            code { "webc serve" }
-        }
-    }
-
-    section class="doc-section" {
-        h2 { "Included examples" }
-        p {
-            "All examples live under "
-            code { "examples/" }
-            " in the repository. Each compiles to a standalone "
+            "Projets complets construits avec WebCore — chacun compile vers un "
             code { "dist/" }
-            " — no framework, no bundler, no client-side dependencies."
+            " autonome, sans framework ni bundler."
         }
-        div class="examples-grid" {
-            div class="example-card" {
-                code class="example-tag" { "counter" }
-                h3 { "Counter" }
-                p { "Minimal reactive counter with increment, decrement and step. The simplest possible WebCore app — ideal starting point." }
-                pre class="code-block" { "cd examples/counter
-webc serve" }
+    }
+
+    div class="examples-grid" {
+        div class="example-card" {
+            div class="example-card-top" {
+                span class="example-emoji" { "🔢" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "counter" }
+                    div class="example-chips" {
+                        span class="chip" { "state" }
+                        span class="chip" { "computed" }
+                        span class="chip" { "@if" }
+                    }
+                }
             }
-            div class="example-card" {
-                code class="example-tag" { "todo" }
-                h3 { "Todo" }
-                p { "Todo list with add, toggle done, and delete. Demonstrates @for with key diffing, @if, computed values and CSS nesting." }
-                pre class="code-block" { "cd examples/todo
-webc serve" }
+            h3 { "Counter" }
+            p { "Le point de départ idéal — compteur réactif avec incrément, décrément et pas variable. Démontre l'état, les computed et les directives conditionnelles." }
+            pre class="code-block" { "cd examples/counter && webc serve" }
+        }
+
+        div class="example-card" {
+            div class="example-card-top" {
+                span class="example-emoji" { "✅" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "todo" }
+                    div class="example-chips" {
+                        span class="chip" { "@for key" }
+                        span class="chip" { "bind:value" }
+                        span class="chip" { "lifecycle" }
+                    }
+                }
             }
-            div class="example-card" {
-                code class="example-tag" { "blog" }
-                h3 { "Blog" }
-                p { "Multi-page blog with parameterized routes (/post/:slug). Shows SPA routing, $route params, and global store for theme switching." }
-                pre class="code-block" { "cd examples/blog
-webc serve" }
+            h3 { "Todo" }
+            p {
+                "Liste de tâches avec ajout, toggle et suppression. Démontre "
+                code { "@for" }
+                " avec key-diffing, "
+                code { "@if" }
+                ", les computed et le CSS nesting."
             }
-            div class="example-card" {
-                code class="example-tag" { "forms" }
-                h3 { "Forms" }
-                p { "SignupForm and ContactForm with full declarative validation — required, email, minlength, maxlength, pattern, and @error blocks." }
-                pre class="code-block" { "cd examples/forms
-webc serve" }
+            pre class="code-block" { "cd examples/todo && webc serve" }
+        }
+
+        div class="example-card" {
+            div class="example-card-top" {
+                span class="example-emoji" { "📝" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "blog" }
+                    div class="example-chips" {
+                        span class="chip chip-accent" { "routing" }
+                        span class="chip" { "$route" }
+                        span class="chip" { "store" }
+                    }
+                }
             }
-            div class="example-card" {
-                code class="example-tag" { "i18n" }
-                h3 { "i18n" }
-                p { "Internationalisation demo — t() calls, plural forms (items_one / items_other), positional params, and reactive setLocale()." }
-                pre class="code-block" { "cd examples/i18n
-webc serve" }
+            h3 { "Blog" }
+            p {
+                "Blog multi-pages avec routes paramétrées ("
+                code { "/post/:slug" }
+                "). Montre le routage SPA, les params de route et le store global pour le thème."
             }
-            div class="example-card" {
-                code class="example-tag" { "docs" }
-                h3 { "Docs" }
-                p { "This documentation site — 5 pages, SPA routing, named slots, sidebar TOC, copy-to-clipboard, announcement bar, and a minimal design system." }
-                pre class="code-block" { "cd examples/docs
-webc serve" }
+            pre class="code-block" { "cd examples/blog && webc serve" }
+        }
+
+        div class="example-card" {
+            div class="example-card-top" {
+                span class="example-emoji" { "📋" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "forms" }
+                    div class="example-chips" {
+                        span class="chip chip-warning" { "validate:" }
+                        span class="chip" { "@error" }
+                        span class="chip" { "bind:" }
+                    }
+                }
             }
+            h3 { "Forms" }
+            p {
+                "SignupForm et ContactForm avec validation déclarative complète — required, email, minlength, maxlength, pattern et blocs "
+                code { "@error" }
+                "."
+            }
+            pre class="code-block" { "cd examples/forms && webc serve" }
+        }
+
+        div class="example-card" {
+            div class="example-card-top" {
+                span class="example-emoji" { "🌍" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "i18n" }
+                    div class="example-chips" {
+                        span class="chip chip-secondary" { "t()" }
+                        span class="chip" { "plural" }
+                        span class="chip" { "setLocale" }
+                    }
+                }
+            }
+            h3 { "i18n" }
+            p { "Internationalisation — appels t(), formes plurielles (items_one / items_other), paramètres positionnels et changement de locale réactif." }
+            pre class="code-block" { "cd examples/i18n && webc serve" }
+        }
+
+        div class="example-card example-card-featured" {
+            div class="example-card-top" {
+                span class="example-emoji" { "📚" }
+                div class="example-card-meta" {
+                    code class="example-tag" { "docs" }
+                    div class="example-chips" {
+                        span class="chip chip-accent" { "SPA" }
+                        span class="chip" { "slots" }
+                        span class="chip" { "on:mount" }
+                    }
+                }
+            }
+            h3 { "Docs — ce site" }
+            p { "Ce site de documentation — 5 pages, routage SPA, slots nommés, sidebar TOC, copy-to-clipboard, barre d'annonce et système de design minimal." }
+            pre class="code-block" { "cd examples/docs && webc serve" }
         }
     }
 
     section class="doc-section" {
-        h2 { "Project structure" }
-        p { "Every example follows the same layout:" }
+        h2 { "Structure d'un projet" }
+        p { "Tous les exemples suivent le même schéma :" }
         pre class="code-block" {
 "my-project/
-├── webc.toml          # project name, entry point
-├── theme.toml         # design tokens (colors, spacing, fonts)
+├── webc.toml          # nom, point d'entrée, mode (dev | prod)
+├── theme.toml         # tokens de design (couleurs, espacements, fontes)
 ├── public/
-│   └── styles.css     # optional extra styles
+│   └── styles.css     # styles globaux optionnels
 └── src/
-    ├── app.webc       # routes + layout declaration
+    ├── app.webc       # routes + déclaration du layout
     ├── layouts/
     │   └── Main.webc
     ├── pages/
@@ -83,38 +148,35 @@ webc serve" }
     }
 
     section class="doc-section" {
-        h2 { "Scaffold a new project" }
+        h2 { "Créer un nouveau projet" }
         p {
-            "Use "
             code { "webc new" }
-            " to generate a full project skeleton — webc.toml, theme.toml, layout, homepage, and a Counter component."
+            " génère un squelette complet — webc.toml, theme.toml, layout, page d'accueil et un composant Counter avec état réactif."
         }
         pre class="code-block" {
 "webc new my-app
 cd my-app
-webc serve        # dev server with HMR"
+webc serve        # serveur dev avec HMR"
         }
-        p { "The scaffold generates a working Counter component with reactive state, CSS nesting and scoped styles, so you have something to build on immediately." }
     }
 
     section class="doc-section" {
-        h2 { "Building for production" }
+        h2 { "Build de production" }
         p {
-            "Run "
             code { "webc build" }
-            " to produce a minified, production-ready "
+            " produit un "
             code { "dist/" }
-            ". After the build, the compiler prints a bundle analysis table showing which runtime features are included vs. tree-shaken."
+            " minifié, avec CSS inliné, SRI sur les assets et analyse de bundle."
         }
         pre class="code-block" {
-"webc build        # minified output in dist/
+"webc build
 
 Bundle Analysis:
-  ✓ state            312 b
-  ✓ signals ($effect) 428 b
-  ✓ bindFor          512 b
-  - http             (tree-shaken)
-  - router           (tree-shaken)
+  ✓ state              312 b
+  ✓ signals ($effect)  428 b
+  ✓ bindFor            512 b
+  - http               (tree-shaken)
+  - router             (tree-shaken)
 Total JS: 1.35 KB"
         }
     }

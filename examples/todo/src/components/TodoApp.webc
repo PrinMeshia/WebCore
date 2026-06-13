@@ -5,14 +5,15 @@ component TodoApp {
     }
     computed {
         total = (items ?? []).length
+        done  = (items ?? []).filter(i => i.done).length
     }
 
     on:mount {
         window.mkTodo = text => ({text, done: false})
         S.set('items', [
-            mkTodo("Buy groceries"),
-            mkTodo("Read a book"),
-            mkTodo("Write some Rust")
+            mkTodo("Acheter des courses"),
+            mkTodo("Lire un livre"),
+            mkTodo("Écrire du Rust")
         ])
         document.querySelector('.todo-list').addEventListener('click', function(e) {
             const w = e.target.closest('[data-webcore-idx]')
@@ -20,7 +21,7 @@ component TodoApp {
             const idx = +w.dataset.webcoreIdx
             if (e.target.classList.contains('btn-delete')) {
                 S.set('items', S.get('items').filter((_, i) => i !== idx))
-            } else if (e.target.classList.contains('btn-toggle')) {
+            } else if (e.target.closest('.btn-toggle')) {
                 S.set('items', S.get('items').map((it, i) =>
                     i === idx ? Object.assign({}, it, {done: !it.done}) : it
                 ))
@@ -29,63 +30,184 @@ component TodoApp {
     }
 
     view {
-        div {
-            h2 "Tâches ({total})"
+        div class="todo-app" {
+            div class="todo-header" {
+                h1 class="todo-title" { "Tâches" }
+                @if total > 0 {
+                    span class="todo-count" { "{done}/{total} faites" }
+                }
+            }
 
             div class="add-row" {
-                input type="text" placeholder="Nouvelle tâche…" value={draft}
-                      on:input={draft = event.target.value}
-                button on:click={items = [...(items ?? []), mkTodo(draft)]; draft = ""} { "Ajouter" }
+                input type="text"
+                      class="add-input"
+                      placeholder="Ajouter une tâche…"
+                      bind:value={draft}
+                button class="add-btn" on:click={items = [...(items ?? []), mkTodo(draft)]; draft = ""} { "Ajouter" }
             }
 
             @if total > 0 {
                 ul class="todo-list" {
-                    @for item key=item.text in items {
-                        li {
-                            button class="btn-toggle" title="Marquer comme fait" { "✓" }
+                    @for item in items {
+                        li class="todo-item" {
+                            button class="btn-toggle" title="Marquer comme fait" {
+                                span class="toggle-icon" { "✓" }
+                            }
                             span class="item-text" { "{item.text}" }
                             button class="btn-delete" title="Supprimer" { "×" }
                         }
                     }
                 }
             } @else {
-                p class="empty" { "Aucune tâche pour l'instant." }
+                div class="empty-state" {
+                    p class="empty-icon" { "✓" }
+                    p class="empty-text" { "Tout est fait !" }
+                }
             }
         }
     }
 
     style {
-        div      { max-width: 520px; margin: 2rem auto; padding: 1.5rem; }
-        h2       { margin-bottom: 1rem; }
-        .add-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-        input    { flex: 1; padding: 0.4rem 0.7rem; border: 1px solid #555; border-radius: 4px; background: #1e293b; color: #e2e8f0; }
-        ul       { list-style: none; padding: 0; margin: 0; }
-        li {
+        .todo-app {
+            max-width: 560px;
+            margin: 0 auto;
+        }
+        .todo-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: var(--spacing-lg);
+        }
+        .todo-title {
+            font-size: 1.75rem;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+        }
+        .todo-count {
+            font-size: 0.78rem;
+            color: var(--color-muted);
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--color-border);
+            padding: 2px 10px;
+            border-radius: 999px;
+        }
+        .add-row {
+            display: flex;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-lg);
+        }
+        .add-input {
+            flex: 1;
+            padding: 0.55rem 0.9rem;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            color: var(--color-text);
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: border-color 0.15s;
+            &:focus { outline: none; border-color: var(--color-primary); }
+            &::placeholder { color: var(--color-muted); }
+        }
+        .add-btn {
+            padding: 0.55rem 1.25rem;
+            background: var(--color-primary);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: opacity 0.15s, transform 0.1s;
+            &:hover { opacity: 0.85; transform: translateY(-1px); }
+        }
+        .todo-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .todo-item {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            padding: 0.55rem 0;
-            border-bottom: 1px solid #334;
-            &:last-child { border-bottom: none; }
+            gap: var(--spacing-md);
+            padding: 0.7rem var(--spacing-md);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            transition: border-color 0.15s, background 0.15s;
+            &:hover { border-color: rgba(91,74,247,0.3); }
         }
-        .item-text { flex: 1; }
         .btn-toggle {
-            padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid #22c55e;
-            background: transparent; color: #22c55e; cursor: pointer; font-size: 0.9rem;
-            &:hover { background: #22c55e; color: #fff; }
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            border: 2px solid var(--color-border);
+            background: transparent;
+            color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+            &:hover { border-color: var(--color-secondary); color: var(--color-secondary); }
+        }
+        .toggle-icon { line-height: 1; }
+        .item-text {
+            flex: 1;
+            font-size: 0.9rem;
+            color: var(--color-text);
+            line-height: 1.4;
         }
         .btn-delete {
-            padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid #ef4444;
-            background: transparent; color: #ef4444; cursor: pointer; font-size: 0.9rem;
-            &:hover { background: #ef4444; color: #fff; }
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--color-muted);
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            opacity: 0;
+            transition: opacity 0.15s, color 0.15s, border-color 0.15s;
         }
-        button {
-            padding: 0.4rem 0.9rem; cursor: pointer; border-radius: 4px; border: none; background: #3b82f6; color: #fff;
-            &:hover { opacity: 0.85; }
-        }
-        .empty   { color: #64748b; font-style: italic; }
+        .todo-item:hover .btn-delete { opacity: 1; }
+        .btn-delete:hover { color: var(--color-danger); border-color: rgba(239,68,68,0.3); }
 
-        [data-done="true"] .item-text { text-decoration: line-through; opacity: 0.45; }
-        [data-done="true"] .btn-toggle { background: #22c55e; color: #fff; }
+        [data-done="true"] .item-text { text-decoration: line-through; color: var(--color-muted); opacity: 0.55; }
+        [data-done="true"] .btn-toggle {
+            border-color: var(--color-secondary);
+            background: var(--color-secondary);
+            color: #fff;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--spacing-xxl) var(--spacing-xl);
+            gap: var(--spacing-sm);
+        }
+        .empty-icon {
+            font-size: 2.5rem;
+            width: 4rem;
+            height: 4rem;
+            background: rgba(16,185,129,0.08);
+            border: 2px solid rgba(16,185,129,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-secondary);
+        }
+        .empty-text {
+            color: var(--color-muted);
+            font-size: 0.9rem;
+        }
     }
 }

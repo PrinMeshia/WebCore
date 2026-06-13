@@ -2592,3 +2592,354 @@ fn golden_ssg_string_length_unicode() {
         "string .length should be char count (4), not byte count (5)"
     );
 }
+
+// ── v2.6.0 features ───────────────────────────────────────────────────────────
+
+#[test]
+fn golden_fragment_renders_children_without_wrapper() {
+    let html = compile_to_html(
+        r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    <>
+        h1 "Title"
+        p "Body"
+    </>
+}
+"#,
+    );
+    assert!(html.contains("<h1>Title"), "h1 missing in fragment output:\n{}", html);
+    assert!(html.contains("<p>Body"), "p missing in fragment output:\n{}", html);
+    // Fragment must NOT introduce a wrapper tag
+    assert!(!html.contains("<fragment"), "fragment wrapper tag must not appear:\n{}", html);
+    assert!(!html.contains("<>"), "raw <> must not appear in output:\n{}", html);
+}
+
+#[test]
+fn golden_fragment_in_component_view() {
+    let html = compile_to_html(
+        r#"
+layout MainLayout { main { slot content } }
+component Pair {
+    view {
+        <>
+            span "A"
+            span "B"
+        </>
+    }
+}
+page "home" { Pair {} }
+"#,
+    );
+    assert!(html.contains(">A"), "span A missing:\n{}", html);
+    assert!(html.contains(">B"), "span B missing:\n{}", html);
+    assert!(!html.contains("<fragment"), "no wrapper tag expected:\n{}", html);
+}
+
+#[test]
+fn golden_default_prop_used_when_not_supplied() {
+    let html = compile_to_html(
+        r#"
+layout MainLayout { main { slot content } }
+component Badge {
+    props { label: String = "Default" }
+    view { span "{label}" }
+}
+page "home" { Badge {} }
+"#,
+    );
+    // No label prop supplied → should use the default "Default"
+    assert!(
+        html.contains("Default"),
+        "default prop value not rendered:\n{}",
+        html
+    );
+    assert!(
+        !html.contains(&format!("{}=\"label\"", attr_names::INTERPOLATION)),
+        "unresolved label span should not appear:\n{}",
+        html
+    );
+}
+
+#[test]
+fn golden_default_prop_overridden_by_caller() {
+    let html = compile_to_html(
+        r#"
+layout MainLayout { main { slot content } }
+component Badge {
+    props { label: String = "Default" }
+    view { span "{label}" }
+}
+page "home" { Badge label="Custom" {} }
+"#,
+    );
+    assert!(
+        html.contains("Custom"),
+        "caller-supplied prop value missing:\n{}",
+        html
+    );
+    assert!(
+        !html.contains("Default"),
+        "default value should be overridden:\n{}",
+        html
+    );
+}
+
+#[test]
+fn golden_event_modifier_stop_encoded_in_data_attr() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button on:click|stop={doThing()} { "Stop" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-e=\"click|stop\""),
+        "stop modifier not encoded in data-webcore-e:\n{}",
+        res.html
+    );
+    // Handler must still be registered with base event type
+    assert!(
+        res.handlers.iter().any(|h| h.event_type == "click"),
+        "handler event_type should be base 'click': {:?}",
+        res.handlers
+    );
+}
+
+#[test]
+fn golden_event_modifier_prevent_encoded_in_data_attr() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    form on:submit|prevent={handleSubmit()} { input }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-e=\"submit|prevent\""),
+        "prevent modifier not encoded in data-webcore-e:\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_event_modifier_updates_d_function() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button on:click|stop={count += 1} { "Stop" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    let js = generate_runtime_js(&res.handlers, &doc);
+    // D() must check data-webcore-e for modifiers (startsWith check)
+    assert!(
+        js.contains("startsWith(t+'|')"),
+        "D() must use startsWith for modifier matching:\n{}",
+        js
+    );
+    assert!(
+        js.contains("mods.includes('stop')"),
+        "D() must handle stop modifier:\n{}",
+        js
+    );
+}
+
+#[test]
+fn golden_event_multiple_modifiers() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button on:click|stop|prevent={action()} { "Click" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-e=\"click|stop|prevent\""),
+        "multiple modifiers not encoded:\n{}",
+        res.html
+    );
+    // Only one D('click') call should be emitted (not one per modifier combination)
+    let js = generate_runtime_js(&res.handlers, &doc);
+    let d_click_count = js.matches("D('click',").count();
+    assert_eq!(d_click_count, 1, "should emit exactly one D('click') call: {js}");
+}
+
+// ── @for nested scope ─────────────────────────────────────────────────────
+
+#[test]
+fn golden_nested_for_generates_inner_template_with_outer_var_interpolation() {
+    // Verifies that nested @for loops produce correct HTML: inner template has
+    // data-webcore-for-in referencing the outer var's property, and the inner
+    // template content has interpolation spans for both inner and outer vars.
+    let (html, _js) = compile_full(
+        r#"
+layout MainLayout { main { slot content } }
+component NestedFor {
+    state { sections: List = null }
+    view {
+        @for section in sections {
+            div {
+                h2 "{section.title}"
+                @for item in section.items {
+                    span "{item} — {section.title}"
+                }
+            }
+        }
+    }
+}
+page "home" { NestedFor {} }
+"#,
+    );
+    // Outer template
+    assert!(
+        html.contains("data-webcore-for=\"section\""),
+        "outer for var missing:\n{html}"
+    );
+    assert!(
+        html.contains("data-webcore-in=\"sections\""),
+        "outer for-in missing:\n{html}"
+    );
+    // Inner template nested inside the outer
+    assert!(
+        html.contains("data-webcore-for=\"item\""),
+        "inner for var missing:\n{html}"
+    );
+    assert!(
+        html.contains("data-webcore-in=\"section.items\""),
+        "inner for-in missing:\n{html}"
+    );
+    // Both vars have interpolation spans in the inner template content
+    assert!(
+        html.contains("data-webcore-interpolation=\"item\""),
+        "inner var interpolation missing:\n{html}"
+    );
+    assert!(
+        html.contains("data-webcore-interpolation=\"section.title\""),
+        "outer var interpolation inside inner template missing:\n{html}"
+    );
+}
+
+#[test]
+fn golden_nested_for_bindffor_emits_context_passing_runtime() {
+    // Verifies that the JS runtime includes the new bindFor signature and
+    // context-passing machinery for nested @for support.
+    let (_html, js) = compile_full(
+        r#"
+layout MainLayout { main { slot content } }
+component NestedFor {
+    state { items: List = null }
+    view {
+        @for outer in items {
+            @for inner in outer.children {
+                p "{inner} in {outer.name}"
+            }
+        }
+    }
+}
+page "home" { NestedFor {} }
+"#,
+    );
+    assert!(
+        js.contains("bindFor=(root=document)"),
+        "bindFor should accept root parameter:\n{js}"
+    );
+    assert!(
+        js.contains("_wc_ctx"),
+        "context propagation (_wc_ctx) missing from bindFor:\n{js}"
+    );
+    assert!(
+        js.contains("isConnected"),
+        "isConnected guard missing from bindFor:\n{js}"
+    );
+    assert!(
+        js.contains("bindFor(cont)"),
+        "recursive bindFor(cont) call missing:\n{js}"
+    );
+}
+
+// ── webc fmt ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn fmt_roundtrip_simple_component() {
+    use crate::cli::fmt::{FmtOptions, format_webc};
+    let source = r#"layout MainLayout { main { slot content } }
+component Counter {
+    state {
+        count: Number = 0
+    }
+    view {
+        div {
+            p "{count}"
+            button on:click={count += 1} { "+" }
+        }
+    }
+}
+page "home" { Counter {} }
+"#;
+    let opts = FmtOptions::default();
+    let formatted = format_webc(source, &opts).expect("format failed");
+    // Formatted output must re-parse and compile to the same HTML
+    let (html_orig, _) = compile_full(source);
+    let (html_fmt, _) = compile_full(&formatted);
+    assert_eq!(
+        html_orig, html_fmt,
+        "round-trip: formatted source produces different HTML"
+    );
+}
+
+#[test]
+fn fmt_roundtrip_page_with_for_and_if() {
+    use crate::cli::fmt::{FmtOptions, format_webc};
+    let source = r#"layout MainLayout { main { slot content } }
+component ListComp {
+    state {
+        items: List = null
+        show: Boolean = true
+    }
+    view {
+        @if show {
+            @for item in items {
+                li "{item}"
+            }
+        }
+    }
+}
+page "home" { ListComp {} }
+"#;
+    let opts = FmtOptions::default();
+    let formatted = format_webc(source, &opts).expect("format failed");
+    let (html_orig, _) = compile_full(source);
+    let (html_fmt, _) = compile_full(&formatted);
+    assert_eq!(
+        html_orig, html_fmt,
+        "round-trip: formatted source produces different HTML"
+    );
+}
+
+#[test]
+fn fmt_idempotent_already_formatted() {
+    use crate::cli::fmt::{FmtOptions, format_webc};
+    // A source that is already formatted; formatting it again must produce the same output.
+    let source = r#"component Badge {
+    props {
+        label: String = "Default"
+    }
+    view {
+        span class="badge" { "{label}" }
+    }
+    style {
+        .badge { padding: 2px 6px; border-radius: 4px; }
+    }
+}
+"#;
+    let opts = FmtOptions::default();
+    let first = format_webc(source, &opts).expect("first format failed");
+    let second = format_webc(&first, &opts).expect("second format failed");
+    assert_eq!(first, second, "formatter is not idempotent");
+}

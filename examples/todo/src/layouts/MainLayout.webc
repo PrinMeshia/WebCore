@@ -1,6 +1,15 @@
 layout MainLayout {
-    header {
-        h1 "Ma Todo List"
+    header class="site-header" {
+        div class="header-inner" {
+            span class="logo" {
+                span class="logo-mark" { "▸" }
+                span { "WebCore" }
+                span class="logo-project" { "todo" }
+            }
+        }
     }
-    main { slot content }
+    main class="site-main" { slot content }
+    footer class="site-footer" {
+        p { "Construit avec " strong { "WebCore" } " — " code { "webc build" } " → HTML/CSS/JS statique" }
+    }
 }
