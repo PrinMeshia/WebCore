@@ -1,6 +1,6 @@
 //! Control-flow directive parsing: @for, @if, @switch, @error.
 
-use crate::ast::{Element, Span};
+use crate::core::ast::{Element, Span};
 use crate::parser::elements::{extract_string_literal, parse_element};
 use crate::parser::{ParseError, Rule};
 use pest::iterators::Pair;

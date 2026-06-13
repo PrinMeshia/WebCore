@@ -1,7 +1,7 @@
 //! CSS Code Generator with Scoped Styles
 
-use crate::ast::{Component, KeyframeStep, StyleItem, StyleRule, WebCoreDocument};
-use crate::theme::Theme;
+use crate::core::ast::{Component, KeyframeStep, StyleItem, StyleRule, WebCoreDocument};
+use crate::core::theme::Theme;
 use std::fmt::Write as _;
 
 // FNV-1a 32-bit constants (https://tools.ietf.org/html/draft-eastlake-fnv)

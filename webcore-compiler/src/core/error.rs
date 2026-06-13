@@ -4,7 +4,7 @@
 //! `Result<T, String>`.  Internal helpers that still use `String` errors can
 //! propagate via `?` thanks to `impl From<String> for CompileError`.
 
-use crate::ast::Span;
+use crate::core::ast::Span;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -35,40 +35,55 @@ pub enum CompileError {
     Custom(String),
 }
 
+fn use_color() -> bool {
+    std::env::var("NO_COLOR").is_err()
+        && std::env::var("TERM")
+            .map(|t| t != "dumb")
+            .unwrap_or(true)
+}
+
 impl std::fmt::Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let color = use_color();
+        let (bold_red, bold, reset) = if color {
+            ("\x1b[1;31m", "\x1b[1m", "\x1b[0m")
+        } else {
+            ("", "", "")
+        };
         match self {
-            CompileError::Parse {
-                file,
-                message,
-                span,
-            } => {
+            CompileError::Parse { file, message, span } => {
                 if let Some(sp) = span {
                     write!(
                         f,
-                        "Parse error in {} ({}:{}): {}",
-                        file.display(),
-                        sp.line,
-                        sp.col,
-                        message
+                        "{bold_red}error[parse]{reset}: {bold}{}:{}:{}{reset}: {}",
+                        file.display(), sp.line, sp.col, message
                     )
                 } else {
-                    write!(f, "Parse error in {}: {}", file.display(), message)
+                    write!(
+                        f,
+                        "{bold_red}error[parse]{reset}: {bold}{}{reset}: {}",
+                        file.display(), message
+                    )
                 }
             }
             CompileError::MissingLayout { name, available } => write!(
                 f,
-                "Layout '{}' not found. Available layouts: [{}]",
-                name,
+                "{bold_red}error{reset}: layout {bold}'{name}'{reset} introuvable. Layouts disponibles : [{}]",
                 available.join(", ")
             ),
-            CompileError::MissingPage { name } => write!(f, "Page '{}' not found", name),
-            CompileError::MissingComponent { name } => {
-                write!(f, "Component '{}' not found", name)
-            }
-            CompileError::Io { path, source } => {
-                write!(f, "I/O error for '{}': {}", path.display(), source)
-            }
+            CompileError::MissingPage { name } => write!(
+                f,
+                "{bold_red}error{reset}: page {bold}'{name}'{reset} introuvable"
+            ),
+            CompileError::MissingComponent { name } => write!(
+                f,
+                "{bold_red}error{reset}: composant {bold}'{name}'{reset} introuvable"
+            ),
+            CompileError::Io { path, source } => write!(
+                f,
+                "{bold_red}error[io]{reset}: {bold}{}{reset}: {source}",
+                path.display()
+            ),
             CompileError::Custom(msg) => write!(f, "{msg}"),
         }
     }

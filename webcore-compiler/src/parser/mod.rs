@@ -4,7 +4,7 @@ mod declarations;
 mod directives;
 mod elements;
 
-use crate::ast::{Span, WebCoreDocument};
+use crate::core::ast::{Span, WebCoreDocument};
 use pest::Parser;
 use pest_derive::Parser;
 use std::collections::HashMap;
@@ -20,6 +20,8 @@ pub struct ParseError {
     pub span: Option<Span>,
     /// The exact source line where the error occurred (for caret display).
     pub source_line: Option<String>,
+    /// Source file path — set by the build pipeline after parsing.
+    pub file: Option<std::path::PathBuf>,
 }
 
 impl ParseError {
@@ -28,6 +30,7 @@ impl ParseError {
             message: message.into(),
             span: None,
             source_line: None,
+            file: None,
         }
     }
 
@@ -36,17 +39,41 @@ impl ParseError {
             message: message.into(),
             span: Some(span),
             source_line: None,
+            file: None,
         }
     }
+}
+
+fn use_color() -> bool {
+    std::env::var("NO_COLOR").is_err()
+        && std::env::var("TERM")
+            .map(|t| t != "dumb")
+            .unwrap_or(true)
+}
+
+/// Extract the first `expected …` clause from a Pest error message.
+fn extract_expected_clause(pest_msg: &str) -> Option<String> {
+    pest_msg
+        .lines()
+        .find(|l| l.trim_start().starts_with("= expected"))
+        .map(|l| {
+            l.trim_start_matches(|c: char| c.is_whitespace() || c == '=')
+                .trim()
+                .to_string()
+        })
 }
 
 fn parse_hint(msg: &str) -> Option<&'static str> {
     if msg.contains("interp_expr") {
         Some("{} est vide — écris {maVar} ou utilise un attribut string: attr=\"valeur\"")
+    } else if msg.contains("expected element") {
+        Some("accolade fermante manquante ? Chaque bloc { doit être fermé par }")
     } else if msg.contains("string_literal") {
         Some("valeur texte attendue entre guillemets, ex: \"ma valeur\"")
+    } else if msg.contains("expression_content") {
+        Some("expression JS attendue, ex: on:click={count += 1}")
     } else if msg.contains("identifier") {
-        Some("nom attendu (lettres, chiffres, _) sans guillemets")
+        Some("nom attendu (lettres, chiffres, _) sans guillemets ni espaces")
     } else {
         None
     }
@@ -54,23 +81,34 @@ fn parse_hint(msg: &str) -> Option<&'static str> {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let color = use_color();
+        let (bold_red, bold, red, cyan, reset) = if color {
+            ("\x1b[1;31m", "\x1b[1m", "\x1b[31m", "\x1b[36m", "\x1b[0m")
+        } else {
+            ("", "", "", "", "")
+        };
+
         if let (Some(span), Some(src)) = (&self.span, &self.source_line) {
+            let loc = match &self.file {
+                Some(p) => format!("{}:{}:{}", p.display(), span.line, span.col),
+                None => format!("{}:{}", span.line, span.col),
+            };
+            writeln!(f, "{bold_red}error[parse]{reset}: {bold}{loc}{reset}")?;
+
             let col0 = (span.col as usize).saturating_sub(1);
-            write!(
-                f,
-                "{}:{}\n  |\n{:>3} | {}\n  | {}^",
-                span.line,
-                span.col,
-                span.line,
-                src,
-                " ".repeat(col0)
-            )?;
+            writeln!(f, "  {cyan}|{reset}")?;
+            writeln!(f, "{:>3} {cyan}|{reset} {src}", span.line)?;
+            write!(f, "  {cyan}|{reset} {}{red}^{reset}", " ".repeat(col0))?;
+
+            if let Some(clause) = extract_expected_clause(&self.message) {
+                write!(f, " {clause}")?;
+            }
             if let Some(hint) = parse_hint(&self.message) {
-                write!(f, "\n  |\n  = hint: {hint}")?;
+                write!(f, "\n  {cyan}|{reset}\n  = {bold}hint{reset}: {hint}")?;
             }
             Ok(())
         } else {
-            write!(f, "{}", self.message)
+            write!(f, "{bold_red}error[parse]{reset}: {}", self.message)
         }
     }
 }
@@ -89,6 +127,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
             message: format!("{e}"),
             span: Some(Span::new(0, 0, line, col)),
             source_line,
+            file: None,
         }
     })?;
 
@@ -145,7 +184,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                         } else {
                             path_raw
                         };
-                        document.imports.push(crate::ast::ImportDecl { name, path });
+                        document.imports.push(crate::core::ast::ImportDecl { name, path });
                     }
                     _ => {}
                 }
@@ -201,7 +240,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
 }
 
 fn check_nesting_depth(
-    el: &crate::ast::Element,
+    el: &crate::core::ast::Element,
     depth: usize,
     max: usize,
 ) -> Result<(), ParseError> {
@@ -219,7 +258,7 @@ fn check_nesting_depth(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{AttributeValue, Element};
+    use crate::core::ast::{AttributeValue, Element};
 
     #[test]
     fn test_parse_simple_component() {

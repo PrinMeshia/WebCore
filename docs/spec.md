@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 2.4.0 — Référence complète de la syntaxe `.webc`
+> Version : 2.5.2 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -60,7 +60,10 @@
 45. [Nouveautés v2.2.0](#nouveautés-v220)
 46. [Nouveautés v2.3.0](#nouveautés-v230)
 47. [Nouveautés v2.4.0](#nouveautés-v240)
-48. [Limites actuelles (v2.4.0)](#limites-actuelles-v240)
+48. [Nouveautés v2.5.0](#nouveautés-v250)
+49. [Nouveautés v2.5.1](#nouveautés-v251)
+50. [Nouveautés v2.5.2](#nouveautés-v252)
+51. [Limites actuelles (v2.5.2)](#limites-actuelles-v252)
 
 ---
 
@@ -2486,12 +2489,12 @@ La feuille complète `theme.css` est chargée **en différé**, sans bloquer le 
 <style>/* CSS critique de la page, minifié */</style>
 <link rel="stylesheet" href="/assets/theme.css?v=hash"
       integrity="sha256-..." crossorigin="anonymous"
-      media="print" onload="this.media='all'">
+      media="print" data-webcore-defer>
 <noscript><link rel="stylesheet" href="/assets/theme.css?v=hash"></noscript>
 ```
 
 - `media="print"` : le navigateur télécharge la feuille sans bloquer le rendu
-- `onload="this.media='all'"` : une fois chargée, elle s'applique normalement
+- `data-webcore-defer` : le swap `media` → `"all"` est effectué dans `DOMContentLoaded` (CSP-safe, remplace `onload="this.media='all'"` depuis v2.5.0)
 - `<noscript>` : fallback bloquant classique si JS est désactivé
 
 Résultat : zéro CSS render-blocking, First Contentful Paint immédiat.
@@ -2555,7 +2558,196 @@ par `webc build` (elles étaient parsées mais jamais lues) :
 
 ---
 
-## Limites actuelles (v2.4.0)
+## Nouveautés v2.5.0
+
+### CSP stricte — event delegation
+
+Depuis v2.5.0, les handlers d'événements ne sont plus émis comme attributs HTML inline.
+
+**Avant (v2.4.0) :**
+```html
+<button onclick="webcore_handle_click(...)">
+<form onsubmit="webcore_handle_submit(...)">
+```
+
+**Après (v2.5.0) :**
+```html
+<button data-webcore-e="click">
+<form data-webcore-e="submit">
+```
+
+Un unique `document.addEventListener` par type d'événement est enregistré dans le runtime JS via délégation. Cela rend le HTML entièrement compatible avec `script-src 'self'` — plus aucun JS inline.
+
+> La **syntaxe `.webc` ne change pas** : `on:click`, `on:submit`, `on:change` etc. fonctionnent exactement pareil pour le développeur. Seul le HTML généré change.
+
+### Navigation SPA `data-webcore-nav`
+
+Les liens de navigation SPA n'utilisent plus de JS inline :
+
+**Avant :**
+```html
+<a onclick="webcore_navigate('/path')">Accueil</a>
+```
+
+**Après :**
+```html
+<a href="/path" data-webcore-nav>Accueil</a>
+```
+
+Un listener délégué `document.addEventListener('click', ...)` capture les clics sur `a[data-webcore-nav]` et déclenche la navigation History API. La syntaxe `.webc` reste inchangée : `link to="/path" "Accueil"`.
+
+### CSS différé `data-webcore-defer`
+
+Le swap du CSS différé est désormais géré dans `DOMContentLoaded` au lieu d'un attribut `onload` inline :
+
+**Avant (v2.4.0) :**
+```html
+<link rel="stylesheet" href="/assets/theme.css" media="print" onload="this.media='all'">
+```
+
+**Après (v2.5.0) :**
+```html
+<link rel="stylesheet" href="/assets/theme.css" media="print" data-webcore-defer>
+```
+
+Le runtime détecte `data-webcore-defer` au `DOMContentLoaded` et applique `media = 'all'`. Le `<noscript>` fallback est conservé.
+
+### Option `csp = true` dans `webc.toml`
+
+```toml
+[app]
+mode = "prod"
+csp = true
+```
+
+Quand `csp = true` en mode `prod`, chaque page reçoit automatiquement dans son `<head>` :
+
+```html
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:">
+```
+
+> Note : `style-src 'unsafe-inline'` est requis pour le critical CSS inline (voir [Limites actuelles](#limites-actuelles-v252)).
+
+---
+
+## Nouveautés v2.5.1
+
+### Corrections de sécurité et de comportement
+
+**Escape des `</style>` dans le CSS critique inline**
+
+Les séquences `</style>` présentes dans le CSS critique inliné sont désormais échappées en `<\/style>`. Cela empêche la sortie prématurée du bloc `<style>` et évite toute injection HTML.
+
+**Zero-JS + critical CSS**
+
+Une page sans JS réactif qui utilise le critical CSS inclut maintenant `webcore.js`. Ce script est requis pour le swap `data-webcore-defer` (le chargement différé de `theme.css`). Sans lui, le CSS différé ne s'appliquerait jamais.
+
+**`.length` sur arrays contenant des virgules dans les chaînes**
+
+```webc
+// items = ["a,b", "c"]
+{items.length}  // retourne 2 (correct) — était 3 (bug de parsing naïf)
+```
+
+Le parser de tableaux distingue désormais correctement les virgules à l'intérieur des chaînes entre guillemets des virgules séparatrices d'éléments.
+
+**`.length` Unicode-correct**
+
+```webc
+{"café".length}  // retourne 4 (caractères) — était 5 (octets UTF-8)
+```
+
+Le calcul de longueur opère désormais sur les caractères Unicode (points de code) et non sur les octets.
+
+**Minificateur HTML — encodage UTF-8**
+
+Le minificateur HTML en mode `prod` utilisait `bytes[i] as char` pour itérer sur les caractères, ce qui tronquait incorrectement les séquences UTF-8 multi-octets (accents, emoji, caractères CJK). Les caractères sont désormais traités comme des points de code Unicode — les titres, meta tags et contenus texte en langues non-ASCII ne sont plus corrompus après minification.
+
+---
+
+## Nouveautés v2.5.2
+
+### Messages d'erreur enrichis
+
+Depuis v2.5.2, les erreurs de compilation affichent un format structuré avec contexte visuel.
+
+**Format d'erreur :**
+
+```
+error[parse]: src/pages/home.webc:3:17
+  |
+3 |     div class={  }
+  |                 ^
+  = expected expression
+  = hint: une interpolation vide `{}` n'est pas valide — utilisez `{varName}` ou `{expr}`
+```
+
+Chaque erreur de parse comporte :
+- Un en-tête `error[parse]: fichier:ligne:col` (rouge gras si le terminal le supporte)
+- Le numéro de ligne avec le gutter `|` (cyan)
+- La ligne source fautive
+- Un caret `^` positionné sous la colonne exacte (rouge)
+- La clause `expected` extraite du message Pest
+- Un `= hint:` contextuel si applicable
+
+Le fichier source est propagé depuis tous les points de chargement (`app.webc`, `layouts/`, `components/`, `pages/`) — chaque erreur indique son fichier exact.
+
+**Couleurs ANSI :**
+
+Les couleurs sont automatiquement désactivées si `NO_COLOR=1` ou `TERM=dumb` est posé dans l'environnement. La sortie reste lisible en texte brut (CI, pipes, logs).
+
+**Cinq patterns de hints contextuels :**
+
+| Pattern détecté | Hint affiché |
+|---|---|
+| Interpolation vide `{}` | `une interpolation vide \{\} n'est pas valide — utilisez \{varName\} ou \{expr\}` |
+| Accolade fermante manquante | `accolade fermante \`}\` manquante` |
+| Guillemets attendus | `une chaîne de caractères est attendue ici` |
+| Expression JS attendue | `une expression JS est attendue après \`=\`` |
+| Nom sans espaces attendu | `un identifiant sans espaces est attendu ici` |
+
+**Suppression du préfixe redondant :**
+
+La sortie de `webc build` n'affiche plus le préfixe `"Build failed:"` avant la liste d'erreurs — `CompileErrors::Display` affiche directement les erreurs puis le compte final.
+
+### Performances internes v2.5.2
+
+Ces optimisations n'ajoutent aucune fonctionnalité visible mais améliorent les performances
+du compilateur et du runtime généré.
+
+**`bindFor` — mutation DOM atomique**
+
+La boucle `@for` sans `key=` utilise désormais un `DocumentFragment` + `replaceChildren(frag)`
+au lieu de `innerHTML=''` + N appels `appendChild`. Résultat : une seule mutation DOM atomique,
+les reflows intermédiaires entre insertions sont éliminés — bénéfice mesurable sur les listes
+de plus de ~20 éléments qui se rafraîchissent fréquemment.
+
+**`evalCond` — O(1) et regexes pré-compilées**
+
+Deux optimisations dans le JS généré :
+- `const VARS_SET=new Set(VARS)` — lookup O(1) pour les expressions qui sont exactement un nom
+  de variable (le chemin le plus fréquent).
+- `const _VR=[...VARS].sort(...).map(v=>[RegExp,...])` — les regexes de substitution pour les
+  expressions composites sont construites une fois au chargement de la page (et non à chaque appel
+  `evalCond`).
+
+**SSG — `OnceLock<Regex>` et scanners passe unique**
+
+- Les 3 regexes de `apply_ssg_with_locales` sont compilées une seule fois par processus (`OnceLock`).
+- `html_unescape` et `html_escape_text` utilisent des scanners passe unique avec sortie anticipée
+  (évite l'allocation d'intermédiaires lorsqu'aucun caractère spécial n'est présent).
+
+**Compilateur — `resolve_slots` et regexes variables**
+
+- `contains_slot()` court-circuite `resolve_slots` pour les sous-arbres sans slot → évite la
+  reconstruction récursive de l'AST dans la majorité des nœuds d'un layout.
+- Les N regexes de substitution des variables d'état sont compilées une fois par document au lieu
+  d'une recompilation par expression.
+
+---
+
+## Limites actuelles (v2.5.2)
 
 | Limite | Détail |
 |---|---|
@@ -2567,3 +2759,4 @@ par `webc build` (elles étaient parsées mais jamais lues) :
 | Imports de données | Seuls JSON et TOML sont supportés (pas de CSV, XML, ou requêtes réseau) |
 | Collections SSG | Seuls les champs de l'élément accessibles via `$route.<param>` sont pré-rendus ; les autres champs (`title`, etc.) sont résolus côté client |
 | Collections SSG | Un seul paramètre `:param` par route de collection |
+| CSP et `style-src` | `style-src 'unsafe-inline'` est requis pour le critical CSS inline — une CSP stricte sans `'unsafe-inline'` n'est pas possible tant que le critical CSS reste dans un `<style>` inline |

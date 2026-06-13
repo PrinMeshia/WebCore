@@ -31,13 +31,13 @@ mod js_dom;
 mod js_events;
 mod js_runtime;
 
-use crate::ast::WebCoreDocument;
-use crate::codegen::codegen_html::HandlerMapping;
+use crate::core::ast::WebCoreDocument;
+use crate::codegen::html::HandlerMapping;
 use js_dom::{
     collect_component_event_listeners, collect_on_destroy_bodies, collect_on_mount_bodies,
     detect_features, rebind_seq,
 };
-use js_events::{compile_expression_full, replace_utils_short};
+use js_events::{compile_expression_full, replace_utils_short, CompiledVars};
 use js_runtime::{emit_bind_fns, emit_evalcond, emit_state_class, emit_vars_array};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -113,10 +113,14 @@ pub(crate) fn generate_runtime_js_with_vars(
     store_vars: &HashSet<String>,
     document: &WebCoreDocument,
 ) -> String {
-    let mut unique_handlers: std::collections::HashMap<String, &HandlerMapping> =
+    // Pre-compile variable regexes once for this document — avoids recompiling N regexes
+    // for every expression in handlers, computed vars, listeners, etc.
+    let compiled_vars = CompiledVars::new(state_vars);
+
+    let mut unique_handlers: std::collections::HashMap<&str, &HandlerMapping> =
         std::collections::HashMap::new();
     for handler in handlers {
-        unique_handlers.insert(handler.id.clone(), handler);
+        unique_handlers.insert(&handler.id, handler);
     }
 
     // ── Feature detection (tree-shaking) ────────────────────────────────────
@@ -127,7 +131,7 @@ pub(crate) fn generate_runtime_js_with_vars(
     for component in document.components.values() {
         for cv in &component.computed {
             let compiled =
-                replace_utils_short(&js_events::replace_store_and_local(&cv.expr, state_vars));
+                replace_utils_short(&js_events::replace_store_and_local(&cv.expr, &compiled_vars));
             computed_entries.push(format!("{{name:'{}',fn:()=>{}}}", cv.name, compiled));
         }
     }
@@ -247,7 +251,7 @@ pub(crate) fn generate_runtime_js_with_vars(
         if handler.event_type.contains("|debounce") {
             continue;
         }
-        let compiled = compile_expression_full(&handler.expression, state_vars);
+        let compiled = compile_expression_full(&handler.expression, &compiled_vars);
         writeln!(js, "{}(){{{}}},", handler.id, compiled).unwrap();
     }
     js.push_str("};\n\n");
@@ -298,7 +302,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                 .cloned()
                 .unwrap_or_default();
             let mut route_entries: Vec<(String, String)> = routes.into_iter().collect();
-            route_entries.sort_by_key(|(path, _)| path.clone());
+            route_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             let mut routes_js = String::from("const ROUTES=[");
             for (path, page_name) in &route_entries {
@@ -340,21 +344,51 @@ pub(crate) fn generate_runtime_js_with_vars(
         js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
     }
 
+    // ── Event delegation (CSP-safe — no inline onclick= attributes) ──────────
+    // D(t, p) listens at document level and dispatches via H[el.id].
+    // p=1 means preventDefault (click, submit); p=0 leaves default behaviour.
+    let non_debounce_event_types: Vec<String> = {
+        let mut seen = std::collections::BTreeSet::new();
+        for h in &sorted_handlers {
+            if !h.event_type.contains("|debounce") {
+                seen.insert(h.event_type.clone());
+            }
+        }
+        seen.into_iter().collect()
+    };
+    if !non_debounce_event_types.is_empty() {
+        js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest(`[data-webcore-e=\"${t}\"]`);if(el&&H[el.id]){if(p)e.preventDefault();H[el.id]();}});\n");
+        for et in &non_debounce_event_types {
+            let prevent = matches!(et.as_str(), "click" | "submit");
+            writeln!(js, "D('{}',{});", et, if prevent { 1 } else { 0 }).unwrap();
+        }
+        js.push('\n');
+    }
+
+    // ── SPA link delegation (data-webcore-nav) ────────────────────────────────
+    if features.has_navigation {
+        js.push_str("document.addEventListener('click',e=>{const a=e.target.closest('a[data-webcore-nav]');if(a){e.preventDefault();nav(a.getAttribute('href'));}});\n\n");
+    }
+
     // ── globalThis exports ────────────────────────────────────────────────────
-    let i18n_export = if document.locales.is_empty() {
-        ""
-    } else {
-        ",setLocale"
-    };
-    let nav_export = if features.has_navigation {
-        "webcore_navigate:nav,"
-    } else {
-        ""
-    };
-    writeln!(js, "Object.assign(globalThis,{{{nav_export}webcore_handle_event:(t,id)=>H[id]?.(){i18n_export},").unwrap();
-    js.push_str(
-        "...Object.fromEntries(['click','submit','change','input'].map(e=>[`webcore_handle_${e}`,id=>H[id]?.()]))});\n\n",
-    );
+    {
+        let mut global_exports: Vec<&str> = Vec::new();
+        if features.has_navigation {
+            global_exports.push("webcore_navigate:nav");
+        }
+        if !document.locales.is_empty() {
+            global_exports.push("setLocale");
+        }
+        if !global_exports.is_empty() {
+            writeln!(
+                js,
+                "Object.assign(globalThis,{{{}}});",
+                global_exports.join(",")
+            )
+            .unwrap();
+            js.push('\n');
+        }
+    }
 
     // ── DOMContentLoaded ─────────────────────────────────────────────────────
     let mount_bodies = collect_on_mount_bodies(document);
@@ -379,7 +413,10 @@ pub(crate) fn generate_runtime_js_with_vars(
     } else {
         ""
     };
-    write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}").unwrap();
+    // Swap deferred stylesheet (data-webcore-defer) to media="all" — CSP-safe alternative to onload=
+    let css_defer_swap =
+        ";document.querySelectorAll('link[data-webcore-defer]').forEach(l=>l.media='all')";
+    write!(js, "document.addEventListener('DOMContentLoaded',()=>{{{init_route_params}{transition_css_inject}{all_rebinds}{refs_populate}{css_defer_swap}").unwrap();
     for body in &mount_bodies {
         write!(js, ";(()=>{{{}}})()", body.trim()).unwrap();
     }
@@ -390,7 +427,7 @@ pub(crate) fn generate_runtime_js_with_vars(
         }
     }
     for listener in &comp_listeners {
-        let compiled = compile_expression_full(&listener.expression, state_vars);
+        let compiled = compile_expression_full(&listener.expression, &compiled_vars);
         write!(
             js,
             ";document.addEventListener('{}',e=>{{{}}})",
@@ -421,7 +458,7 @@ pub(crate) fn generate_runtime_js_with_vars(
                 } else {
                     (handler.event_type.as_str(), 300u32)
                 };
-            let compiled = compile_expression_full(&handler.expression, state_vars);
+            let compiled = compile_expression_full(&handler.expression, &compiled_vars);
             dbt_idx += 1;
             write!(js,
                 ";(()=>{{const __el=document.getElementById('{}');if(__el){{let __dbt{};__el.addEventListener('{}',e=>{{clearTimeout(__dbt{});__dbt{}=setTimeout(()=>{{{};}}{},{})}})}}}})()",

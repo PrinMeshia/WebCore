@@ -5,6 +5,44 @@
 
 use regex::Regex;
 use std::collections::HashSet;
+use std::sync::OnceLock;
+
+static RE_STORE: OnceLock<Regex> = OnceLock::new();
+static RE_SENT: OnceLock<Regex> = OnceLock::new();
+
+/// Pre-compiled, longest-first sorted variable replacement regexes for a document.
+///
+/// Build once per `generate_runtime_js_with_vars` call instead of recompiling
+/// on every expression. Sorting longest-first prevents shorter names from
+/// matching inside longer ones (e.g. `count` inside `countdown`).
+pub(super) struct CompiledVars(Vec<(String, Regex)>);
+
+impl CompiledVars {
+    pub fn new(vars: &HashSet<String>) -> Self {
+        let mut sorted: Vec<&String> = vars.iter().collect();
+        sorted.sort_by_key(|v| std::cmp::Reverse(v.len()));
+        let pairs = sorted
+            .into_iter()
+            .filter_map(|v| {
+                let pat = format!(r"\b{}\b", regex::escape(v));
+                Regex::new(&pat).ok().map(|re| (v.clone(), re))
+            })
+            .collect();
+        Self(pairs)
+    }
+
+    fn replace_into(&self, expr: &str) -> String {
+        let mut result = std::borrow::Cow::Borrowed(expr);
+        for (var, re) in &self.0 {
+            let replacement = format!("S.get('{var}')");
+            let next = re.replace_all(&result, replacement.as_str());
+            if let std::borrow::Cow::Owned(s) = next {
+                result = std::borrow::Cow::Owned(s);
+            }
+        }
+        result.into_owned()
+    }
+}
 
 /// Parse `$store.identifier op= value`
 pub(super) fn parse_store_compound_assign(expr: &str, op: &str) -> Option<(String, String)> {
@@ -56,57 +94,26 @@ pub(super) fn parse_compound_assign(expr: &str, operator: &str) -> Option<(Strin
 
 /// Parse simple assignment like "count = value" (but not ==, !=, <=, >=)
 pub(super) fn parse_simple_assign(expr: &str) -> Option<(String, String)> {
-    // Find = that is not part of ==, !=, <=, >=, +=, -=, *=, /=
-    let chars: Vec<char> = expr.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
+    // Walk char_indices so we never allocate a Vec<char>.
+    // '=' is ASCII so byte-indexing the next char is safe.
+    let mut prev = '\0';
+    for (i, c) in expr.char_indices() {
         if c == '=' {
-            // Check previous char
-            if i > 0 {
-                let prev = chars[i - 1];
-                if prev == '='
-                    || prev == '!'
-                    || prev == '<'
-                    || prev == '>'
-                    || prev == '+'
-                    || prev == '-'
-                    || prev == '*'
-                    || prev == '/'
+            let prev_is_op = matches!(prev, '=' | '!' | '<' | '>' | '+' | '-' | '*' | '/');
+            let next_is_eq = expr.as_bytes().get(i + 1) == Some(&b'=');
+            if !prev_is_op && !next_is_eq {
+                let var_name = expr[..i].trim();
+                let value = expr[i + 1..].trim();
+                if !var_name.is_empty()
+                    && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 {
-                    continue;
+                    return Some((var_name.to_string(), value.to_string()));
                 }
             }
-            // Check next char
-            if i + 1 < chars.len() && chars[i + 1] == '=' {
-                continue;
-            }
-
-            let var_name = expr[..i].trim().to_string();
-            let value = expr[i + 1..].trim().to_string();
-
-            // Validate variable name
-            if var_name.chars().all(|c| c.is_alphanumeric() || c == '_') && !var_name.is_empty() {
-                return Some((var_name, value));
-            }
         }
+        prev = c;
     }
     None
-}
-
-/// Replace variable references with short getter (S.get)
-pub(super) fn replace_vars_short(expr: &str, state_vars: &HashSet<String>) -> String {
-    let mut result = expr.to_string();
-    let mut vars: Vec<_> = state_vars.iter().collect();
-    vars.sort_by_key(|v| std::cmp::Reverse(v.len()));
-
-    for var in vars {
-        let pattern = format!(r"\b{}\b", regex::escape(var));
-        if let Ok(re) = Regex::new(&pattern) {
-            result = re
-                .replace_all(&result, format!("S.get('{var}')").as_str())
-                .to_string();
-        }
-    }
-    result
 }
 
 /// Replace utility functions with short aliases (U.max, etc.)
@@ -122,19 +129,22 @@ pub(super) fn replace_utils_short(expr: &str) -> String {
 
 /// Replace `$store.varname` (sentinel: `__STORE_varname__`) then local vars, then restore.
 /// The sentinel approach prevents local-var replacement from touching store references.
-pub(super) fn replace_store_and_local(expr: &str, state_vars: &HashSet<String>) -> String {
-    let re_store = Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)")
-        .expect("hardcoded $store.var regex is always valid");
+/// The two hardcoded regexes are compiled once (OnceLock) for the process lifetime.
+pub(super) fn replace_store_and_local(expr: &str, vars: &CompiledVars) -> String {
+    let re_store = RE_STORE.get_or_init(|| {
+        Regex::new(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)").expect("hardcoded regex")
+    });
+    let re_sent = RE_SENT.get_or_init(|| {
+        Regex::new(r"__STORE_([a-zA-Z_][a-zA-Z0-9_]*)__").expect("hardcoded regex")
+    });
     // Step 1: sentinel so local-var replacement can't touch store refs
-    let sentineled = re_store.replace_all(expr, "__STORE_$1__").to_string();
-    // Step 2: replace local state vars  (_ is a word char → \bcount\b won't match inside __STORE_count__)
-    let with_local = replace_vars_short(&sentineled, state_vars);
+    let sentineled = re_store.replace_all(expr, "__STORE_$1__").into_owned();
+    // Step 2: replace local state vars (_ is a word char → \bcount\b won't match inside __STORE_count__)
+    let with_local = vars.replace_into(&sentineled);
     // Step 3: restore sentinels → STORE.get('...')
-    let re_sent = Regex::new(r"__STORE_([a-zA-Z_][a-zA-Z0-9_]*)__")
-        .expect("hardcoded store-sentinel regex is always valid");
     re_sent
         .replace_all(&with_local, "STORE.get('$1')")
-        .to_string()
+        .into_owned()
 }
 
 /// Convert a route pattern `/post/:slug` to a JS regex string `^\/post\/([^\/]+)$`
@@ -204,7 +214,7 @@ pub(super) fn compile_navigate_call(expr: &str) -> String {
 }
 
 /// Compile emit("eventName") or emit("eventName", data) to `CustomEvent` dispatch.
-pub(super) fn compile_emit_call(expr: &str, state_vars: &HashSet<String>) -> String {
+pub(super) fn compile_emit_call(expr: &str, vars: &CompiledVars) -> String {
     if let Some(start) = expr.find("emit(") {
         let inner_start = start + 5;
         if let Some(paren_end) = expr[inner_start..].rfind(')') {
@@ -215,18 +225,18 @@ pub(super) fn compile_emit_call(expr: &str, state_vars: &HashSet<String>) -> Str
                 return format!("document.dispatchEvent(new CustomEvent({event_name}))");
             }
             let detail_raw = parts[1].trim();
-            let detail = replace_utils_short(&replace_store_and_local(detail_raw, state_vars));
+            let detail = replace_utils_short(&replace_store_and_local(detail_raw, vars));
             return format!(
                 "document.dispatchEvent(new CustomEvent({event_name},{{detail:{detail}}}))"
             );
         }
     }
-    let result = replace_store_and_local(expr, state_vars);
+    let result = replace_store_and_local(expr, vars);
     replace_utils_short(&result)
 }
 
 /// Full expression compiler: handles both `$store.var` and local state vars.
-pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) -> String {
+pub(crate) fn compile_expression_full(expr: &str, vars: &CompiledVars) -> String {
     let compiled = expr.trim();
 
     // Multi-statement: split on ; and compile each independently
@@ -240,7 +250,7 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
         if parts.len() > 1 {
             return parts
                 .iter()
-                .map(|s| compile_expression_full(s, state_vars))
+                .map(|s| compile_expression_full(s, vars))
                 .collect::<Vec<_>>()
                 .join(";");
         }
@@ -248,24 +258,24 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
 
     // Store compound assigns: $store.count += 1
     if let Some((var, val)) = parse_store_compound_assign(compiled, "+=") {
-        let rhs = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        let rhs = replace_utils_short(&replace_store_and_local(&val, vars));
         return format!("STORE.set('{var}',STORE.get('{var}')+{rhs})");
     }
     if let Some((var, val)) = parse_store_compound_assign(compiled, "-=") {
-        let rhs = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        let rhs = replace_utils_short(&replace_store_and_local(&val, vars));
         return format!("STORE.set('{var}',STORE.get('{var}')-{rhs})");
     }
     if let Some((var, val)) = parse_store_compound_assign(compiled, "*=") {
-        let rhs = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        let rhs = replace_utils_short(&replace_store_and_local(&val, vars));
         return format!("STORE.set('{var}',STORE.get('{var}')*{rhs})");
     }
     if let Some((var, val)) = parse_store_compound_assign(compiled, "/=") {
-        let rhs = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        let rhs = replace_utils_short(&replace_store_and_local(&val, vars));
         return format!("STORE.set('{var}',STORE.get('{var}')/{rhs})");
     }
     // Store simple assign: $store.count = value
     if let Some((var, val)) = parse_store_simple_assign(compiled) {
-        let rhs = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        let rhs = replace_utils_short(&replace_store_and_local(&val, vars));
         return format!("STORE.set('{var}',{rhs})");
     }
 
@@ -275,7 +285,7 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
             "S.set('{}',S.get('{}')+{})",
             var,
             var,
-            replace_store_and_local(&val, state_vars)
+            replace_store_and_local(&val, vars)
         );
     }
     if let Some((var, val)) = parse_compound_assign(compiled, "-=") {
@@ -283,7 +293,7 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
             "S.set('{}',S.get('{}')-{})",
             var,
             var,
-            replace_store_and_local(&val, state_vars)
+            replace_store_and_local(&val, vars)
         );
     }
     if let Some((var, val)) = parse_compound_assign(compiled, "*=") {
@@ -291,7 +301,7 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
             "S.set('{}',S.get('{}')*{})",
             var,
             var,
-            replace_store_and_local(&val, state_vars)
+            replace_store_and_local(&val, vars)
         );
     }
     if let Some((var, val)) = parse_compound_assign(compiled, "/=") {
@@ -299,13 +309,14 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
             "S.set('{}',S.get('{}')/{})",
             var,
             var,
-            replace_store_and_local(&val, state_vars)
+            replace_store_and_local(&val, vars)
         );
     }
     // Local state simple assign: count = max(0, count - 1)
     if let Some((var, val)) = parse_simple_assign(compiled) {
-        if state_vars.contains(&var) {
-            let replaced = replace_utils_short(&replace_store_and_local(&val, state_vars));
+        // Check membership against the raw pairs to avoid a HashSet lookup
+        if vars.0.iter().any(|(v, _)| v == &var) {
+            let replaced = replace_utils_short(&replace_store_and_local(&val, vars));
             return format!("S.set('{var}',{replaced})");
         }
     }
@@ -315,10 +326,10 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
     }
     // emit("eventName") / emit("eventName", data) — inter-component events
     if compiled.contains("emit(") {
-        return compile_emit_call(compiled, state_vars);
+        return compile_emit_call(compiled, vars);
     }
     // Default: replace all variables and utils
-    let result = replace_store_and_local(compiled, state_vars);
+    let result = replace_store_and_local(compiled, vars);
     replace_utils_short(&result)
 }
 
@@ -326,30 +337,26 @@ pub(crate) fn compile_expression_full(expr: &str, state_vars: &HashSet<String>) 
 mod tests {
     use super::*;
 
+    fn cv(names: &[&str]) -> CompiledVars {
+        let set: HashSet<String> = names.iter().map(|s| s.to_string()).collect();
+        CompiledVars::new(&set)
+    }
+
     #[test]
     fn test_compile_increment() {
-        let mut vars = HashSet::new();
-        vars.insert("count".to_string());
-
-        let result = compile_expression_full("count += 1", &vars);
+        let result = compile_expression_full("count += 1", &cv(&["count"]));
         assert_eq!(result, "S.set('count',S.get('count')+1)");
     }
 
     #[test]
     fn test_compile_decrement() {
-        let mut vars = HashSet::new();
-        vars.insert("count".to_string());
-
-        let result = compile_expression_full("count -= 1", &vars);
+        let result = compile_expression_full("count -= 1", &cv(&["count"]));
         assert_eq!(result, "S.set('count',S.get('count')-1)");
     }
 
     #[test]
     fn test_compile_assignment_with_max() {
-        let mut vars = HashSet::new();
-        vars.insert("count".to_string());
-
-        let result = compile_expression_full("count = max(0, count - 1)", &vars);
+        let result = compile_expression_full("count = max(0, count - 1)", &cv(&["count"]));
         assert!(result.starts_with("S.set('count',"));
         assert!(result.contains("U.max"));
         assert!(result.contains("S.get('count')"));
@@ -357,20 +364,13 @@ mod tests {
 
     #[test]
     fn test_compile_navigate() {
-        let vars = HashSet::new();
-
-        let result = compile_expression_full("webcore_navigate(/about)", &vars);
+        let result = compile_expression_full("webcore_navigate(/about)", &cv(&[]));
         assert_eq!(result, "nav('/about')");
     }
 
     #[test]
     fn test_multiple_variables() {
-        let mut vars = HashSet::new();
-        vars.insert("x".to_string());
-        vars.insert("y".to_string());
-        vars.insert("total".to_string());
-
-        let result = compile_expression_full("total = x + y", &vars);
+        let result = compile_expression_full("total = x + y", &cv(&["x", "y", "total"]));
         assert!(result.starts_with("S.set('total',"));
         assert!(result.contains("S.get('x')"));
         assert!(result.contains("S.get('y')"));

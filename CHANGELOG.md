@@ -5,6 +5,83 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.2]
+
+### Améliorations DX (v2.5.2)
+
+- **Messages d'erreur parse enrichis** — les erreurs de compilation affichent désormais un en-tête structuré `error[parse]: fichier:ligne:col`, la ligne source fautive, un caret `^` sous la colonne exacte, et la clause `expected` extraite du message Pest
+- **Chemin de fichier dans les erreurs** — le fichier `.webc` source est propagé dans `ParseError` depuis tous les points de chargement (`app.webc`, `layouts/`, `components/`, `pages/`) ; chaque erreur indique son fichier exact
+- **Couleurs ANSI conditionnelles** — `error[parse]` (rouge gras), gutter `|` (cyan), caret `^` (rouge) ; désactivés automatiquement si `NO_COLOR=1` ou `TERM=dumb` ; `CompileError::Io` et `MissingLayout/Page/Component` reçoivent aussi des préfixes colorés
+- **Hints contextuels élargis** — cinq patterns déclenchent un message `= hint:` : `{}` vide, accolade fermante manquante, guillemets attendus, expression JS attendue, nom sans espaces
+- **`webc build` — suppression du préfixe redondant** — `"Build failed:"` retiré de `cli.rs` ; `CompileErrors::Display` affiche directement les erreurs puis le compte final
+- 2 nouveaux tests (NO_COLOR, file path) — 139 tests au total
+
+### Performances internes (v2.5.2)
+
+- **`bindFor` non-clé — mutation DOM atomique** — le chemin sans `key=` remplace désormais
+  `innerHTML=''` + N `appendChild` par un `DocumentFragment` accumulé puis un seul
+  `replaceChildren(frag)` ; une seule mutation DOM atomique élimine les reflows intermédiaires
+  (bénéfice direct sur les longues listes)
+- **`evalCond` — `VARS_SET` et regexes pré-compilées** — `const VARS_SET=new Set(VARS)` pour
+  un lookup O(1) des variables simples (remplace `VARS.indexOf` O(n)) ; `const _VR=[...VARS].sort(...).map(v=>[RegExp,...])` pré-compile les regexes de substitution une seule fois au
+  chargement de la page plutôt qu'à chaque appel `evalCond` sur une expression composite
+- **SSG — `OnceLock<Regex>`** — les 3 expressions régulières de `apply_ssg_with_locales`
+  (interpolation, `@if`, `@else`) sont compilées une fois par processus via `OnceLock` au lieu
+  d'être recompilées à chaque page générée
+- **SSG — `html_unescape` / `html_escape_text` passe unique** — les 5 appels `.replace()` chaînés
+  et les 3 appels `.replace()` chaînés sont remplacés par des scanners passe unique avec sortie
+  anticipée quand aucun caractère spécial n'est présent
+- **`resolve_slots` — court-circuit** — ajout de `contains_slot()` ; `resolve_slots` retourne
+  `elements.to_vec()` immédiatement si aucun slot n'est présent dans l'arbre, évitant la
+  reconstruction match-par-élément pour les sous-arbres sans slot dans les layouts
+
+### Refactorisation interne (v2.5.2)
+
+- **Module split CLI** — `build.rs`, `serve.rs`, `check.rs`, `cli.rs` réorganisés dans `src/cli/`
+  avec sous-modules dédiés (`config.rs`, `loader.rs`, `output.rs`, `assets.rs`)
+- **Module split codegen** — `codegen_html.rs` scindé en `html/mod.rs`, `html/attrs.rs`,
+  `html/analysis.rs`, `html/minify.rs`, `html/props.rs`, `html/utils.rs` ;
+  `codegen_css.rs` → `css.rs` ; `codegen_js/` → `js/`
+- **Module `core/`** — `ast.rs`, `ssg.rs`, `error.rs`, `css_processor.rs`, `theme.rs`
+  regroupés dans `src/core/`
+- **Précompilation des regexes de variables** — les N regexes de substitution de variables
+  d'état sont compilées une seule fois par document au lieu d'une recompilation par expression
+
+---
+
+## [2.5.1]
+
+### Corrections de sécurité (v2.5.1)
+
+- **Injection via CSS inline** — les séquences `</style>` dans le CSS critique inliné sont désormais échappées en `<\/style>` ; empêchait une sortie prématurée du bloc `<style>` pouvant injecter du HTML/JS arbitraire
+- **Zero-JS + critical CSS** — les pages purement statiques avec `critical_css` activé incluent désormais `webcore.js` (requis pour le swap `data-webcore-defer` → `media="all"`) ; avant, le `<link media="print">` restait bloqué indéfiniment
+- **Composant avec seulement un handler d'événement** — `document_needs_js()` vérifie maintenant `elements_need_js()` sur les vues des composants (pas seulement sur leur `state`/`computed`) ; évitait d'omettre `webcore.js` pour des composants n'ayant que des handlers `on:click`/`on:submit`
+
+### Corrections (v2.5.1)
+
+- **Longueur de tableau avec virgules dans des chaînes** — `eval_expr_with_locale("items.length")` utilise désormais `serde_json` pour compter les éléments d'un tableau JSON ; la heuristique par `split(',')` renvoyait un compte incorrect pour `["a,b","c"]` (3 au lieu de 2)
+- **Longueur de chaîne Unicode** — `val.chars().count()` remplace `val.len()` pour les expressions `.length` sur les variables de type string ; `"café".length` retournait 5 (octets) au lieu de 4 (caractères)
+- 5 nouveaux tests — 137 tests au total
+
+---
+
+## [2.5.0]
+
+### Ajouts (v2.5.0)
+
+- **CSP stricte — event delegation** — tous les attributs `onclick=`, `onsubmit=`, `onchange=`, `oninput=` inline sont remplacés par `data-webcore-e="<type>"` ; un listener unique par type d'événement est enregistré via `document.addEventListener` (fonction `D(t,p)`) ; élimine la nécessité de `script-src 'unsafe-inline'` dans la Content-Security-Policy
+- **SPA links `data-webcore-nav`** — les liens de navigation interne (`link to="/path"`) reçoivent `data-webcore-nav` à la place de `onclick="webcore_navigate(...)"` ; le JS délègue via `document.addEventListener('click', ...)` sur `a[data-webcore-nav]`
+- **CSS déféré `data-webcore-defer`** — le lien feuille `media="print"` reçoit l'attribut `data-webcore-defer` à la place de `onload="this.media='all'"` ; le swap vers `media="all"` est effectué dans le callback `DOMContentLoaded` (100% CSP-safe)
+- **Meta `Content-Security-Policy`** — quand `csp = true` est posé dans `webc.toml` (mode `prod`), chaque page reçoit `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:">` dans son `<head>`
+- **Option `csp` dans `webc.toml`** — `[app] csp = true` active l'émission du meta CSP en mode prod
+
+### Améliorations (v2.5.0)
+
+- Exports `globalThis` nettoyés : `webcore_handle_click`, `webcore_handle_submit`, etc. retirés (plus nécessaires avec la délégation) ; seuls `webcore_navigate` (si routing) et `setLocale` (si i18n) restent exportés
+- 4 nouveaux tests — 132 tests au total
+
+---
+
 ## [2.4.0]
 
 ### Ajouts (v2.4.0)

@@ -1,6 +1,6 @@
 //! Element parsing: tags, components, slots, text, and interpolation.
 
-use crate::ast::{Attribute, AttributeValue, Element, Span};
+use crate::core::ast::{Attribute, AttributeValue, Element, Span};
 use crate::parser::{ParseError, Rule};
 use pest::iterators::Pair;
 

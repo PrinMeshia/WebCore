@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 2.4.0 |
+| **Version** | 2.5.2 |
 | **Statut** | Stable |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 128 tests unitaires |
+| **Tests** | 139 tests unitaires |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -97,8 +97,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **Élision JS zéro** : pages purement statiques (sans état, sans boucle, sans événements) n'émettent plus `<script defer>` ni `<link rel="preload">` — zéro JS pour les pages de contenu (v2.3.0)
 - **Limite d'imbrication** : le parser rejette tout document dont les éléments dépassent 128 niveaux d'imbrication — protège contre les "nesting bombs" (v2.3.0)
 - **Escape JS des URLs de navigation** : apostrophes et backslashes dans les chemins `<a onclick="webcore_navigate(...)">` échappés — empêche l'injection JS (v2.3.0)
-- **Critical CSS inline** : en mode `prod`, le CSS de chaque page (global + composants utilisés) est inliné dans `<style>` ; `theme.css` chargé en différé (`media="print"` + `onload`) — zéro CSS render-blocking (v2.4.0)
+- **Critical CSS inline** : en mode `prod`, le CSS de chaque page (global + composants utilisés) est inliné dans `<style>` ; `theme.css` chargé en différé (`media="print"` + `data-webcore-defer`) — zéro CSS render-blocking (v2.4.0)
 - **Collections SSG** : `"/post/:slug": PostPage each posts` — une page statique générée par élément d'un import de données ; `{$route.slug}` pré-rendu ; chemins de sortie validés contre le path traversal (v2.4.0)
+- **CSP stricte — event delegation** : tous les `onclick=`/`onsubmit=` inline remplacés par `data-webcore-e="<type>"` + listener délégué `D(t,p)` ; SPA links via `data-webcore-nav` ; CSS déféré via `data-webcore-defer` + `DOMContentLoaded` ; option `csp = true` dans `webc.toml` émet le meta `Content-Security-Policy` (v2.5.0)
+- **Corrections v2.5.1** : escape de `</style>` dans le CSS critique inline ; inclusion de `webcore.js` sur les pages zero-JS avec CSS différé ; `.length` correct sur les arrays contenant des virgules dans les chaînes et sur les chaînes Unicode (v2.5.1)
 
 ---
 
@@ -382,11 +384,11 @@ webc check
 
 ```
 fichier.webc
-    └── Parser Pest
+    └── parser/                        # Pest → AST
            └── AST (apps · layouts · pages · composants)
-                  ├── codegen_html.rs  →  HTML sémantique
-                  ├── codegen_css.rs   →  CSS scopé (data-v)
-                  └── codegen_js.rs    →  Runtime ES2022+
+                  ├── codegen/html/    →  HTML sémantique
+                  ├── codegen/css.rs   →  CSS scopé (data-v)
+                  └── codegen/js/      →  Runtime ES2022+
 ```
 
 **Runtime JS généré (extrait) :**
@@ -409,17 +411,23 @@ Webcore/
 ├── webcore-compiler/
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs           # CLI : build, dev
-│       ├── grammar.pest      # Grammaire PEG
-│       ├── parser.rs         # Pest → AST
-│       ├── ast.rs            # Types AST
-│       ├── errors.rs         # Gestion d'erreurs
-│       ├── css_processor.rs  # Post-traitement CSS
-│       ├── theme.rs          # Support thème
-│       └── codegen/
-│           ├── codegen_html.rs
-│           ├── codegen_css.rs
-│           └── codegen_js.rs
+│       ├── main.rs            # Point d'entrée CLI
+│       ├── grammar.pest       # Grammaire PEG
+│       ├── parser/            # Pest → AST
+│       │   ├── mod.rs
+│       │   ├── declarations.rs
+│       │   ├── directives.rs
+│       │   └── elements.rs
+│       ├── cli/               # Commandes build · serve · check
+│       │   ├── build.rs · serve.rs · check.rs
+│       │   └── config.rs · loader.rs · output.rs · assets.rs
+│       ├── core/              # Types et logique métier
+│       │   ├── ast.rs · error.rs · ssg.rs
+│       │   └── css_processor.rs · theme.rs · utils.rs
+│       └── codegen/           # Génération de code
+│           ├── html/          # mod.rs · attrs.rs · analysis.rs · minify.rs · props.rs
+│           ├── css.rs
+│           └── js/            # mod.rs · js_runtime.rs · js_dom.rs · js_events.rs
 └── .github/
     └── workflows/
         └── ci.yml
@@ -455,200 +463,10 @@ cargo fmt
 **Workflow pour ajouter une fonctionnalité :**
 
 1. Modifier la grammaire → `grammar.pest`
-2. Étendre l'AST → `ast.rs`
-3. Mettre à jour le parser → `parser.rs`
+2. Étendre l'AST → `core/ast.rs`
+3. Mettre à jour le parser → `parser/`
 4. Adapter le codegen → `codegen/`
-5. Ajouter un test unitaire
-
----
-
-## Roadmap
-
-### ✅ v0.2.0 — Livré
-
-| Fonctionnalité | Détail |
-|---|---|
-| Parser PEG | Grammaire Pest complète pour `.webc` |
-| AST | Apps · layouts · pages · composants · state · view · style · props |
-| Codegen HTML | Génération sémantique avec scoping CSS (`data-v`) |
-| Codegen CSS | Isolation par composant, hash FNV-1a déterministe |
-| Codegen JS | Runtime ES2022+ : `State`, `evalCond`, `bindIf/For/Attrs` |
-| `@if` / `@for` | Directives réactives avec binding DOM |
-| Interpolation d'expressions | `{count + 1}`, `{max(a, b)}` dans les chaînes |
-| Contenu mixte | Texte et éléments dans le même bloc |
-| Attributs dynamiques | `class={expr}` → binding runtime |
-| Routage SPA | History API + `nav()` sans rechargement |
-| Handlers d'événements | `on:click`, `on:submit`, `on:change`, `on:input` |
-| CI/CD | GitHub Actions : fmt · test · clippy |
-
----
-
-### ✅ Phase 1 — Stabilisation (complète)
-
-- [x] Messages d'erreurs avec numéros de ligne (format Pest `Display` : fichier · ligne · col · contexte)
-- [x] Tests golden (8 tests pipeline complet : parse → HTML/CSS/JS)
-- [x] Props inter-composants (`props { name: String }` → substitution statique au codegen)
-- [x] Minification CSS (LightningCSS — déjà câblé, activé en mode `prod`)
-- [x] Minification JS (strip commentaires + join lignes, activé en mode `prod`)
-- [x] Licence (MIT)
-
----
-
-### ✅ Phase 2 — Expérience développeur (complète)
-
-- [x] `webc new <nom>` — scaffolding complet (webc.toml, theme.toml, layouts, pages, Counter, public/)
-- [x] Exemples d'applications (`examples/counter`, `examples/todo`, `examples/blog`)
-- [x] Spécification du langage (`docs/spec.md`) — référence complète, 15 sections
-- [x] Vrai hot reload via WebSockets — connexion persistante sur `port+1`, rechargement instantané, reconnexion auto
-- [x] Extension VS Code (`editors/vscode/`) — coloration syntaxique TextMate pour `.webc`
-
----
-
-### ✅ Phase 3 — Vision long terme (complète)
-
-- [x] Store global partagé entre composants — bloc `store { ... }` + accès `$store.varName` dans tout le projet
-- [x] Validation de formulaires déclarative — `validate:required/minlength/maxlength/email/pattern` + `@error "field" { }`
-- [x] SSG — Static Site Generation (pré-rendu des valeurs initiales, `display` initial sur `@if`/`@else`)
-- [x] Internationalisation intégrée (i18n) — `locales/*.toml` + `t("key")` + `setLocale()` réactif
-- [x] Support WebAssembly (logique métier Rust → WASM) — détection `wasm/Cargo.toml`, `wasm-pack build`, loader async `globalThis.wasm`
-
----
-
-### ✅ v0.8.0 — Modèle de composant v2 (complète)
-
-- [x] **Props réactives** — `Component value={expr} />` : les props acceptent des expressions dynamiques ; `{propName}` dans la vue devient un span réactif au lieu d'un texte figé
-- [x] **Named slots** — layouts multi-zones (`slot header`, `slot sidebar`, `slot content`) ; pages fournissent le contenu via `slot header { ... }` ; résolution récursive à n'importe quelle profondeur
-- [x] **`@media` dans `style { }`** — media queries responsives scopées par composant ; scoping `data-v` propagé à l'intérieur des blocs `@media`
-
----
-
-### ✅ v0.9.0 — Modèle de composant v3 (complète)
-
-- [x] **État dérivé** — `computed { fullName = firstName + " " + lastName }` ; réévalué via `rebindComputed()` avant chaque bind DOM ; `setQ` (setter silencieux) sur `State` pour éviter les boucles réactives
-- [x] **Lifecycle hook `on:mount`** — bloc `on:mount { }` : code JS exécuté dans `DOMContentLoaded` après l'initialisation ; wrappé dans un IIFE pour l'isolation des variables locales
-- [x] **Événements inter-composants** — `emit("event", data)` compilé vers `CustomEvent` ; `on:event={handler}` sur les appels de composants → `document.addEventListener` dans `DOMContentLoaded`
-
----
-
-### ✅ v1.0.0 — Release stable (complète)
-
-- [x] **`on:destroy { }`** — lifecycle hook symétrique à `on:mount` ; exécuté avant chaque navigation SPA et à `window.beforeunload`
-- [x] **Tree-shaking du runtime** — `bindFor`, `bindIf`, `bindAttrs`, `validateField`/`bindValidation`, `nav`, `evalCond`, `VARS`/`STORE_VARS`, `COMPUTED`/`rebindComputed` sont émis uniquement si le document les utilise ; économies significatives pour les applications simples
-- [x] **Site de documentation** — `examples/docs/` : site entièrement construit avec WebCore lui-même (4 pages, 2 composants, layout, styles)
-
----
-
-### ✅ v1.1.0 — Routes, DX et polissage (complète)
-
-- [x] **Routes paramétrées** — `/post/:slug`, `/user/:id` : `ROUTES[]` avec RegExp + `ROUTE_PARAMS` ; accès via `{$route.slug}` dans les vues ; tree-shaké si inutilisé
-- [x] **`@for` avec key** — `@for item key=item.id in items { }` : DOM diffing par clé, patch minimal au lieu de re-rendu complet
-- [x] **i18n params + pluralisation** — `t("key", n)` → clés `_one`/`_other` + `{{count}}` ; `t("key", val)` → `{{0}}`
-- [x] **Props composées** — `{step + 1}`, `class={color}` : substitution word-boundary dans les expressions complexes et les attributs
-- [x] **Erreurs de parsing enrichies** — ligne source + caret `^` à la colonne fautive + hints contextuels pour les erreurs fréquentes
-
----
-
-### ✅ v1.2.0 — DX & directives (complète)
-
-- [x] **`@switch` / `@case` / `@default`** — directive multi-branches compilée en chaîne `@if`/`@else` au parsing ; aucun overhead runtime
-- [x] **`bind:` two-way binding** — `bind:value={x}` / `bind:checked={x}` : attribut + handler générés automatiquement par `expand_bind_attrs()`
-- [x] **`@for item, i in items`** — index courant accessible dans la boucle ; `data-webcore-for-index` sur le `<template>` ; `fillItem` injecte la valeur
-- [x] **`webc check`** — validation CLI sans génération de fichiers : parse + cohérence routes/composants/props
-- [x] **URLs propres** — `slug/index.html` au lieu de `slug.html` ; le serveur dev résout `/about` → `dist/about/index.html`
-- [x] **`dist/assets/`** — JS/CSS/assets publics dans un sous-dossier, HTML à la racine ; chemins absolus `/assets/`
-- [x] **Arborescence du build** — résumé `dist/` avec tailles de fichiers après chaque `webc build`
-- [x] **CSS public minifié** — `public/*.css` traités par LightningCSS en mode `prod`
-
----
-
-### ✅ v1.1.1 — Corrections et polissage (complète)
-
-- [x] **Validation de formulaires** — phase de capture + `stopImmediatePropagation()` garantit l'exécution avant `on:submit` ; blocs `@error` préservés via `firstElementChild`
-- [x] **Handlers multi-instructions** — `on:click={a = 1; b = 2}` : chaque instruction est compilée indépendamment
-- [x] **`on:mount` imbrication profonde** — grammaire Pest récursive pour les accolades JS à profondeur arbitraire
-- [x] **`t()` dans `evalCond`** — passé explicitement aux `new Function()` ; variable locale renommée `_c` pour éviter le masquage
-- [x] **Sélecteurs CSS multi-éléments** — `input, textarea { }` désormais valide dans les blocs `style { }`
-- [x] **DOM diffing `@for` sans wrapper** — clé posée sur `firstElementChild`, éliminant les espaces parasites entre items
-- [x] **Exemple `examples/forms/`** — `SignupForm` + `ContactForm` avec validation complète, computed, compteur de caractères
-
----
-
-### ✅ v1.3.0 — HTTP, head, query params, classes conditionnelles, debounce (complète)
-
-- [x] **`http { }` — fetch déclaratif** — `get: "/url"  into: var` dans un composant ; `loading`/`error` auto-injectés et réactifs ; réponse JSON parsée automatiquement
-- [x] **`head { }` — personnalisation du `<head>`** — `title "..."` et `meta name="..."` par page ; override le titre global de `webc.toml`
-- [x] **`$query.` — query string params** — `{$query.search}`, `{$query.page}` ; tree-shaké si inutilisé
-- [x] **`class:name={expr}` — classes conditionnelles** — `class:active={isOpen}` ; `bindAttrs()` gère le toggle ; tree-shaké
-- [x] **`on:event|debounce`** — handler debouncé (300 ms par défaut) ; fonctionne avec tout type d'événement
-
----
-
-### ✅ v1.4.0 — Références DOM, styles dynamiques, slot default, transitions (complète)
-
-- [x] **`ref:name=true` — références DOM directes** — `input ref:name=true` émet `data-webcore-ref="name"` ; `refs['name']` accessible après `DOMContentLoaded` ; accès direct sans `querySelector` ; tree-shaké via `has_refs`
-- [x] **`style:prop={expr}` — styles inline dynamiques** — `div style:color={myColor}` → `el.style.setProperty('color', ...)` via `bindAttrs()` ; peut coexister avec `style="..."` et `class:` ; tree-shaké via `has_style_binding`
-- [x] **Contenu par défaut des slots** — `slot sidebar { p "Contenu par défaut" }` dans un layout ; utilisé si la page ne remplit pas le slot ; les slots non remplis étaient précédemment supprimés silencieusement
-- [x] **`webc:transition="name"` — animations CSS** — `div webc:transition="fade" { ... }` ; transitions intégrées `fade` et `slide` sur les blocs `@if` ; CSS injecté automatiquement ; tree-shaké via `has_transition`
-
----
-
-### ✅ v1.5.0 — Images optimisées et fingerprinting (complète)
-
-- [x] **`webc:img` — images optimisées** — `img webc:img src="/hero.png" alt="Hero"` compile vers `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">` ; dimensions lues depuis `public/` à la compilation (prévient le CLS) ; avertissement `warning[a11y]` si `alt` est absent ; `webc:img` absent du HTML généré ; zéro JS émis ; crate `imagesize`
-- [x] **Fingerprinting des images** — chaque image dans `public/` reçoit un hash FNV-1a 32 bits à `webc build` (`logo.png` → `logo.a3f9c1b2.png`) ; extensions : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif` ; toutes les références HTML et CSS mises à jour automatiquement ; cache-busting parfait, aucune configuration requise
-
----
-
-### ✅ v2.0.0 — Signaux fins, HMR et sécurité (complète)
-
-- [x] **Signaux réactifs fins (`$effect`)** — tracking automatique des dépendances ; les composants ne se re-rendent que quand leurs dépendances réelles changent ; **rupture** avec v1.x
-- [x] **HMR** — `webc serve` surveille les fichiers et recharge via WebSocket — aucune configuration
-- [x] **Sécurité path traversal** — `resolve_safe_path()` : `canonicalize()` + vérification `starts_with(dist_root)` ; 403 si hors `dist/`
-- [x] **Détection de cycles** — `webc check` détecte les références circulaires entre composants
-- [x] **Agrégation des erreurs** — toutes les erreurs collectées et reportées en une seule passe
-- [x] **CSS nesting** — `&:hover`, `& > span`, `&::before` aplatis en CSS scopé valide
-- [x] **Rapport bundle** — tableau des fonctionnalités runtime incluses vs tree-shaquées après chaque build
-
----
-
-### ✅ v2.1.0 — Réactivité avancée et données (complète)
-
-- [x] **`$watch`** — `$watch varName => { body }` : observer réactif sans effet DOM ; `S.on('varName', fn)` dans `DOMContentLoaded`
-- [x] **`on:click` avec objets imbriqués** — `on:click={handler({key: val})}` via `expr_brace_seq` récursif dans la grammaire
-- [x] **`@for key={expr}` complexe** — expression arbitraire comme clé de diffing DOM (`key={item.id + "-" + item.type}`)
-- [x] **`@for N..M` — plage** — `@for i in 0..5` émet `data-webcore-for-range` ; tableau généré côté runtime sans donnée d'état
-- [x] **Expressions SSG étendues** — `.length`, `.toUpperCase()`, `.toLowerCase()`, `.trim()` dans `eval_expr_with_locale`
-- [x] **Validation des props** — `warning[props]` si prop inconnue reçue ; compilation continue
-- [x] **Imports de données build-time** — `import name from "file.json"` ; validation de chemin via `canonicalize()`
-
----
-
-### ✅ v2.2.0 — Performance et outillage (complète)
-
-- [x] **`@keyframes`** — blocs `@keyframes` dans `style {}` ; émis globaux ; parser, AST (`StyleItem::Keyframes`), grammaire et codegen mis à jour
-- [x] **`<script defer>` + preload** — script non bloquant ; `<link rel="preload" as="script">` en parallèle dans le `<head>`
-- [x] **Hash CSS** — `theme.css?v=<hash>` — cache-busting automatique comme pour `webcore.js`
-- [x] **Minification HTML (prod)** — commentaires et espaces inter-balises supprimés en mode `prod`
-- [x] **Élision scope CSS** — composants sans `style {}` n'émettent plus `data-v` — HTML plus propre
-- [x] **Avertissement ReDoS** — `validate:pattern` avec `)+`/`)*` → `warning[security]` à la compilation
-
----
-
-### ✅ v2.3.0 — Sécurité et zéro-poids (complète)
-
-- [x] **SRI — Subresource Integrity** — `integrity="sha256-..."` + `crossorigin="anonymous"` sur `<script>` et `<link>` en mode `prod` ; hash SHA-256 calculé par le compilateur (crate `sha2`)
-- [x] **Élision JS zéro** — pages purement statiques sans `<script defer>` ni `<link rel="preload">` — zéro requête JS pour les pages de contenu
-- [x] **Limite d'imbrication (128 niveaux)** — le parser rejette les "nesting bombs" avec message explicite
-- [x] **Escape JS navigation** — apostrophes et backslashes dans `<a onclick="webcore_navigate(...)">` échappés
-
----
-
-### ✅ v2.4.0 — Critical CSS et collections SSG (complète)
-
-- [x] **Critical CSS inline (prod)** — CSS par page (global + composants utilisés, collecte récursive) inliné dans `<style>` ; `theme.css` en différé via `media="print"` + swap `onload` + fallback `<noscript>` ; hash et SRI préservés
-- [x] **Collections SSG** — `"/post/:slug": PostPage each posts` : une page statique par élément de l'import lié ; `{$route.slug}` pré-rendu ; valeurs de chemin validées (rejet `/`, `\`, `..`)
-- [x] **Résolution des imports de données** — `import name from "file.json"` réellement résolu au build (JSON/TOML → `S.setQ`) avec garde path-traversal
-- [x] **Correctif preload** — `?v=hash` + SRI désormais appliqués au `<link rel="preload">` (ordre d'attributs corrigé)
+5. Ajouter un test unitaire dans `src/tests/`
 
 ---
 
