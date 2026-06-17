@@ -16,6 +16,9 @@ pub(super) fn parse_control_flow(pair: Pair<Rule>) -> Result<Element, ParseError
         Rule::if_statement => parse_if_block(inner),
         Rule::switch_statement => parse_switch(inner),
         Rule::error_block => parse_error_block(inner),
+        Rule::loading_block => parse_loading_block(inner),
+        Rule::catch_block => parse_catch_block(inner),
+        Rule::defer_block => parse_defer_block(inner),
         _ => Err(ParseError::new(format!(
             "Unknown control flow: {:?}",
             inner.as_rule()
@@ -188,6 +191,43 @@ fn parse_switch(inner: Pair<Rule>) -> Result<Element, ParseError> {
     else_branch
         .and_then(|mut v| v.pop())
         .ok_or_else(|| ParseError::with_span("@switch: empty case chain", span))
+}
+
+/// Collect direct element children from a block pair (filters out keyword/punctuation tokens).
+fn collect_block_content(inner: Pair<Rule>) -> Result<Vec<Element>, ParseError> {
+    inner
+        .into_inner()
+        .filter(|e| e.as_rule() == Rule::element)
+        .map(parse_element)
+        .collect()
+}
+
+fn parse_loading_block(inner: Pair<Rule>) -> Result<Element, ParseError> {
+    let span = Span::from_pest(inner.as_span());
+    Ok(Element::If {
+        condition: "loading".to_string(),
+        then_branch: collect_block_content(inner)?,
+        else_branch: None,
+        span,
+    })
+}
+
+fn parse_catch_block(inner: Pair<Rule>) -> Result<Element, ParseError> {
+    let span = Span::from_pest(inner.as_span());
+    Ok(Element::If {
+        condition: "error".to_string(),
+        then_branch: collect_block_content(inner)?,
+        else_branch: None,
+        span,
+    })
+}
+
+fn parse_defer_block(inner: Pair<Rule>) -> Result<Element, ParseError> {
+    let span = Span::from_pest(inner.as_span());
+    Ok(Element::Defer {
+        content: collect_block_content(inner)?,
+        span,
+    })
 }
 
 fn parse_error_block(inner: Pair<Rule>) -> Result<Element, ParseError> {

@@ -1,6 +1,10 @@
 app WebCoreDocs {
     theme: "default"
     layout: DocsLayout
+    head {
+        favicon "/assets/logo.png"
+        meta description="WebCore — un langage déclaratif pour construire des interfaces web, compilé en Rust."
+    }
     routes {
         "/": HomePage
         "/syntax": SyntaxPage

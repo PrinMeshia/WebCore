@@ -36,6 +36,24 @@ const STORE = new State();  // store global ($store.x)
 Invariant : **toutes** les fonctions `bind*` s'appuient sur `$effect`, donc un
 composant n'est re-rendu que si une dépendance réellement lue a changé.
 
+## Compilation des expressions (compile-time) — `compile_list_method`
+
+Avant d'atteindre `evalCond` au runtime, certaines expressions sont réécrites
+**au moment de la compilation** par `compile_list_method()` (`src/codegen/js/js_events.rs`) :
+
+| Expression source | Code JS émis |
+|---|---|
+| `items.push(val)` | `S.set('items',[...S.get('items'),val])` |
+| `items.remove(i)` | `S.set('items',S.get('items').filter((_,_i)=>_i!==(i)))` |
+| `items.clear()` | `S.set('items',[])` |
+| `$store.items.push(val)` | `STORE.set('items',[...STORE.get('items'),val])` |
+
+La détection se fait par scan de chaîne (`.push(`, `.remove(`, `.clear(`) avant
+toute autre réécriture — `compile_list_method` court-circuite le reste du pipeline
+dès qu'une correspondance est trouvée.
+
+---
+
 ## `evalCond(expr)` — évaluation d'expressions
 
 Évalue une expression `.webc` (`count > 0`, `item.price * qty`, `$store.user`)

@@ -6,6 +6,7 @@ pub(crate) mod check;
 pub(crate) mod config;
 pub(crate) mod fmt;
 pub(crate) mod loader;
+pub(crate) mod lsp;
 pub(crate) mod output;
 pub(crate) mod serve;
 use std::env;
@@ -72,13 +73,20 @@ pub(crate) fn run() {
                 std::process::exit(1);
             }
         }
-        "check" => match check::check_project() {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
+        "check" => {
+            let json = args.iter().skip(2).any(|a| a == "--json");
+            match check::check_project(json) {
+                Ok(()) => {}
+                Err(e) => {
+                    // In JSON mode the report (including failures) is already
+                    // on stdout; only the exit code matters.
+                    if !e.is_empty() {
+                        eprintln!("{e}");
+                    }
+                    std::process::exit(1);
+                }
             }
-        },
+        }
         "watch" => {
             if let Err(e) = build::watch_project() {
                 eprintln!("Watch error: {e}");
@@ -121,6 +129,9 @@ pub(crate) fn run() {
                 std::process::exit(1);
             }
         }
+        "lsp" => {
+            lsp::run_lsp();
+        }
         _ => {
             eprintln!("Commande inconnue : {}", args[1]);
             print_help();
@@ -139,9 +150,11 @@ fn print_help() {
     println!("  new <nom>    Créer un nouveau projet WebCore");
     println!("  build        Compiler le projet (dist/)");
     println!("  check        Valider le projet sans générer de fichiers");
+    println!("               --json : diagnostics structurés sur stdout (éditeurs/outils)");
     println!("  watch        Rebuilder à chaque modification (sans serveur)");
     println!("  dev [port]   Démarrer le serveur de développement (défaut : 3000)");
     println!("  fmt [paths]  Formater les fichiers .webc (défaut : src/)");
+    println!("  lsp          Démarrer le serveur LSP (stdin/stdout, JSON-RPC)");
     println!();
     println!("OPTIONS (dev) :");
     println!("  --host <ip>  Écouter sur une IP spécifique (ex: 0.0.0.0)");

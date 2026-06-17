@@ -15,10 +15,10 @@ static RE_SENT: OnceLock<Regex> = OnceLock::new();
 /// Build once per `generate_runtime_js_with_vars` call instead of recompiling
 /// on every expression. Sorting longest-first prevents shorter names from
 /// matching inside longer ones (e.g. `count` inside `countdown`).
-pub(super) struct CompiledVars(Vec<(String, Regex)>);
+pub(crate) struct CompiledVars(pub(crate) Vec<(String, Regex)>);
 
 impl CompiledVars {
-    pub fn new(vars: &HashSet<String>) -> Self {
+    pub(crate) fn new(vars: &HashSet<String>) -> Self {
         let mut sorted: Vec<&String> = vars.iter().collect();
         sorted.sort_by_key(|v| std::cmp::Reverse(v.len()));
         let pairs = sorted
@@ -115,6 +115,82 @@ pub(super) fn parse_simple_assign(expr: &str) -> Option<(String, String)> {
     None
 }
 
+/// Compile reactive list mutations for local state vars and `$store` vars.
+///
+/// Recognized patterns (where `var` is a known state/store variable):
+/// - `var.push(value)`  → spread-append into reactive set
+/// - `var.remove(i)`    → filter by index
+/// - `var.clear()`      → reset to empty array
+/// - `$store.var.push(…)` / `.remove(…)` / `.clear()` — same for the global store
+pub(crate) fn compile_list_method(expr: &str, vars: &CompiledVars) -> Option<String> {
+    let trimmed = expr.trim();
+
+    // $store.var.push/remove/clear
+    if let Some(rest) = trimmed.strip_prefix("$store.") {
+        for method in ["push", "remove", "clear"] {
+            let marker = format!(".{}(", method);
+            if let Some(dot_pos) = rest.find(&marker) {
+                let var = &rest[..dot_pos];
+                if var.is_empty() || !var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                let after_open = &rest[dot_pos + marker.len()..];
+                let arg = after_open
+                    .rfind(')')
+                    .map(|i| after_open[..i].trim())
+                    .unwrap_or("");
+                let compiled = match method {
+                    "push" => {
+                        let a = replace_utils_short(&replace_store_and_local(arg, vars));
+                        format!("STORE.set('{var}',[...STORE.get('{var}'),{a}])")
+                    }
+                    "remove" => {
+                        let a = replace_utils_short(&replace_store_and_local(arg, vars));
+                        format!("STORE.set('{var}',STORE.get('{var}').filter((_,_i)=>_i!==({a})))")
+                    }
+                    "clear" => format!("STORE.set('{var}',[])"),
+                    _ => continue,
+                };
+                return Some(compiled);
+            }
+        }
+    }
+
+    // local state var.push/remove/clear
+    for method in ["push", "remove", "clear"] {
+        let marker = format!(".{}(", method);
+        if let Some(dot_pos) = trimmed.find(&marker) {
+            let var = &trimmed[..dot_pos];
+            if var.is_empty() || !var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            if !vars.0.iter().any(|(v, _)| v == var) {
+                continue;
+            }
+            let after_open = &trimmed[dot_pos + marker.len()..];
+            let arg = after_open
+                .rfind(')')
+                .map(|i| after_open[..i].trim())
+                .unwrap_or("");
+            let compiled = match method {
+                "push" => {
+                    let a = replace_utils_short(&replace_store_and_local(arg, vars));
+                    format!("S.set('{var}',[...S.get('{var}'),{a}])")
+                }
+                "remove" => {
+                    let a = replace_utils_short(&replace_store_and_local(arg, vars));
+                    format!("S.set('{var}',S.get('{var}').filter((_,_i)=>_i!==({a})))")
+                }
+                "clear" => format!("S.set('{var}',[])"),
+                _ => continue,
+            };
+            return Some(compiled);
+        }
+    }
+
+    None
+}
+
 /// Replace utility functions with short aliases (U.max, etc.)
 pub(super) fn replace_utils_short(expr: &str) -> String {
     let mut result = expr.to_string();
@@ -143,6 +219,50 @@ pub(super) fn replace_store_and_local(expr: &str, vars: &CompiledVars) -> String
     re_sent
         .replace_all(&with_local, "STORE.get('$1')")
         .into_owned()
+}
+
+/// Compile a `store { computed { name = expr } }` expression.
+///
+/// Both `$store.var` (explicit) and bare `var` (implicit, when var is a store variable)
+/// are rewritten to `STORE.get('var')`.
+///
+/// Single-pass strategy: builds a combined regex that matches either `$store.var`
+/// (explicit, group 1) or a bare store-var name at word boundary (implicit, group 2),
+/// longest-first. Because the regex engine tries alternatives left-to-right, `$store.var`
+/// consumes the text before the bare name can be matched inside the same span.
+pub(crate) fn compile_store_computed_expr(expr: &str, store_vars: &HashSet<String>) -> String {
+    use std::cmp::Reverse;
+
+    let mut sorted: Vec<&String> = store_vars.iter().collect();
+    sorted.sort_by_key(|v| Reverse(v.len()));
+
+    let var_alts: String = sorted
+        .iter()
+        .map(|v| regex::escape(v))
+        .collect::<Vec<_>>()
+        .join("|");
+
+    let pattern = if var_alts.is_empty() {
+        r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)".to_string()
+    } else {
+        format!(r"\$store\.([a-zA-Z_][a-zA-Z0-9_]*)|\b({})\b", var_alts)
+    };
+
+    let re = match Regex::new(&pattern) {
+        Ok(r) => r,
+        Err(_) => return expr.to_string(),
+    };
+
+    re.replace_all(expr, |caps: &regex::Captures| {
+        if let Some(var) = caps.get(1) {
+            return format!("STORE.get('{}')", var.as_str());
+        }
+        if let Some(var) = caps.get(2) {
+            return format!("STORE.get('{}')", var.as_str());
+        }
+        caps[0].to_string()
+    })
+    .into_owned()
 }
 
 /// Convert a route pattern `/post/:slug` to a JS regex string `^\/post\/([^\/]+)$`
@@ -317,6 +437,10 @@ pub(crate) fn compile_expression_full(expr: &str, vars: &CompiledVars) -> String
             let replaced = replace_utils_short(&replace_store_and_local(&val, vars));
             return format!("S.set('{var}',{replaced})");
         }
+    }
+    // Reactive list mutations: items.push(x), items.remove(i), items.clear()
+    if let Some(result) = compile_list_method(compiled, vars) {
+        return result;
     }
     // Navigation
     if compiled.contains("webcore_navigate(") {

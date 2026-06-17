@@ -217,35 +217,35 @@ pub(crate) fn replace_in_html_files(dir: &Path, from: &str, to: &str) {
 }
 
 /// Apply content-hash versioning and SRI to all HTML files under `dist_dir`.
+/// `js_filename` is the hashed filename (e.g. `webcore.abc12345.js`); HTML
+/// already contains the plain `webcore.js` placeholder which is replaced here.
 pub(super) fn patch_asset_hashes(
     dist_dir: &Path,
-    js_hash: &str,
+    js_filename: &str,
     css_hash: &str,
     js_sri: Option<&str>,
     css_sri: Option<&str>,
 ) {
-    patch_html_files(
-        dist_dir,
-        &format!(r#"src="/assets/webcore.js?v={js_hash}""#),
-    );
+    // Replace script src placeholder with content-hash filename
+    patch_html_files(dist_dir, &format!(r#"src="/assets/{js_filename}""#));
+    // CSS keeps query-param versioning (file not renamed)
     replace_in_html_files(
         dist_dir,
         r#"href="/assets/theme.css""#,
         &format!(r#"href="/assets/theme.css?v={css_hash}""#),
     );
+    // JS preload hint
     replace_in_html_files(
         dist_dir,
         r#"as="script" href="/assets/webcore.js""#,
-        &format!(r#"as="script" href="/assets/webcore.js?v={js_hash}""#),
+        &format!(r#"as="script" href="/assets/{js_filename}""#),
     );
 
     if let (Some(js_sri), Some(css_sri)) = (js_sri, css_sri) {
         replace_in_html_files(
             dist_dir,
-            &format!(r#"src="/assets/webcore.js?v={js_hash}""#),
-            &format!(
-                r#"src="/assets/webcore.js?v={js_hash}" integrity="{js_sri}" crossorigin="anonymous""#
-            ),
+            &format!(r#"src="/assets/{js_filename}""#),
+            &format!(r#"src="/assets/{js_filename}" integrity="{js_sri}" crossorigin="anonymous""#),
         );
         replace_in_html_files(
             dist_dir,
@@ -256,9 +256,9 @@ pub(super) fn patch_asset_hashes(
         );
         replace_in_html_files(
             dist_dir,
-            &format!(r#"as="script" href="/assets/webcore.js?v={js_hash}""#),
+            &format!(r#"as="script" href="/assets/{js_filename}""#),
             &format!(
-                r#"as="script" href="/assets/webcore.js?v={js_hash}" integrity="{js_sri}" crossorigin="anonymous""#
+                r#"as="script" href="/assets/{js_filename}" integrity="{js_sri}" crossorigin="anonymous""#
             ),
         );
     }

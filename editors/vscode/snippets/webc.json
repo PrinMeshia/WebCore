@@ -286,5 +286,42 @@
       "csp = true"
     ],
     "description": "webc.toml config with strict CSP enabled (prod mode)"
+  },
+  "Fragment": {
+    "prefix": "fragment",
+    "body": [
+      "<>",
+      "    $0",
+      "</>"
+    ],
+    "description": "Fragment <>...</> — groupe d'éléments sans balise wrapper (v2.6.0)"
+  },
+  "on:click with modifiers": {
+    "prefix": "onclickmod",
+    "body": [
+      "on:click|${1|stop,prevent,once,self|}={$2}"
+    ],
+    "description": "Handler avec modificateur d'événement (v2.6.0)"
+  },
+  "$watch hook": {
+    "prefix": "watch",
+    "body": [
+      "$watch ${1:varName} => { $0 }"
+    ],
+    "description": "Observer un changement d'état sans effet DOM ($watch)"
+  },
+  "import data": {
+    "prefix": "import",
+    "body": [
+      "import ${1:posts} from \"${2:data/posts.json}\""
+    ],
+    "description": "Import de données build-time (JSON/TOML)"
+  },
+  "prop with default": {
+    "prefix": "propdef",
+    "body": [
+      "${1:label}: ${2|String,Number,Boolean,List|} = ${3:\"valeur\"}"
+    ],
+    "description": "Prop avec valeur par défaut (v2.6.0)"
   }
 }

@@ -1,6 +1,6 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v2.6.0 — Stable" }
+        div class="hero-badge" { "v2.10.1 — Stable" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }

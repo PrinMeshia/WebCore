@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 use crate::codegen::css::generate_scope_id;
+use crate::core::ast::HeadBlock;
 #[cfg(test)]
 use crate::core::ast::{Component, Element, Layout, Page, WebCoreDocument};
 #[cfg(test)]
@@ -27,6 +28,9 @@ use super::HandlerMapping;
 /// `needs_js` controls whether the preload hint for webcore.js is included.
 /// When `critical_css` is set, it is inlined in a `<style>` tag and the full
 /// stylesheet is loaded non-blocking (`media="print"` swap + `<noscript>` fallback).
+/// `head` carries the page's `head { }` block: its `title` overrides the global
+/// one, its `meta` entries and `favicon` are emitted into `<head>`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_html_shell(
     title: &str,
     lang: &str,
@@ -34,6 +38,7 @@ pub(super) fn emit_html_shell(
     needs_js: bool,
     critical_css: Option<&str>,
     csp_meta: Option<&str>,
+    head: Option<&HeadBlock>,
 ) -> String {
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n");
@@ -49,8 +54,32 @@ pub(super) fn emit_html_shell(
         )
         .expect("write! to String is infallible");
     }
-    writeln!(html, "  <title>{}</title>", html_escape(title))
+    // The page's head{} title overrides the global title when present.
+    let effective_title = head.and_then(|h| h.title.as_deref()).unwrap_or(title);
+    writeln!(html, "  <title>{}</title>", html_escape(effective_title))
         .expect("write! to String is infallible");
+    if let Some(h) = head {
+        for (key, value) in &h.metas {
+            // OpenGraph/Facebook tags use `property`; everything else uses `name`.
+            let attr = if key.starts_with("og:") {
+                "property"
+            } else {
+                "name"
+            };
+            writeln!(
+                html,
+                "  <meta {}=\"{}\" content=\"{}\">",
+                attr,
+                html_escape(key),
+                html_escape(value)
+            )
+            .expect("write! to String is infallible");
+        }
+        if let Some(icon) = &h.favicon {
+            writeln!(html, "  <link rel=\"icon\" href=\"{}\">", html_escape(icon))
+                .expect("write! to String is infallible");
+        }
+    }
     if let Some(css) = critical_css {
         // Critical CSS: inline the page's own styles, defer the full stylesheet.
         // `data-webcore-defer` is swapped to media="all" by DOMContentLoaded (CSP-safe).

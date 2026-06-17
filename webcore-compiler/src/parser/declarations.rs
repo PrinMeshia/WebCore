@@ -24,6 +24,7 @@ pub(super) fn parse_app(pair: Pair<Rule>) -> Result<App, ParseError> {
         layout: None,
         routes: std::collections::BTreeMap::new(),
         collections: std::collections::BTreeMap::new(),
+        head: None,
         span,
     };
 
@@ -58,6 +59,9 @@ pub(super) fn parse_app(pair: Pair<Rule>) -> Result<App, ParseError> {
                                 }
                             }
                         }
+                    }
+                    Rule::head_block => {
+                        app.head = Some(parse_head_block(field)?);
                     }
                     _ => {}
                 }
@@ -126,6 +130,7 @@ pub(super) fn parse_page(pair: Pair<Rule>) -> Result<Page, ParseError> {
 pub(super) fn parse_head_block(pair: Pair<Rule>) -> Result<HeadBlock, ParseError> {
     let mut title: Option<String> = None;
     let mut metas: Vec<(String, String)> = Vec::new();
+    let mut favicon: Option<String> = None;
 
     for item in pair.into_inner() {
         match item.as_rule() {
@@ -146,11 +151,20 @@ pub(super) fn parse_head_block(pair: Pair<Rule>) -> Result<HeadBlock, ParseError
                     .unwrap_or_default();
                 metas.push((key, val));
             }
+            Rule::head_favicon => {
+                if let Some(s) = item.into_inner().next() {
+                    favicon = Some(extract_string_literal(s.as_str()));
+                }
+            }
             _ => {}
         }
     }
 
-    Ok(HeadBlock { title, metas })
+    Ok(HeadBlock {
+        title,
+        metas,
+        favicon,
+    })
 }
 
 pub(super) fn parse_http_block(pair: Pair<Rule>) -> Result<HttpBlock, ParseError> {
@@ -362,6 +376,51 @@ pub(super) fn parse_props_block(pair: Pair<Rule>) -> Result<Vec<Prop>, ParseErro
     }
 
     Ok(props)
+}
+
+/// Parse a `store { }` block, which may contain both `state_def` and `computed_block` entries.
+pub(super) fn parse_store_block(
+    pair: Pair<Rule>,
+) -> Result<(Vec<StateVar>, Vec<ComputedVar>), ParseError> {
+    let mut state_vars = Vec::new();
+    let mut computed_vars = Vec::new();
+
+    for item in pair.into_inner() {
+        match item.as_rule() {
+            Rule::state_def => {
+                let span = Span::from_pest(item.as_span());
+                let mut inner = item.into_inner();
+                let name = inner
+                    .next()
+                    .map(|p| p.as_str().to_string())
+                    .unwrap_or_default();
+                let type_ = inner
+                    .next()
+                    .map_or_else(|| "Any".to_string(), |p| p.as_str().to_string());
+                let default_value = inner.next().map(|p| {
+                    let val = p.as_str().trim();
+                    if val.starts_with('"') && val.ends_with('"') {
+                        extract_string_literal(val)
+                    } else {
+                        val.to_string()
+                    }
+                });
+                state_vars.push(StateVar {
+                    name,
+                    type_,
+                    default_value,
+                    span,
+                });
+            }
+            Rule::computed_block => {
+                let mut cvars = parse_computed_block(item)?;
+                computed_vars.append(&mut cvars);
+            }
+            _ => {}
+        }
+    }
+
+    Ok((state_vars, computed_vars))
 }
 
 pub(super) fn parse_state_block(pair: Pair<Rule>) -> Result<Vec<StateVar>, ParseError> {

@@ -48,11 +48,14 @@ pub(super) fn generate_tag_element(
             .expect("write! to String is infallible");
     }
 
-    // Mark elements that have dynamic (expression) attribute bindings via data-webcore-attr-*
+    // Mark elements that have dynamic (expression) or spread attribute bindings
     if attributes.iter().any(|a| {
         !a.name.starts_with("on:")
             && !a.name.starts_with("class:")
-            && matches!(&a.value, AttributeValue::Expression(_))
+            && matches!(
+                &a.value,
+                AttributeValue::Expression(_) | AttributeValue::Spread(_)
+            )
     }) {
         write!(result, " {}", attr_names::BOUND).expect("write! to String is infallible");
     }
@@ -205,6 +208,11 @@ pub(super) fn generate_tag_element(
                 write!(result, " {}", attr.name).expect("write! to String is infallible");
             }
             AttributeValue::Boolean(false) => {}
+            AttributeValue::Spread(expr) => {
+                // Spread: `...obj` — all properties of obj become attributes at runtime
+                write!(result, " {}=\"{}\"", attr_names::SPREAD, html_escape(expr))
+                    .expect("write! to String is infallible");
+            }
             AttributeValue::Expression(expr) => {
                 if attr.name.starts_with("class:") {
                     // Conditional class binding: class:name={expr} → data-webcore-class-name="expr"

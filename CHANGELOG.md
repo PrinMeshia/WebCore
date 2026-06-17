@@ -5,6 +5,56 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.10.1]
+
+### Correctifs (v2.10.1)
+
+- **Compatibilité navigateur — `RegExp.escape` retiré** — `RegExp.escape()` (ES2025, Chrome 127+ / FF 134+ / Safari 18.2+ seulement) remplacé par interpolation directe de `v` dans le patron regex ; les noms de variables étant des identifiants purs (alphanumérique + `_`), aucun métacaractère regex ne peut y figurer
+- **Compatibilité navigateur — `Promise.try` retiré** — `Promise.try(async()=>{})` (ES2025, Chrome 130+ / FF 134+) remplacé par `Promise.resolve().then(async()=>{})` ; sémantiquement équivalent pour les fonctions async, compatible dès Chrome 88+
+- **Strip prod — sentinelle `data-webcore-class-bound` préservée** — le filtre de nettoyage prod supprimait `data-webcore-class-bound` avec les autres attributs `data-webcore-class-*` ; `bindClassBindings()` interroge ce sélecteur à chaque navigation SPA, son absence rendait silencieusement morts tous les bindings de classes après le premier `nav()`
+- **En-tête runtime** — commentaire mis à jour de `ES2025+` à `ES2022+` pour refléter la baseline réelle
+
+---
+
+## [2.10.0]
+
+### Ajouts (v2.10.0)
+
+- **Runtime ES2022+** — strip prod des `data-webcore-*` dans `DOMContentLoaded` après binding ; en-tête runtime `ES2022+`
+- **`@defer { }` — rendu différé** — bloc DSL dont le contenu est masqué (`display:none`) jusqu'au déclenchement de `DOMContentLoaded`, puis révélé par `bindDefer()` ; utile pour masquer du contenu non-critique pendant l'hydratation
+- **Shorthand props** — `<Component {count}>` est un sucre syntaxique équivalent à `<Component count={count}>` ; round-trip préservé par `webc fmt`
+- **Spread d'attributs** — `<div ...attrs>` propage les propriétés d'un objet d'expression comme attributs DOM individuels via `bindAttrs` au runtime
+- **LSP `textDocument/rename`** — renomme un identifiant (variable d'état, prop…) sur toute l'occurrence dans le fichier source ; renvoie une `WorkspaceEdit` LSP 3.17 standard
+
+### Optimisations build (v2.10.0)
+
+- **Content-hash filename** — `webcore.<fnv8>.js` remplace `webcore.js?v=hash` : le nom du fichier porte le hash (cache-busting côté CDN sans query-param)
+- **Déduplication des handlers** — expressions identiques sur plusieurs éléments partagent un helper `_wh<n>` ; noms assignés en ordre lexicographique (déterministe via `BTreeMap`)
+- **Strip prod des data-attrs** — `data-webcore-if/else/interpolation/ref/defer/spread` retirés du DOM en prod dans `DOMContentLoaded` après binding ; `data-webcore-bound/class-bound` et leurs attrs de binding aussi nettoyés
+
+### Qualité & outillage (v2.10.0)
+
+- 12 nouveaux tests — 182 tests au total (172 unitaires + 10 intégration)
+- Refactorisation : `collect_block_content()`, `scope_attr_str()`, `is_word_char()` extraits comme helpers ; `bindAttrs` JS unifié en un seul scaffold paramétré ; branche morte `else if has_spread` supprimée
+
+---
+
+## [2.8.0]
+
+### Ajouts (v2.8.0)
+
+- **Méthodes réactives sur `List`** — `items.push(value)`, `items.remove(index)`, `items.clear()` sont désormais des mutations réactives directes dans les handlers (ex. `on:click={todos.push(draft)}`) ; compilées respectivement en spread-append (`[...S.get('items'), v]`), filtre par index et reset tableau vide ; fonctionne aussi sur les variables de store (`$store.cart.push(item)`) ; aucune modification de grammaire ni de runtime — la transformation est entièrement dans le compilateur d'expressions (`js_events.rs`)
+- **`@loading { }` / `@catch { }`** — sucre syntaxique HTTP : `@loading { ... }` est équivalent à `@if loading { ... }` et `@catch { ... }` est équivalent à `@if error { ... }` ; aucun runtime supplémentaire (compilés vers `Element::If`) ; acceptables à côté de `@for` dans un composant avec `http {}` pour un modèle template propre sans répéter `loading`/`error` manuellement
+- **Serveur LSP `webc lsp`** — serveur LSP JSON-RPC sur `stdin/stdout` (LSP 3.17, sans dépendance supplémentaire) : `textDocument/hover` (type, valeur par défaut, expression computed), `textDocument/completion` (vars d'état, computed, props, composants, `loading`/`error`), `textDocument/definition` (jump vers la déclaration du composant ou de la variable) ; store de documents en mémoire (`didOpen` / `didChange` / `didClose`) ; compatible VS Code, Neovim, Zed
+
+### Qualité & outillage (v2.8.0)
+
+- 28 nouveaux tests — 170 tests au total (unitaires sur méthodes List, golden sur `@loading`/`@catch`, helpers LSP)
+- `CompiledVars` et `compile_list_method` promus `pub(crate)` pour les tests inter-modules
+- Module `js_events` rendu `pub(crate)` (tests uniquement)
+
+---
+
 ## [2.7.0]
 
 ### Ajouts (v2.7.0)
@@ -36,7 +86,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.6.0] 
+## [2.6.0]
 
 ### Ajouts (v2.6.0)
 
@@ -97,7 +147,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.1] 
+## [2.5.1]
 
 ### Corrections de sécurité (v2.5.1)
 
@@ -113,7 +163,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.5.0] 
+## [2.5.0]
 
 ### Ajouts (v2.5.0)
 
@@ -130,7 +180,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.4.0] 
+## [2.4.0]
 
 ### Ajouts (v2.4.0)
 
@@ -149,7 +199,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.3.0] 
+## [2.3.0]
 
 ### Ajouts (v2.3.0)
 
@@ -163,7 +213,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.0] 
+## [2.1.0]
 
 ### Ajouts
 
@@ -181,7 +231,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.2.0] 
+## [2.2.0]
 
 ### Ajouts
 
@@ -198,7 +248,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.0.0] 
+## [2.0.0]
 
 ### Rupture avec v1.x
 
@@ -230,7 +280,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.5.0] 
+## [1.5.0]
 
 ### Ajouts
 
@@ -243,7 +293,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.4.0] 
+## [1.4.0]
 
 ### Ajouts
 
@@ -258,7 +308,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.3.0] 
+## [1.3.0]
 
 ### Ajouts
 
@@ -278,7 +328,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.2.0] 
+## [1.2.0]
 
 ### Ajouts
 
@@ -297,7 +347,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.1] 
+## [1.1.1]
 
 ### Corrections
 
@@ -316,7 +366,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.1.0] 
+## [1.1.0]
 
 ### Ajouts
 
@@ -347,7 +397,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [1.0.0] 
+## [1.0.0]
 
 ### Ajouts
 
@@ -371,7 +421,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.9.0] 
+## [0.9.0]
 
 ### Ajouts
 
@@ -386,7 +436,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.8.0] 
+## [0.8.0]
 
 ### Ajouts
 
@@ -402,7 +452,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.7.0] 
+## [0.7.0]
 
 ### Ajouts
 
@@ -410,7 +460,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.6.0] 
+## [0.6.0]
 
 ### Ajouts
 
@@ -418,7 +468,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.5.0] 
+## [0.5.0]
 
 ### Ajouts
 
@@ -426,7 +476,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0] 
+## [0.4.0]
 
 ### Ajouts
 
@@ -440,7 +490,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.0] 
+## [0.3.0]
 
 ### Ajouts
 
@@ -461,7 +511,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.2.0] 
+## [0.2.0]
 
 ### Ajouts
 

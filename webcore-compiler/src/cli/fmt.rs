@@ -141,7 +141,7 @@ pub fn format_webc(source: &str, opts: &FmtOptions) -> Result<String, String> {
     }
 
     // Store
-    if !doc.store.is_empty() {
+    if !doc.store.is_empty() || !doc.store_computed.is_empty() {
         out.push_str("store {\n");
         for sv in &doc.store {
             let default = sv
@@ -156,6 +156,18 @@ pub fn format_webc(source: &str, opts: &FmtOptions) -> Result<String, String> {
                 col_pad(&sv.name),
                 sv.type_
             ));
+        }
+        if !doc.store_computed.is_empty() {
+            out.push_str(&format!("{}computed {{\n", i(opts.indent)));
+            for cv in &doc.store_computed {
+                out.push_str(&format!(
+                    "{}{} = {}\n",
+                    i(opts.indent * 2),
+                    cv.name,
+                    cv.expr
+                ));
+            }
+            out.push_str(&format!("{}}}\n", i(opts.indent)));
         }
         out.push_str("}\n\n");
     }
@@ -390,6 +402,22 @@ pub fn format_element(el: &Element, depth: usize, opts: &FmtOptions) -> String {
             else_branch,
             ..
         } => {
+            // @loading / @catch sugar: round-trip them as-is when no else branch
+            let keyword = if else_branch.is_none() && condition == "loading" {
+                "@loading"
+            } else if else_branch.is_none() && condition == "error" {
+                "@catch"
+            } else {
+                ""
+            };
+            if !keyword.is_empty() {
+                let mut out = format!("{ind}{keyword} {{\n");
+                for child in then_branch {
+                    out.push_str(&format_element(child, depth + 1, opts));
+                }
+                out.push_str(&format!("{ind}}}\n"));
+                return out;
+            }
             let mut out = format!("{ind}@if {condition} {{\n");
             for child in then_branch {
                 out.push_str(&format_element(child, depth + 1, opts));
@@ -419,6 +447,14 @@ pub fn format_element(el: &Element, depth: usize, opts: &FmtOptions) -> String {
                 out.push_str(&format_element(child, depth + 1, opts));
             }
             out.push_str(&format!("{ind}</>\n"));
+            out
+        }
+        Element::Defer { content, .. } => {
+            let mut out = format!("{ind}@defer {{\n");
+            for child in content {
+                out.push_str(&format_element(child, depth + 1, opts));
+            }
+            out.push_str(&format!("{ind}}}\n"));
             out
         }
     }
@@ -524,9 +560,17 @@ fn inline_content(content: &[Element], _opts: &FmtOptions) -> Option<String> {
 fn format_attribute(attr: &Attribute) -> String {
     match &attr.value {
         AttributeValue::String(s) => format!("{}=\"{}\"", attr.name, s),
-        AttributeValue::Expression(e) => format!("{}={{{e}}}", attr.name),
+        AttributeValue::Expression(e) => {
+            // Shorthand: if name == expr (shorthand prop {count}), emit `{count}`
+            if attr.name == e.as_str() {
+                format!("{{{e}}}")
+            } else {
+                format!("{}={{{e}}}", attr.name)
+            }
+        }
         AttributeValue::Boolean(true) => attr.name.clone(),
         AttributeValue::Boolean(false) => format!("{}=false", attr.name),
+        AttributeValue::Spread(expr) => format!("...{expr}"),
     }
 }
 

@@ -341,12 +341,24 @@ fn full_build_prod_mode_counter() {
     );
 
     // Minified JS must still be syntactically valid.
-    let js = fs::read_to_string(dist.join("assets/webcore.js")).expect("read webcore.js");
+    // The filename is content-hashed (e.g. webcore.abc12345.js), so locate it dynamically.
+    let webcore_js_path = fs::read_dir(dist.join("assets"))
+        .expect("read assets dir")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("webcore.") && n.ends_with(".js"))
+                .unwrap_or(false)
+        })
+        .expect("find hashed webcore.*.js in dist/assets");
+    let js = fs::read_to_string(&webcore_js_path).expect("read webcore.js");
     assert!(
         !js.lines().any(|l| l.trim_start().starts_with("//")),
         "prod JS still contains line comments"
     );
-    check_js_syntax(&dist.join("assets/webcore.js"));
+    check_js_syntax(&webcore_js_path);
 
     // Prod builds must be deterministic too (hashes depend only on content).
     let first = snapshot_tree(&dist);
@@ -388,4 +400,81 @@ fn full_build_i18n() {
 #[test]
 fn full_build_docs() {
     build_example("docs");
+}
+
+/// `webc check --json` must emit one machine-readable JSON line on stdout:
+/// parse errors carry file/line/col, reference issues a stable code, and a
+/// healthy project reports ok:true with exit code 0.
+#[test]
+fn check_json_structured_diagnostics() {
+    let work = scratch_dir("checkjson");
+    fs::create_dir_all(work.join("src/layouts")).expect("mkdir layouts");
+    fs::create_dir_all(work.join("src/pages")).expect("mkdir pages");
+    fs::write(
+        work.join("webc.toml"),
+        "[app]\ntitle = \"T\"\nlang = \"fr\"\nmode = \"dev\"\n",
+    )
+    .expect("write webc.toml");
+    fs::write(
+        work.join("src/layouts/MainLayout.webc"),
+        "layout MainLayout { main { slot content } }\n",
+    )
+    .expect("write layout");
+
+    let run_check = |dir: &Path| -> (bool, serde_json::Value) {
+        let out = Command::new(webc_bin())
+            .args(["check", "--json"])
+            .current_dir(dir)
+            .output()
+            .expect("spawn webc check --json");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("stdout is not valid JSON ({e}):\n{stdout}"));
+        (out.status.success(), parsed)
+    };
+
+    // 1. Parse error → positioned diagnostic, non-zero exit.
+    fs::write(
+        work.join("src/pages/home.webc"),
+        "page \"home\" {\n    div {\n        p \"oops\n}\n",
+    )
+    .expect("write broken page");
+    let (ok, report) = run_check(&work);
+    assert!(!ok, "broken project must exit non-zero");
+    assert_eq!(report["ok"], false);
+    let d = &report["diagnostics"][0];
+    assert_eq!(d["severity"], "error");
+    assert_eq!(d["code"], "parse");
+    assert!(
+        d["file"].as_str().unwrap_or("").ends_with("home.webc"),
+        "parse diagnostic should point at home.webc: {report}"
+    );
+    assert!(
+        d["line"].as_u64().unwrap_or(0) > 0,
+        "line missing: {report}"
+    );
+    assert!(d["col"].as_u64().unwrap_or(0) > 0, "col missing: {report}");
+
+    // 2. Unknown component → stable code, no position required.
+    fs::write(
+        work.join("src/pages/home.webc"),
+        "page \"home\" {\n    Missing {}\n}\n",
+    )
+    .expect("write page with unknown component");
+    let (ok, report) = run_check(&work);
+    assert!(!ok);
+    assert_eq!(report["diagnostics"][0]["code"], "unknown-component");
+
+    // 3. Healthy project → ok:true, empty diagnostics, exit 0.
+    fs::write(
+        work.join("src/pages/home.webc"),
+        "page \"home\" {\n    p \"ok\"\n}\n",
+    )
+    .expect("write valid page");
+    let (ok, report) = run_check(&work);
+    assert!(ok, "valid project must exit 0: {report}");
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["diagnostics"].as_array().map(Vec::len), Some(0));
+
+    fs::remove_dir_all(&work).ok();
 }

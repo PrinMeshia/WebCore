@@ -49,6 +49,9 @@ pub(super) fn push_plain_attributes(result: &mut String, attributes: &[Attribute
                 )
                 .expect("write! to String is infallible");
             }
+            AttributeValue::Spread(_) => {
+                // Spread is handled by tags.rs / bindAttrs; skip here
+            }
         }
     }
 }

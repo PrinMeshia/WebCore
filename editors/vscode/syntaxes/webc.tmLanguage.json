@@ -3,27 +3,72 @@
   "name": "WebCore",
   "scopeName": "source.webc",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#top-level-blocks" },
-    { "include": "#directives" },
-    { "include": "#webc-directives" },
-    { "include": "#ref-attrs" },
-    { "include": "#style-binding-attrs" },
-    { "include": "#debounce-event-attrs" },
-    { "include": "#lifecycle-event-attrs" },
-    { "include": "#event-attrs" },
-    { "include": "#class-binding-attrs" },
-    { "include": "#bind-attrs" },
-    { "include": "#dynamic-attrs" },
-    { "include": "#static-attrs" },
-    { "include": "#query-vars" },
-    { "include": "#html-tags" },
-    { "include": "#interpolation" },
-    { "include": "#strings" },
-    { "include": "#numbers" },
-    { "include": "#types" },
-    { "include": "#builtin-functions" },
-    { "include": "#keywords" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#import-decl"
+    },
+    {
+      "include": "#top-level-blocks"
+    },
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#webc-directives"
+    },
+    {
+      "include": "#ref-attrs"
+    },
+    {
+      "include": "#style-binding-attrs"
+    },
+    {
+      "include": "#debounce-event-attrs"
+    },
+    {
+      "include": "#lifecycle-event-attrs"
+    },
+    {
+      "include": "#event-attrs"
+    },
+    {
+      "include": "#class-binding-attrs"
+    },
+    {
+      "include": "#bind-attrs"
+    },
+    {
+      "include": "#dynamic-attrs"
+    },
+    {
+      "include": "#static-attrs"
+    },
+    {
+      "include": "#query-vars"
+    },
+    {
+      "include": "#html-tags"
+    },
+    {
+      "include": "#interpolation"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#builtin-functions"
+    },
+    {
+      "include": "#keywords"
+    }
   ],
   "repository": {
     "comments": {
@@ -34,354 +79,653 @@
         }
       ]
     },
-
     "top-level-blocks": {
       "patterns": [
         {
           "name": "meta.block.app.webc",
           "begin": "\\b(app)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
           "beginCaptures": {
-            "1": { "name": "keyword.control.app.webc" },
-            "2": { "name": "entity.name.type.webc" }
+            "1": {
+              "name": "keyword.control.app.webc"
+            },
+            "2": {
+              "name": "entity.name.type.webc"
+            }
           },
           "end": "\\}",
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#routes-block" },
-            { "include": "#strings" },
-            { "include": "#keywords" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#routes-block"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#keywords"
+            }
           ]
         },
         {
           "name": "meta.block.layout.webc",
           "begin": "\\b(layout)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
           "beginCaptures": {
-            "1": { "name": "keyword.control.layout.webc" },
-            "2": { "name": "entity.name.type.webc" }
+            "1": {
+              "name": "keyword.control.layout.webc"
+            },
+            "2": {
+              "name": "entity.name.type.webc"
+            }
           },
           "end": "\\}",
-          "patterns": [{ "include": "#view-content" }]
+          "patterns": [
+            {
+              "include": "#view-content"
+            }
+          ]
         },
         {
           "name": "meta.block.page.webc",
           "begin": "\\b(page)\\s+",
           "beginCaptures": {
-            "1": { "name": "keyword.control.page.webc" }
+            "1": {
+              "name": "keyword.control.page.webc"
+            }
           },
           "end": "\\}",
           "patterns": [
-            { "include": "#strings" },
-            { "include": "#head-block" },
-            { "include": "#view-content" }
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#head-block"
+            },
+            {
+              "include": "#view-content"
+            }
           ]
         },
         {
           "name": "meta.block.component.webc",
           "begin": "\\b(component)\\s+([A-Z][a-zA-Z0-9]*)\\s*\\{",
           "beginCaptures": {
-            "1": { "name": "keyword.control.component.webc" },
-            "2": { "name": "entity.name.type.webc" }
+            "1": {
+              "name": "keyword.control.component.webc"
+            },
+            "2": {
+              "name": "entity.name.type.webc"
+            }
           },
           "end": "\\}",
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#props-block" },
-            { "include": "#state-block" },
-            { "include": "#computed-block" },
-            { "include": "#http-block" },
-            { "include": "#view-block" },
-            { "include": "#style-block" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#watch-hook"
+            },
+            {
+              "include": "#lifecycle-event-attrs"
+            },
+            {
+              "include": "#props-block"
+            },
+            {
+              "include": "#state-block"
+            },
+            {
+              "include": "#computed-block"
+            },
+            {
+              "include": "#http-block"
+            },
+            {
+              "include": "#view-block"
+            },
+            {
+              "include": "#style-block"
+            }
+          ]
+        },
+        {
+          "name": "meta.block.store.webc",
+          "begin": "\\b(store)\\s*\\{",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.store.webc"
+            }
+          },
+          "end": "\\}",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)\\s*(=)?",
+              "captures": {
+                "1": {
+                  "name": "variable.other.readwrite.webc"
+                },
+                "2": {
+                  "name": "punctuation.separator.webc"
+                },
+                "3": {
+                  "name": "support.type.webc"
+                },
+                "4": {
+                  "name": "keyword.operator.assignment.webc"
+                }
+              }
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#keywords"
+            }
           ]
         }
       ]
     },
-
     "routes-block": {
       "begin": "\\b(routes)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.routes.webc" }
+        "1": {
+          "name": "keyword.other.routes.webc"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
         {
-          "match": "(\"[^\"]*\")\\s*(:)\\s*([A-Z][a-zA-Z0-9]*)",
+          "include": "#comments"
+        },
+        {
+          "match": "(\"[^\"]*\")\\s*(:)\\s*([A-Z][a-zA-Z0-9]*)(?:\\s+(each)\\s+([a-z_][a-zA-Z0-9_]*))?",
           "captures": {
-            "1": { "name": "string.quoted.double.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "entity.name.type.webc" }
+            "1": {
+              "name": "string.quoted.double.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "entity.name.type.webc"
+            },
+            "4": {
+              "name": "keyword.control.each.webc"
+            },
+            "5": {
+              "name": "variable.other.webc"
+            }
           }
         }
       ]
     },
-
     "props-block": {
       "begin": "\\b(props)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
-      },
-      "end": "\\}",
-      "patterns": [
-        { "include": "#comments" },
-        {
-          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)",
-          "captures": {
-            "1": { "name": "variable.other.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "support.type.webc" }
-          }
+        "1": {
+          "name": "keyword.other.section.webc"
         }
-      ]
-    },
-
-    "state-block": {
-      "begin": "\\b(state)\\s*\\{",
-      "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
+        {
+          "include": "#comments"
+        },
         {
           "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)\\s*(=)?",
           "captures": {
-            "1": { "name": "variable.other.readwrite.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "support.type.webc" },
-            "4": { "name": "keyword.operator.assignment.webc" }
+            "1": {
+              "name": "variable.other.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "support.type.webc"
+            },
+            "4": {
+              "name": "keyword.operator.assignment.webc"
+            }
           }
         },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#keywords" }
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords"
+        }
       ]
     },
-
+    "state-block": {
+      "begin": "\\b(state)\\s*\\{",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
+      },
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:)\\s*(String|Number|Boolean|List)\\s*(=)?",
+          "captures": {
+            "1": {
+              "name": "variable.other.readwrite.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "support.type.webc"
+            },
+            "4": {
+              "name": "keyword.operator.assignment.webc"
+            }
+          }
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords"
+        }
+      ]
+    },
     "computed-block": {
       "begin": "\\b(computed)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
+        {
+          "include": "#comments"
+        },
         {
           "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(=)\\s*(.+)",
           "captures": {
-            "1": { "name": "variable.other.readwrite.webc" },
-            "2": { "name": "keyword.operator.assignment.webc" },
-            "3": { "name": "meta.embedded.expression.webc" }
+            "1": {
+              "name": "variable.other.readwrite.webc"
+            },
+            "2": {
+              "name": "keyword.operator.assignment.webc"
+            },
+            "3": {
+              "name": "meta.embedded.expression.webc"
+            }
           }
         }
       ]
     },
-
     "http-block": {
       "begin": "\\b(http)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
+        {
+          "include": "#comments"
+        },
         {
           "match": "\\b(get|post|into)\\s*(:)\\s*(\"[^\"]*\"|[a-z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.other.http.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "keyword.other.http.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "string.quoted.double.webc"
+            }
           }
         }
       ]
     },
-
     "head-block": {
       "begin": "\\b(head)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
+        {
+          "include": "#comments"
+        },
         {
           "match": "\\b(title)\\s+(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "keyword.other.head.webc" },
-            "2": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "keyword.other.head.webc"
+            },
+            "2": {
+              "name": "string.quoted.double.webc"
+            }
           }
         },
         {
           "match": "\\b(meta)\\s+([a-zA-Z_:][a-zA-Z0-9_:]*)\\s*(=)\\s*(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "keyword.other.head.webc" },
-            "2": { "name": "entity.other.attribute-name.webc" },
-            "3": { "name": "punctuation.separator.webc" },
-            "4": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "keyword.other.head.webc"
+            },
+            "2": {
+              "name": "entity.other.attribute-name.webc"
+            },
+            "3": {
+              "name": "punctuation.separator.webc"
+            },
+            "4": {
+              "name": "string.quoted.double.webc"
+            }
           }
         }
       ]
     },
-
     "view-block": {
       "begin": "\\b(view)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
       },
       "end": "\\}",
-      "patterns": [{ "include": "#view-content" }]
+      "patterns": [
+        {
+          "include": "#view-content"
+        }
+      ]
     },
-
     "style-block": {
       "name": "meta.block.style.webc",
       "begin": "\\b(style)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.webc" }
+        "1": {
+          "name": "keyword.other.section.webc"
+        }
       },
       "end": "\\}",
       "contentName": "meta.embedded.css",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#media-rule" },
-        { "include": "#css-rule" }
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#keyframes-rule"
+        },
+        {
+          "include": "#media-rule"
+        },
+        {
+          "include": "#css-rule"
+        }
       ]
     },
-
     "media-rule": {
       "name": "meta.at-rule.media.css",
       "begin": "(@media)\\s+([^{]+)\\{",
       "beginCaptures": {
-        "1": { "name": "keyword.control.at-rule.media.css" },
-        "2": { "name": "meta.property-value.css" }
+        "1": {
+          "name": "keyword.control.at-rule.media.css"
+        },
+        "2": {
+          "name": "meta.property-value.css"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#css-rule" }
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#css-rule"
+        }
       ]
     },
-
     "css-rule": {
       "name": "meta.rule.css",
       "begin": "([&a-zA-Z*.:# ][a-zA-Z0-9_.#:& -]*)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "entity.other.attribute-name.css" }
+        "1": {
+          "name": "entity.other.attribute-name.css"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#nested-css-rule" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#nested-css-rule"
+        },
         {
           "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
           "captures": {
-            "1": { "name": "support.type.property-name.css" },
-            "2": { "name": "punctuation.separator.key-value.css" },
-            "3": { "name": "meta.property-value.css" },
-            "4": { "name": "punctuation.terminator.rule.css" }
+            "1": {
+              "name": "support.type.property-name.css"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.css"
+            },
+            "3": {
+              "name": "meta.property-value.css"
+            },
+            "4": {
+              "name": "punctuation.terminator.rule.css"
+            }
           }
         }
       ]
     },
-
     "nested-css-rule": {
       "name": "meta.rule.css.nested",
       "begin": "(&[a-zA-Z0-9_.#:> *~+\\[\\]-]*)\\s*\\{",
       "beginCaptures": {
-        "1": { "name": "entity.other.attribute-name.css.nested" }
+        "1": {
+          "name": "entity.other.attribute-name.css.nested"
+        }
       },
       "end": "\\}",
       "patterns": [
-        { "include": "#comments" },
+        {
+          "include": "#comments"
+        },
         {
           "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
           "captures": {
-            "1": { "name": "support.type.property-name.css" },
-            "2": { "name": "punctuation.separator.key-value.css" },
-            "3": { "name": "meta.property-value.css" },
-            "4": { "name": "punctuation.terminator.rule.css" }
+            "1": {
+              "name": "support.type.property-name.css"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.css"
+            },
+            "3": {
+              "name": "meta.property-value.css"
+            },
+            "4": {
+              "name": "punctuation.terminator.rule.css"
+            }
           }
         }
       ]
     },
-
     "view-content": {
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#directives" },
-        { "include": "#slot" },
-        { "include": "#link-tag" },
-        { "include": "#component-use" },
-        { "include": "#html-tags" },
-        { "include": "#webc-directives" },
-        { "include": "#ref-attrs" },
-        { "include": "#style-binding-attrs" },
-        { "include": "#debounce-event-attrs" },
-        { "include": "#lifecycle-event-attrs" },
-        { "include": "#event-attrs" },
-        { "include": "#class-binding-attrs" },
-        { "include": "#bind-attrs" },
-        { "include": "#dynamic-attrs" },
-        { "include": "#static-attrs" },
-        { "include": "#query-vars" },
-        { "include": "#interpolation" },
-        { "include": "#strings" },
-        { "include": "#numbers" }
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#fragments"
+        },
+        {
+          "include": "#directives"
+        },
+        {
+          "include": "#slot"
+        },
+        {
+          "include": "#link-tag"
+        },
+        {
+          "include": "#component-use"
+        },
+        {
+          "include": "#html-tags"
+        },
+        {
+          "include": "#webc-directives"
+        },
+        {
+          "include": "#ref-attrs"
+        },
+        {
+          "include": "#style-binding-attrs"
+        },
+        {
+          "include": "#debounce-event-attrs"
+        },
+        {
+          "include": "#lifecycle-event-attrs"
+        },
+        {
+          "include": "#event-attrs"
+        },
+        {
+          "include": "#class-binding-attrs"
+        },
+        {
+          "include": "#bind-attrs"
+        },
+        {
+          "include": "#dynamic-attrs"
+        },
+        {
+          "include": "#static-attrs"
+        },
+        {
+          "include": "#query-vars"
+        },
+        {
+          "include": "#interpolation"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        }
       ]
     },
-
     "directives": {
       "patterns": [
         {
           "name": "meta.directive.if.webc",
           "begin": "(@if|@else)\\b",
           "beginCaptures": {
-            "1": { "name": "keyword.control.webc" }
+            "1": {
+              "name": "keyword.control.webc"
+            }
           },
           "end": "(?<=\\})",
           "patterns": [
-            { "include": "#expression" },
-            { "include": "#view-content" }
+            {
+              "include": "#expression"
+            },
+            {
+              "include": "#view-content"
+            }
           ]
         },
         {
           "name": "meta.directive.for.webc",
           "begin": "(@for)\\s+([a-z_][a-zA-Z0-9_]*)(?:\\s*,\\s*([a-z_][a-zA-Z0-9_]*))?\\s+(in)\\s+([a-z_][a-zA-Z0-9_.]*)",
           "beginCaptures": {
-            "1": { "name": "keyword.control.webc" },
-            "2": { "name": "variable.other.webc" },
-            "3": { "name": "variable.other.webc" },
-            "4": { "name": "keyword.control.webc" },
-            "5": { "name": "variable.other.webc" }
+            "1": {
+              "name": "keyword.control.webc"
+            },
+            "2": {
+              "name": "variable.other.webc"
+            },
+            "3": {
+              "name": "variable.other.webc"
+            },
+            "4": {
+              "name": "keyword.control.webc"
+            },
+            "5": {
+              "name": "variable.other.webc"
+            }
           },
           "end": "(?<=\\})",
           "patterns": [
             {
               "match": "\\b(key)\\s*(=)\\s*(\\{[^}]*\\})",
               "captures": {
-                "1": { "name": "keyword.other.for-key.webc" },
-                "2": { "name": "punctuation.separator.webc" },
-                "3": { "name": "meta.embedded.expression.webc" }
+                "1": {
+                  "name": "keyword.other.for-key.webc"
+                },
+                "2": {
+                  "name": "punctuation.separator.webc"
+                },
+                "3": {
+                  "name": "meta.embedded.expression.webc"
+                }
               }
             },
-            { "include": "#view-content" }
+            {
+              "include": "#view-content"
+            }
           ]
         },
         {
           "name": "meta.directive.switch.webc",
           "begin": "(@switch)\\b",
           "beginCaptures": {
-            "1": { "name": "keyword.control.webc" }
+            "1": {
+              "name": "keyword.control.webc"
+            }
           },
           "end": "(?<=\\})",
           "patterns": [
-            { "include": "#expression" },
+            {
+              "include": "#expression"
+            },
             {
               "name": "meta.directive.case.webc",
               "begin": "(@case|@default)\\b",
               "beginCaptures": {
-                "1": { "name": "keyword.control.webc" }
+                "1": {
+                  "name": "keyword.control.webc"
+                }
               },
               "end": "(?<=\\})",
-              "patterns": [{ "include": "#view-content" }]
+              "patterns": [
+                {
+                  "include": "#view-content"
+                }
+              ]
             }
           ]
         },
@@ -389,201 +733,289 @@
           "name": "meta.directive.error.webc",
           "begin": "(@error)\\b",
           "beginCaptures": {
-            "1": { "name": "keyword.control.webc" }
+            "1": {
+              "name": "keyword.control.webc"
+            }
           },
           "end": "(?<=\\})",
           "patterns": [
-            { "include": "#strings" },
-            { "include": "#view-content" }
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#view-content"
+            }
           ]
         }
       ]
     },
-
     "webc-directives": {
       "patterns": [
         {
           "name": "meta.attribute.webc-img.webc",
           "match": "(webc:img)\\b",
           "captures": {
-            "1": { "name": "keyword.other.directive.webc" }
+            "1": {
+              "name": "keyword.other.directive.webc"
+            }
           }
         },
         {
           "name": "meta.attribute.webc-transition.webc",
           "match": "(webc:transition)\\s*(=)\\s*(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "keyword.other.directive.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "keyword.other.directive.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "string.quoted.double.webc"
+            }
           }
         }
       ]
     },
-
     "ref-attrs": {
       "name": "meta.attribute.ref.webc",
       "match": "(ref:[a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(true|false|\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.ref.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.ref.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "style-binding-attrs": {
       "name": "meta.attribute.style-binding.webc",
       "match": "(style:[a-zA-Z_-]+)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.style-binding.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.style-binding.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "lifecycle-event-attrs": {
       "name": "meta.attribute.lifecycle.webc",
       "begin": "(on:mount|on:destroy)\\s*(\\{)",
       "beginCaptures": {
-        "1": { "name": "keyword.control.lifecycle.webc" },
-        "2": { "name": "punctuation.section.block.begin.webc" }
+        "1": {
+          "name": "keyword.control.lifecycle.webc"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.webc"
+        }
       },
       "end": "\\}",
       "endCaptures": {
-        "0": { "name": "punctuation.section.block.end.webc" }
+        "0": {
+          "name": "punctuation.section.block.end.webc"
+        }
       },
       "patterns": [
-        { "include": "#expression" }
+        {
+          "include": "#expression"
+        }
       ]
     },
-
     "slot": {
       "patterns": [
         {
           "name": "meta.slot.content.webc",
           "begin": "\\b(slot)\\s+([a-z_][a-zA-Z0-9_]*)\\s*\\{",
           "beginCaptures": {
-            "1": { "name": "keyword.other.slot.webc" },
-            "2": { "name": "variable.other.webc" }
+            "1": {
+              "name": "keyword.other.slot.webc"
+            },
+            "2": {
+              "name": "variable.other.webc"
+            }
           },
           "end": "\\}",
-          "patterns": [{ "include": "#view-content" }]
+          "patterns": [
+            {
+              "include": "#view-content"
+            }
+          ]
         },
         {
           "match": "\\b(slot)\\s+([a-z_][a-zA-Z0-9_]*)?\\b",
           "captures": {
-            "1": { "name": "keyword.other.slot.webc" },
-            "2": { "name": "variable.other.webc" }
+            "1": {
+              "name": "keyword.other.slot.webc"
+            },
+            "2": {
+              "name": "variable.other.webc"
+            }
           }
         }
       ]
     },
-
     "link-tag": {
       "name": "meta.tag.link.webc",
       "begin": "\\b(link)\\b",
       "beginCaptures": {
-        "1": { "name": "keyword.other.link.webc" }
+        "1": {
+          "name": "keyword.other.link.webc"
+        }
       },
       "end": "(?<=\\}|>)",
       "patterns": [
         {
           "match": "\\b(to|href)\\s*=\\s*(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "entity.other.attribute-name.webc" },
-            "2": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "entity.other.attribute-name.webc"
+            },
+            "2": {
+              "name": "string.quoted.double.webc"
+            }
           }
         },
-        { "include": "#static-attrs" },
-        { "include": "#view-content" }
+        {
+          "include": "#static-attrs"
+        },
+        {
+          "include": "#view-content"
+        }
       ]
     },
-
     "component-use": {
       "name": "meta.tag.component.webc",
       "begin": "\\b([A-Z][a-zA-Z0-9]*)\\s*(?=[{]|[a-z\"'])",
       "beginCaptures": {
-        "1": { "name": "entity.name.type.webc" }
+        "1": {
+          "name": "entity.name.type.webc"
+        }
       },
       "end": "(?<=\\})",
       "patterns": [
-        { "include": "#static-attrs" },
-        { "include": "#dynamic-attrs" },
-        { "include": "#view-content" }
+        {
+          "include": "#static-attrs"
+        },
+        {
+          "include": "#dynamic-attrs"
+        },
+        {
+          "include": "#view-content"
+        }
       ]
     },
-
     "html-tags": {
       "patterns": [
         {
           "name": "meta.tag.html.webc",
           "match": "\\b(div|span|p|h[1-6]|ul|ol|li|a|img|input|button|form|select|option|textarea|section|article|header|footer|nav|main|aside|figure|figcaption|label|table|thead|tbody|tr|th|td|pre|code|blockquote|hr|br|strong|em|small|sup|sub|mark|details|summary|picture|source|video|audio|canvas|svg|path|circle|rect|line|polygon|polyline|ellipse|use|defs|g)\\b",
           "captures": {
-            "1": { "name": "keyword.other.html-tag.webc" }
+            "1": {
+              "name": "keyword.other.html-tag.webc"
+            }
           }
         }
       ]
     },
-
     "debounce-event-attrs": {
       "name": "meta.attribute.event.debounce.webc",
       "match": "(on:[a-z]+\\|debounce(?:=[0-9]+)?)\\s*(=)?\\s*(\\{[^}]*\\})?",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.event.debounce.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.event.debounce.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "event-attrs": {
       "name": "meta.attribute.event.webc",
-      "match": "(on:[a-z]+)\\s*(=)\\s*(\\{[^}]*\\})",
+      "match": "(on:[a-z]+(?:\\|(?:stop|prevent|once|self))*)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.event.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.event.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "class-binding-attrs": {
       "name": "meta.attribute.class-binding.webc",
       "match": "(class:[a-zA-Z_-]+)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.class-binding.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.class-binding.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "bind-attrs": {
       "name": "meta.attribute.bind.webc",
       "match": "(bind:[a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.bind.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.bind.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "dynamic-attrs": {
       "name": "meta.attribute.dynamic.webc",
       "match": "([a-zA-Z-]+)\\s*(=)\\s*(\\{[^}]*\\})",
       "captures": {
-        "1": { "name": "entity.other.attribute-name.webc" },
-        "2": { "name": "punctuation.separator.webc" },
-        "3": { "name": "meta.embedded.expression.webc" }
+        "1": {
+          "name": "entity.other.attribute-name.webc"
+        },
+        "2": {
+          "name": "punctuation.separator.webc"
+        },
+        "3": {
+          "name": "meta.embedded.expression.webc"
+        }
       }
     },
-
     "static-attrs": {
       "patterns": [
         {
           "name": "meta.attribute.static.webc",
           "match": "([a-zA-Z-]+)\\s*(=)\\s*(\"[^\"]*\")",
           "captures": {
-            "1": { "name": "entity.other.attribute-name.webc" },
-            "2": { "name": "punctuation.separator.webc" },
-            "3": { "name": "string.quoted.double.webc" }
+            "1": {
+              "name": "entity.other.attribute-name.webc"
+            },
+            "2": {
+              "name": "punctuation.separator.webc"
+            },
+            "3": {
+              "name": "string.quoted.double.webc"
+            }
           }
         },
         {
@@ -592,46 +1024,61 @@
         }
       ]
     },
-
     "query-vars": {
       "patterns": [
         {
           "name": "variable.language.query.webc",
           "match": "(\\$query\\.[a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "variable.language.query.webc" }
+            "1": {
+              "name": "variable.language.query.webc"
+            }
           }
         },
         {
           "name": "variable.language.store.webc",
           "match": "(\\$store\\.[a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "variable.language.store.webc" }
+            "1": {
+              "name": "variable.language.store.webc"
+            }
           }
         },
         {
           "name": "variable.language.route.webc",
           "match": "(\\$route\\.[a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "variable.language.route.webc" }
+            "1": {
+              "name": "variable.language.route.webc"
+            }
           }
         }
       ]
     },
-
     "interpolation": {
       "name": "meta.embedded.interpolation.webc",
       "begin": "\\{",
       "end": "\\}",
-      "patterns": [{ "include": "#expression" }]
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
     },
-
     "expression": {
       "patterns": [
-        { "include": "#builtin-functions" },
-        { "include": "#query-vars" },
-        { "include": "#numbers" },
-        { "include": "#strings" },
+        {
+          "include": "#builtin-functions"
+        },
+        {
+          "include": "#query-vars"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
         {
           "name": "keyword.operator.webc",
           "match": "\\+\\=|\\-\\=|\\*\\=|\\/\\=|\\+\\+|\\-\\-|\\+|\\-|\\*|\\/|%|===|!==|==|!=|>=|<=|>|<|&&|\\|\\||!"
@@ -650,7 +1097,6 @@
         }
       ]
     },
-
     "strings": {
       "name": "string.quoted.double.webc",
       "begin": "\"",
@@ -660,7 +1106,11 @@
           "name": "meta.embedded.interpolation.webc",
           "begin": "\\{",
           "end": "\\}",
-          "patterns": [{ "include": "#expression" }]
+          "patterns": [
+            {
+              "include": "#expression"
+            }
+          ]
         },
         {
           "name": "constant.character.escape.webc",
@@ -668,27 +1118,23 @@
         }
       ]
     },
-
     "numbers": {
       "name": "constant.numeric.webc",
       "match": "\\b\\d+(\\.\\d+)?\\b"
     },
-
     "types": {
       "name": "support.type.webc",
       "match": "\\b(String|Number|Boolean|List)\\b"
     },
-
     "builtin-functions": {
       "name": "support.function.builtin.webc",
       "match": "\\b(max|min|abs|Math\\.floor|Math\\.ceil|Math\\.round|webcore_navigate|t|setLocale|emit)(?=\\()"
     },
-
     "keywords": {
       "patterns": [
         {
           "name": "keyword.control.webc",
-          "match": "\\b(app|layout|page|component|@if|@else|@for|in|slot|@switch|@case|@default|@error)\\b"
+          "match": "\\b(app|layout|page|component|store|import|from|each|@if|@else|@for|in|slot|@switch|@case|@default|@error)\\b"
         },
         {
           "name": "keyword.other.section.webc",
@@ -701,6 +1147,103 @@
         {
           "name": "constant.language.webc",
           "match": "\\b(true|false|null|undefined|root)\\b"
+        }
+      ]
+    },
+    "fragments": {
+      "name": "punctuation.definition.fragment.webc",
+      "match": "</?>"
+    },
+    "import-decl": {
+      "match": "\\b(import)\\s+([a-z_][a-zA-Z0-9_]*)\\s+(from)\\s+(\"[^\"]*\")",
+      "captures": {
+        "1": {
+          "name": "keyword.control.import.webc"
+        },
+        "2": {
+          "name": "variable.other.webc"
+        },
+        "3": {
+          "name": "keyword.control.import.webc"
+        },
+        "4": {
+          "name": "string.quoted.double.webc"
+        }
+      }
+    },
+    "watch-hook": {
+      "name": "meta.watch.webc",
+      "begin": "(\\$watch)\\s+([a-z_][a-zA-Z0-9_]*)\\s*(=>)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.watch.webc"
+        },
+        "2": {
+          "name": "variable.other.webc"
+        },
+        "3": {
+          "name": "keyword.operator.arrow.webc"
+        },
+        "4": {
+          "name": "punctuation.section.block.begin.webc"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.webc"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "keyframes-rule": {
+      "name": "meta.at-rule.keyframes.css",
+      "begin": "(@keyframes)\\s+([a-zA-Z_-][a-zA-Z0-9_-]*)\\s*\\{",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.at-rule.keyframes.css"
+        },
+        "2": {
+          "name": "entity.name.function.css"
+        }
+      },
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "meta.keyframe-step.css",
+          "begin": "((?:from|to|\\d+%)(?:\\s*,\\s*(?:from|to|\\d+%))*)\\s*\\{",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.other.attribute-name.css"
+            }
+          },
+          "end": "\\}",
+          "patterns": [
+            {
+              "match": "([a-z-]+)\\s*(:)\\s*([^;]+)(;?)",
+              "captures": {
+                "1": {
+                  "name": "support.type.property-name.css"
+                },
+                "2": {
+                  "name": "punctuation.separator.key-value.css"
+                },
+                "3": {
+                  "name": "meta.property-value.css"
+                },
+                "4": {
+                  "name": "punctuation.terminator.rule.css"
+                }
+              }
+            }
+          ]
         }
       ]
     }

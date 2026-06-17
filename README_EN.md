@@ -16,96 +16,81 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 2.7.0 (dev) |
+| **Version** | 2.10.1 (released) |
 | **Status** | Stable |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 161 tests (unit, golden, integration, perf) |
+| **Tests** | 182 tests (unit, golden, integration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
 
 ## Features
 
-- **Pest parser**: complete PEG grammar for `.webc` files
-- **Structured AST**: apps, layouts, pages, components (state · view · style · props)
-- **Expression interpolation**: `{count}`, `{count + 1}`, `{max(a, b)}`
-- **Mixed content**: text and nested elements in the same block
-- **Reactive directives**: `@if condition { }` · `@else { }` · `@for item in list { }`
-- **Events**: `on:click`, `on:submit`, `on:change`, `on:input`
-- **Dynamic attributes**: `class={expr}` compiled to runtime bindings
-- **Scoped CSS**: per-component isolation via `data-v` (deterministic FNV-1a hash)
-- **`@media` in `style { }`**: responsive media queries scoped directly inside components
-- **SPA routing**: History API + `nav()` with no full page reload
-- **Reactive state**: `class State { #d = new Map() }` ES2022 with `S.get/set/on`
-- **Reactive props**: `Component value={expr} />` — props accept dynamic expressions
-- **Named slots**: multi-zone layouts (`slot header`, `slot sidebar`, `slot content`)
-- **Global store**: `store { ... }` shared across all components via `$store.varName`
-- **Form validation**: `validate:required/email/minlength` + `@error "field" { }`
-- **SSG**: pre-render initial values, eliminates flash of wrong content
-- **i18n**: `locales/*.toml` + `t("key")` + reactive `setLocale()`
-- **WASM**: detects `wasm/Cargo.toml`, runs `wasm-pack build`, async loader exposes `globalThis.wasm`
-- **Minimal runtime**: `evalCond`, `bindIf`, `bindFor`, `bindAttrs` — <5 KB
-- **Derived state**: `computed { fullName = firstName + " " + lastName }` — re-evaluated before every bind
-- **Lifecycle hooks**: `on:mount { }` / `on:destroy { }` — run at `DOMContentLoaded` / before navigation
-- **Inter-component events**: `emit("event", data)` + `on:event={handler}` on component calls
-- **Parameterized routes**: `/post/:slug` accessible via `{$route.slug}` in views; tree-shaken when unused
-- **`@for` with key**: `@for item key=item.id in items { }` enables key-based DOM diffing — minimal patch
-- **i18n params & plural**: `t("items", count)` → `_one`/`_other` + `{{count}}`; `t("greeting", name)` → `{{0}}`
-- **Compound props**: `{step + 1}` and `class={color}` substituted even in composite expressions
-- **Enriched parse errors**: source line + caret `^` at the faulty column + contextual hints
-- **Multi-statement handlers**: `on:click={a = 1; b = 2}` — multiple `;`-separated instructions in a single handler
-- **Multi-element CSS selectors**: `input, textarea { }` supported inside `style { }` blocks
-- **Forms example**: `examples/forms/` — `SignupForm` and `ContactForm` with full validation
-- **`@switch` / `@case` / `@default`**: multi-branch directive compiled to an `@if`/`@else` chain — zero runtime overhead
-- **`bind:` two-way binding**: `bind:value={x}` and `bind:checked={x}` expand to attribute + `on:input`/`on:change` handler
-- **`@for item, i in items`**: access the current index in loops via a second variable
-- **`webc check`**: validate syntax and references (routes, components, props) without generating any files
-- **Clean URLs**: pages served without `.html` extension (e.g. `/about` instead of `/about.html`)
-- **`dist/assets/`**: JS, CSS and public assets isolated in a dedicated subfolder
-- **Build tree**: `dist/` summary with file sizes printed after every `webc build`
-- **`http { }` — declarative fetch**: `get: "/url"  into: var` inside a component; `loading` and `error` auto-injected and reactive; response parsed as JSON automatically
-- **`head { }` — per-page head customization**: `title "..."` and `meta name="..."` per page; overrides the global title from `webc.toml`
-- **`$query.` — query string params**: `{$query.search}`, `{$query.page}` — access URL parameters; tree-shaken when unused
-- **`class:active={expr}` — conditional CSS classes**: conditional class binding via `bindAttrs()`; multiple `class:` per element; tree-shaken
-- **`on:event|debounce` — debounced handler**: `on:input|debounce={expr}` — fires only after 300 ms of inactivity; works with any event type
-- **`ref:name=true` — direct DOM references**: `input ref:name=true` registers the element in `refs['name']` via `DOMContentLoaded`; direct access without `querySelector`; useful for focus management; tree-shaken
-- **`style:prop={expr}` — dynamic inline styles**: `div style:color={myColor}` → `el.style.setProperty('color', ...)` via `bindAttrs()`; can coexist with `style="..."` and `class:`; tree-shaken
-- **Slot default content**: `slot sidebar { p "Default sidebar content" }` in a layout — used when the page does not fill the slot; unfilled slots were previously silently dropped
-- **`webc:transition="name"` — CSS animations**: `div webc:transition="fade" { ... }` — built-in `fade` and `slide` transitions on `@if` blocks; CSS injected automatically; tree-shaken
-- **`webc:img` — optimized images**: `img webc:img src="/hero.png" alt="Hero"` injects `loading="lazy"`, `decoding="async"` and image dimensions (`width`/`height`) read from `public/` at compile time; prevents layout shift (CLS); emits `warning[a11y]` when `alt` is missing; pure compile-time transformation, zero JS emitted
-- **Image fingerprinting**: every image in `public/` gets a FNV-1a 32-bit content hash at `webc build` (`logo.png` → `logo.a3f9c1b2.png`); all HTML and CSS references updated automatically; perfect cache busting with no configuration needed
-- **Fine-grained signals (`$effect`)**: `$effect(fn)` replaces `VARS.forEach(v=>S.on(v,fn))` — dependency tracking is automatic; components only re-render when their actual dependencies change (v2.0.0, **breaking change**)
-- **HMR**: `webc serve` watches source files and reloads the browser automatically via WebSocket — no configuration needed (v2.0.0)
-- **Security — path traversal protection**: `resolve_safe_path()` uses `fs::canonicalize()` + `starts_with(dist_root)`; URLs that escape `dist/` return 403 (v2.0.0)
-- **Cycle detection**: `webc check` detects circular component references and reports the full cycle (v2.0.0)
-- **CSS nesting**: `&:hover { }`, `& > span { }`, `&::before { }` are valid inside `style {}` blocks; flattened to valid scoped CSS at emit time (v2.0.0)
-- **Error aggregation**: `webc build` collects ALL errors and reports them in a single pass, just like the Rust compiler (v2.0.0)
-- **Bundle analysis report**: after a successful `webc build`, a table shows which runtime features are included vs. tree-shaken with estimated byte sizes (v2.0.0)
-- **`$watch varName => { body }`**: observe state changes without a direct DOM side-effect; emits `S.on('varName', varName => { body })` in `DOMContentLoaded`; useful for analytics, logging, and sync (v2.1.0)
-- **`@for N..M` — numeric range**: `@for i in 0..5 { }` iterates `i` from 0 to 4; emits `data-webcore-for-range`; runtime generates the array without state data; tree-shaken (v2.1.0)
-- **Build-time data imports**: `import posts from "data/posts.json"` — JSON/TOML files loaded at compile time and injected as `S.setQ(name, data)`; path validated via `canonicalize()` (v2.1.0)
-- **Nested object literals in `on:click`**: `on:click={handler({key: val})}` — arbitrarily nested braces in event expressions via recursive `expr_brace_seq` rule (v2.1.0)
-- **Extended SSG expressions**: `eval_expr_with_locale` supports `.length`, `.toUpperCase()`, `.toLowerCase()`, `.trim()` on state variables — eliminates empty values at pre-render time (v2.1.0)
-- **Compile-time prop validation**: `warning[props]: component 'X' received unknown prop 'y'` emitted on stderr when a component receives an undeclared prop; compilation continues (v2.1.0)
-- **`@keyframes` in `style {}`**: `@keyframes` blocks supported inside components; emitted as global (unscoped) so they can be referenced by `animation:` properties; parser, AST and CSS codegen updated (v2.2.0)
-- **`<script defer>` + `<link rel="preload">`**: runtime script no longer blocks HTML parsing; preload hint in `<head>` parallelises the JS download (v2.2.0)
-- **CSS hash**: `theme.css` receives `?v=<hash>` like `webcore.js` — automatic cache-busting on every modification (v2.2.0)
-- **HTML minification (prod)**: comments and inter-tag whitespace removed in `prod` mode; reduces distributed page sizes (v2.2.0)
-- **CSS scope elision**: components without a `style {}` block no longer emit `data-v="..."` on their elements — cleaner and lighter HTML output (v2.2.0)
-- **ReDoS warning**: `validate:pattern` with nested quantifiers (`)+`, `)*`) emits `warning[security]` at compile time — prevents catastrophic backtracking (v2.2.0)
-- **SRI — Subresource Integrity**: in `prod` mode, `<script>` and `<link rel="stylesheet">` tags receive `integrity="sha256-..."` + `crossorigin="anonymous"`; SHA-256 hash computed by the compiler (v2.3.0)
-- **Zero-JS elision**: purely static pages (no state, no loops, no events) no longer emit `<script defer>` or `<link rel="preload">` — zero JS for content-only pages (v2.3.0)
-- **Nesting depth limit**: the parser rejects documents whose elements exceed 128 nesting levels — protects against "nesting bombs" (v2.3.0)
-- **Navigation URL JS escaping**: apostrophes and backslashes in `<a onclick="webcore_navigate(...)">` paths are now escaped — prevents JS injection (v2.3.0)
-- **Critical CSS inline**: in `prod` mode each page's CSS (global + components actually used) is inlined in `<style>`; `theme.css` loads deferred (`media="print"` + `data-webcore-defer`) — zero render-blocking CSS (v2.4.0)
-- **SSG collections**: `"/post/:slug": PostPage each posts` — one static page generated per item of a data import; `{$route.slug}` pre-rendered; output paths validated against path traversal (v2.4.0)
-- **Strict CSP — event delegation**: all inline `onclick=`/`onsubmit=` replaced by `data-webcore-e="<type>"` + delegated `D(t,p)` listener; SPA links via `data-webcore-nav`; deferred CSS via `data-webcore-defer` + `DOMContentLoaded`; `csp = true` in `webc.toml` emits `Content-Security-Policy` meta tag (v2.5.0)
-- **v2.5.1 fixes**: `</style>` escaped in inlined critical CSS; `webcore.js` now included on zero-JS pages with deferred CSS; `.length` correctly counts elements in arrays with commas inside strings and characters in Unicode strings (v2.5.1)
-- **Enriched parse errors v2.5.2**: structured `error[parse]: file:line:col` format + source line + `^` caret + contextual hints; conditional ANSI colours; file path propagated from all load sites (v2.5.2)
-- **Fragment shorthand `<>...</>`**: groups elements without a wrapper tag — rendered inline; supports directives, components and arbitrary nesting (v2.6.0)
-- **Event modifiers**: `on:click|stop`, `on:click|prevent`, `on:click|once`, `on:click|self` — encoded in `data-webcore-e`; handled by the delegated listener with no extra inline JS; combinable (v2.6.0)
-- **Default prop values**: `props { label: String = "Default" }` — the default is injected when a prop is omitted at the call site (v2.6.0)
-- **`webc watch`**: watches source files and rebuilds automatically on every change without a dev server; 200 ms debounce (v2.6.0)
+> Per-version details for every feature live in the [CHANGELOG](./CHANGELOG.md);
+> the full syntax reference is in [docs/spec.md](./docs/spec.md).
+
+### Language & templating
+
+- **Declarative blocks**: `app` (routes, layout, theme), `layout`, `page`, `component` (props · state · computed · view · style), shared global `store` (`$store.x`)
+- **Expression interpolation**: `{count}`, `{count + 1}`, `{max(a, b)}` — including inside strings and attributes
+- **Directives**: `@if` / `@else`, `@switch` / `@case` / `@default`, `@for` (with `key=` for DOM diffing, index `item, i`, ranges `0..5`), `@error` for validation messages, `@loading` / `@catch` (shorthand for `@if loading` / `@if error`), `@defer` (deferred render until DOMContentLoaded)
+- **Prop shorthand**: `<Component {count}>` ≡ `<Component count={count}>`; `<div ...attrs>` for attribute spreading
+- **Fragments** `<>...</>`, mixed text/element content, named multi-zone slots with default content
+- **Props**: static, reactive (`value={expr}`), default values (`label: String = "Default"`), compile-time validation (warning on unknown props)
+- **Build-time data imports**: `import posts from "data/posts.json"` (JSON/TOML)
+
+### Reactivity & runtime
+
+- **Fine-grained signals**: `$effect` with automatic dependency tracking — a component only re-renders when a dependency it actually read changes
+- **Minimal runtime** (~2-5 KB), **tree-shaken per feature**: anything the document doesn't use isn't emitted
+- **Events**: `on:click`, `on:submit`, `on:input`… with `|stop` `|prevent` `|once` `|self` modifiers, debounce (`on:input|debounce`), multi-statement handlers, nested objects
+- **`bind:value` / `bind:checked`** two-way binding, **`ref:name`** for direct DOM access, **`$watch`** for DOM-free observation, cross-component **`emit()`**, `on:mount` / `on:destroy` hooks
+- **Derived state**: `computed { fullName = firstName + " " + lastName }`
+- **`http {}`**: declarative fetch (`get:` / `into:`) with auto-injected `loading` and `error`, `@loading`/`@catch` as shorthands
+- **`List` methods**: `items.push(val)`, `items.remove(i)`, `items.clear()` compile to reactive `S.set()` / `STORE.set()` mutations
+
+### Styling
+
+- **Component-scoped CSS** (`data-v`, deterministic hash) — elided for unstyled components
+- **Nesting** `&:hover`, `@media` and `@keyframes` inside `style {}` blocks, multi-element selectors
+- **Bindings**: conditional classes `class:active={expr}`, dynamic inline styles `style:color={expr}`
+- **Centralized theme** (`theme.toml` → CSS variables), built-in `webc:transition="fade|slide"` transitions
+
+### Routing & pages
+
+- **SPA**: History API, no-reload navigation, parameterized routes (`/post/:slug` → `{$route.slug}`), query string (`{$query.page}`)
+- **Per-page `head {}`** (title, meta), clean URLs (`/about` without `.html`)
+- **SSG collections**: `"/post/:slug": PostPage each posts` — one static page per data item
+
+### Forms & i18n
+
+- **Declarative validation**: `validate:required/email/minlength/maxlength/pattern` + `@error "field" {}` blocks — on blur, input and submit
+- **i18n**: `locales/*.toml`, `t("key")` with parameters (`{{0}}`) and plurals (`_one`/`_other`, `{{count}}`), reactive `setLocale()`
+
+### Performance
+
+- **SSG**: interpolations and `@if` branches pre-rendered at compile time — zero content flash
+- **Zero-JS static pages**: no script emitted when a page doesn't need one
+- **Prod mode**: HTML/CSS/JS minification, inlined critical CSS (zero render-blocking CSS), `<script defer>` + preload
+- **Cache busting**: content-hash filename (`webcore.<hash8>.js`) and image fingerprinting (`logo.a3f9c1b2.png`), **fully deterministic builds**
+- **`webc:img`**: `loading="lazy"`, `decoding="async"` and dimensions injected at compile time (CLS prevention)
+
+### Security
+
+- **Strict CSP**: zero inline JS — event delegation via `data-webcore-e`, `csp = true` option emitting the Content-Security-Policy meta
+- **SRI**: `integrity="sha256-…"` on scripts and stylesheets in prod
+- **Dev server**: path-traversal protection (canonicalization + 403)
+- **Compilation**: systematic HTML/JS escaping, ReDoS warning on `validate:pattern`, nesting limit (anti nesting-bomb)
+
+### Tooling & DX
+
+- **Full CLI**: `webc new` · `build` · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, **rename**)
+- **rustc-style errors**: source line + `^` caret + contextual hints, all errors aggregated in one pass
+- **ES2025 runtime**: `RegExp.escape()` in `evalCond`, `Promise.try()` for `http {}` blocks, prod strip of `data-webcore-*` attrs after binding
+- **`webc check`**: validates routes, components, props and detects circular references without generating anything
+- **Build report**: `dist/` tree + bundle analysis (included vs tree-shaken features)
+- **WASM**: `wasm/Cargo.toml` detection, `wasm-pack` build, async `globalThis.wasm` loader
+- **[VS Code extension](./editors/vscode)**: highlighting, snippets, formatting via `webc fmt`
 
 ---
 
@@ -323,14 +308,30 @@ component Posts {
     state { posts: List = null }
     http { get: "/api/posts"  into: posts }
     view {
-        @if loading { p "Loading…" }
-        @if error   { p "Error: {error}" }
+        @loading { p "Loading…" }       // shorthand for @if loading (v2.8.0)
+        @catch   { p "Error: {error}" } // shorthand for @if error  (v2.8.0)
         @for post in posts { li "{post.title}" }
     }
 }
 ```
 
 `loading` and `error` are **auto-injected** — no need to declare them in `state`.
+
+### Reactive `List` methods (v2.8.0)
+
+```webc
+component TodoList {
+    state { todos: List = null }
+    view {
+        input ref:draft=true placeholder="New task"
+        button on:click={todos.push(refs.draft.value)} { "Add" }
+        @for todo, i in todos {
+            li { "{todo}" button on:click={todos.remove(i)} { "×" } }
+        }
+        button on:click={todos.clear()} { "Clear all" }
+    }
+}
+```
 
 ### Conditional classes and debounce (v1.3.0)
 
@@ -477,7 +478,7 @@ cargo fmt
 ## Contributing
 
 1. Fork the project
-2. Create a branch: `git checkout -b feature/my-feature`
+2. Create a branch from `develop`: `git checkout -b feature/my-feature origin/develop`
 3. Commit: `git commit -m 'feat: description'`
 4. Push: `git push origin feature/my-feature`
 5. Open a Pull Request

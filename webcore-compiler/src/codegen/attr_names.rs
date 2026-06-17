@@ -13,6 +13,10 @@ pub const ERROR: &str = "data-webcore-error";
 pub const REF: &str = "data-webcore-ref";
 pub const TRANSITION: &str = "data-webcore-transition";
 pub const SCOPE: &str = "data-v";
+/// Lazy-render: element is hidden until DOMContentLoaded fires
+pub const DEFER: &str = "data-webcore-defer";
+/// Spread operator: all properties of the expression are applied as attributes
+pub const SPREAD: &str = "data-webcore-spread";
 // CSS class prefix constants (used in bindAttrs)
 pub const CLASS_PREFIX: &str = "data-webcore-class-";
 pub const CLASS_BOUND: &str = "data-webcore-class-bound";

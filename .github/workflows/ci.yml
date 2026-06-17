@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "[0-9]+.[0-9]+.[0-9]+"]
+    branches: ["main", "develop"]
   pull_request:
 
 env:
@@ -20,7 +20,7 @@ jobs:
       run:
         working-directory: webcore-compiler
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy

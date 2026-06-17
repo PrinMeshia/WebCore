@@ -30,13 +30,14 @@ pub(super) fn generate_component_element(
             let prop_names: std::collections::HashSet<&str> =
                 component.props.iter().map(|p| p.name.as_str()).collect();
             for attr in attributes {
-                // Skip directive/event attributes
+                // Skip directive/event attributes and spread
                 if attr.name.starts_with("on:")
                     || attr.name.starts_with("class:")
                     || attr.name.starts_with("style:")
                     || attr.name.starts_with("ref:")
                     || attr.name.starts_with("webc:")
                     || attr.name.starts_with("bind:")
+                    || attr.name == "..."
                 {
                     continue;
                 }

@@ -132,6 +132,7 @@ fn golden_scoped_css_emits_data_v_selector() {
     let mut doc = WebCoreDocument {
         app: None,
         store: vec![],
+        store_computed: vec![],
         locales: std::collections::BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
@@ -140,6 +141,7 @@ fn golden_scoped_css_emits_data_v_selector() {
         components: std::collections::BTreeMap::new(),
         imports: vec![],
         data_imports: std::collections::BTreeMap::new(),
+        source_files: std::collections::BTreeMap::new(),
     };
     doc.components.insert(
         "Counter".into(),
@@ -1290,6 +1292,7 @@ page "article" {
         title "Mon Article"
         meta description="Article de blog WebCore"
         meta og:title="Mon Article"
+        favicon "/assets/logo.png"
     }
     h1 "Hello"
 }
@@ -1313,6 +1316,110 @@ page "article" {
             .any(|(k, v)| k == "og:title" && v == "Mon Article"),
         "og:title meta missing: {:?}",
         head.metas
+    );
+    assert_eq!(
+        head.favicon.as_deref(),
+        Some("/assets/logo.png"),
+        "favicon mismatch"
+    );
+}
+
+#[test]
+fn golden_head_block_emitted_into_html() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    head {
+        title "Titre Page"
+        meta description="Desc"
+        meta og:title="OG"
+        favicon "/assets/logo.png"
+    }
+    h1 "Hi"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
+    // Per-page title overrides the global one.
+    assert!(
+        html.contains("<title>Titre Page</title>"),
+        "head title not emitted:\n{html}"
+    );
+    // Plain meta uses name=, OpenGraph uses property=.
+    assert!(
+        html.contains(r#"<meta name="description" content="Desc">"#),
+        "description meta not emitted:\n{html}"
+    );
+    assert!(
+        html.contains(r#"<meta property="og:title" content="OG">"#),
+        "og:title should use property=:\n{html}"
+    );
+    assert!(
+        html.contains(r#"<link rel="icon" href="/assets/logo.png">"#),
+        "favicon link not emitted:\n{html}"
+    );
+}
+
+#[test]
+fn golden_app_head_merges_into_pages() {
+    let src = r#"
+app MyApp {
+    layout: MainLayout
+    head {
+        favicon "/assets/logo.png"
+        meta author="WebCore"
+        meta description="Globale"
+    }
+    routes { "/": HomePage }
+}
+layout MainLayout { main { slot content } }
+page "home" {
+    h1 "Accueil"
+}
+page "about" {
+    head {
+        title "À propos"
+        meta description="Spécifique"
+        meta og:title="About"
+    }
+    h1 "À propos"
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+
+    // Page with no head{} inherits the whole site-wide head.
+    let home = generate_html(&doc, "home", &opts())
+        .expect("home codegen")
+        .html;
+    assert!(
+        home.contains(r#"<link rel="icon" href="/assets/logo.png">"#)
+            && home.contains(r#"<meta name="author" content="WebCore">"#)
+            && home.contains(r#"<meta name="description" content="Globale">"#),
+        "home should inherit the app head:\n{home}"
+    );
+
+    // Page head{} overrides title and the shared meta key, keeps inherited ones,
+    // and adds its own — favicon still inherited from the app.
+    let about = generate_html(&doc, "about", &opts())
+        .expect("about codegen")
+        .html;
+    assert!(
+        about.contains("<title>À propos</title>"),
+        "about title:\n{about}"
+    );
+    assert!(
+        about.contains(r#"<meta name="description" content="Spécifique">"#)
+            && !about.contains(r#"content="Globale""#),
+        "page description should override the global one:\n{about}"
+    );
+    assert!(
+        about.contains(r#"<meta name="author" content="WebCore">"#),
+        "about should keep the inherited author meta:\n{about}"
+    );
+    assert!(
+        about.contains(r#"<meta property="og:title" content="About">"#)
+            && about.contains(r#"<link rel="icon" href="/assets/logo.png">"#),
+        "about should add og:title and inherit the favicon:\n{about}"
     );
 }
 
@@ -3107,5 +3214,357 @@ eq(t('missing'),'missing','missing key falls back to key');
         out.status.success(),
         "t() behaviour mismatch:\n{}\n--- script ---\n{script}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// ═══ v2.8.0 — Axe 2 : méthodes réactives sur List ════════════════════════════
+
+#[test]
+fn golden_list_push_compiles_to_spread_append() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    // Both items and draft are known state vars
+    let vars: HashSet<String> = ["items", "draft"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    let result = compile_list_method("items.push(draft)", &cv).expect("should match");
+    assert_eq!(
+        result, "S.set('items',[...S.get('items'),S.get('draft')])",
+        "push compilation mismatch"
+    );
+}
+
+#[test]
+fn golden_list_push_with_literal_compiles() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = ["todos"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    let result = compile_list_method("todos.push(\"buy milk\")", &cv).expect("should match");
+    assert_eq!(
+        result, "S.set('todos',[...S.get('todos'),\"buy milk\"])",
+        "push with literal mismatch"
+    );
+}
+
+#[test]
+fn golden_list_remove_compiles_to_filter() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = ["items"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    let result = compile_list_method("items.remove(0)", &cv).expect("should match");
+    assert_eq!(
+        result, "S.set('items',S.get('items').filter((_,_i)=>_i!==(0)))",
+        "remove compilation mismatch"
+    );
+}
+
+#[test]
+fn golden_list_remove_with_index_var() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = ["items", "idx"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    let result = compile_list_method("items.remove(idx)", &cv).expect("should match");
+    assert!(
+        result.contains("S.get('idx')"),
+        "index variable should be replaced: {result}"
+    );
+    assert!(
+        result.starts_with("S.set('items',"),
+        "result should set items: {result}"
+    );
+}
+
+#[test]
+fn golden_list_clear_compiles_to_empty_array() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = ["items"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    let result = compile_list_method("items.clear()", &cv).expect("should match");
+    assert_eq!(result, "S.set('items',[])", "clear compilation mismatch");
+}
+
+#[test]
+fn golden_list_method_ignored_for_unknown_var() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = HashSet::new();
+    let cv = CompiledVars::new(&vars);
+    // unknown var → should return None (fall through to general expression path)
+    assert!(
+        compile_list_method("unknownVar.push(x)", &cv).is_none(),
+        "should return None for unknown var"
+    );
+}
+
+#[test]
+fn golden_store_list_push_compiles_correctly() {
+    use crate::codegen::js::js_events::{compile_list_method, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = HashSet::new();
+    let cv = CompiledVars::new(&vars);
+    // item is not in vars → passes through as bare identifier
+    let result = compile_list_method("$store.cart.push(item)", &cv).expect("should match");
+    assert!(
+        result.starts_with("STORE.set('cart',"),
+        "store push should use STORE.set: {result}"
+    );
+    assert!(
+        result.contains("STORE.get('cart')"),
+        "store push should read STORE.get: {result}"
+    );
+    let result2 = compile_list_method("$store.cart.push(\"apple\")", &cv).expect("should match");
+    assert!(
+        result2.starts_with("STORE.set('cart',"),
+        "store push with literal should use STORE.set: {result2}"
+    );
+    assert!(
+        result2.contains("\"apple\""),
+        "literal argument should be preserved: {result2}"
+    );
+}
+
+#[test]
+fn golden_list_push_integrated_in_expression_compiler() {
+    use crate::codegen::js::js_events::{compile_expression_full, CompiledVars};
+    use std::collections::HashSet;
+    let vars: HashSet<String> = ["todos"].iter().map(|s| s.to_string()).collect();
+    let cv = CompiledVars::new(&vars);
+    // Should compile via compile_expression_full (not just compile_list_method)
+    let result = compile_expression_full("todos.push(\"new item\")", &cv);
+    assert!(
+        result.starts_with("S.set('todos',"),
+        "list push should be handled by full expression compiler: {result}"
+    );
+}
+
+#[test]
+fn golden_list_push_in_event_handler_js() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component TodoList {
+    state {
+        todos: List = null
+        draft: String = ""
+    }
+    view {
+        ul {
+            @for todo in todos {
+                li "{todo}"
+            }
+        }
+        input bind:value={draft}
+        button on:click={todos.push(draft)} { "Ajouter" }
+    }
+}
+page "home" { TodoList {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("S.set('todos',[...S.get('todos')"),
+        "push should expand to spread append in emitted JS:\n{js}"
+    );
+}
+
+// ═══ v2.8.0 — Axe 3 : directives @loading et @catch ═════════════════════════
+
+#[test]
+fn golden_loading_block_parses_as_if_loading() {
+    let src = r#"
+component Fetcher {
+    http { get: "/api/data" into: data }
+    view {
+        @loading {
+            p "Chargement..."
+        }
+        @for item in data {
+            li "{item}"
+        }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse @loading");
+    let comp = doc.components.get("Fetcher").expect("component exists");
+    // @loading should compile to Element::If { condition: "loading" }
+    let found = comp.view.iter().any(|el| {
+        matches!(el, crate::core::ast::Element::If { condition, .. } if condition == "loading")
+    });
+    assert!(
+        found,
+        "@loading should produce Element::If {{ condition: 'loading' }}"
+    );
+}
+
+#[test]
+fn golden_catch_block_parses_as_if_error() {
+    let src = r#"
+component Fetcher {
+    http { get: "/api/data" into: data }
+    view {
+        @catch {
+            p "Une erreur est survenue."
+        }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse @catch");
+    let comp = doc.components.get("Fetcher").expect("component exists");
+    let found = comp.view.iter().any(
+        |el| matches!(el, crate::core::ast::Element::If { condition, .. } if condition == "error"),
+    );
+    assert!(
+        found,
+        "@catch should produce Element::If {{ condition: 'error' }}"
+    );
+}
+
+#[test]
+fn golden_loading_block_emits_if_binding_in_html() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Loader {
+    http { get: "/api/posts" into: posts }
+    state { loading: Boolean = true }
+    view {
+        @loading {
+            p "Chargement..."
+        }
+        p "Données chargées"
+    }
+}
+page "home" { Loader {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-if=\"loading\""),
+        "@loading should emit data-webcore-if=\"loading\":\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_catch_block_emits_if_error_binding_in_html() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Loader {
+    http { get: "/api/posts" into: posts }
+    state { error: String = "" }
+    view {
+        @catch {
+            p "Erreur : {error}"
+        }
+    }
+}
+page "home" { Loader {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-if=\"error\""),
+        "@catch should emit data-webcore-if=\"error\":\n{}",
+        res.html
+    );
+}
+
+#[test]
+fn golden_loading_and_catch_together_parse_correctly() {
+    let src = r#"
+component DataCard {
+    http { get: "/api/card" into: card }
+    state {
+        loading: Boolean = true
+        error: String = ""
+    }
+    view {
+        @loading {
+            span "..."
+        }
+        @catch {
+            p "Erreur : {error}"
+        }
+        p "{card}"
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse @loading + @catch together");
+    let comp = doc.components.get("DataCard").expect("component exists");
+    let loading_found = comp.view.iter().any(|el| {
+        matches!(el, crate::core::ast::Element::If { condition, .. } if condition == "loading")
+    });
+    let error_found = comp.view.iter().any(
+        |el| matches!(el, crate::core::ast::Element::If { condition, .. } if condition == "error"),
+    );
+    assert!(loading_found, "@loading block missing");
+    assert!(error_found, "@catch block missing");
+}
+
+// ═══ v2.8.0 — Axe 1 : LSP helpers ═══════════════════════════════════════════
+
+#[test]
+fn lsp_word_at_returns_identifier_under_cursor() {
+    use crate::cli::lsp::word_at_test;
+    let source = "component Counter {\n    state { count: Number = 0 }\n}";
+    // "Counter" starts at col 10
+    assert_eq!(word_at_test(source, 0, 10), Some("Counter".to_string()));
+    assert_eq!(word_at_test(source, 0, 15), Some("Counter".to_string()));
+    // "component" keyword
+    assert_eq!(word_at_test(source, 0, 0), Some("component".to_string()));
+    // Whitespace → None
+    assert_eq!(word_at_test(source, 0, 9), None);
+}
+
+#[test]
+fn lsp_hover_returns_state_var_info() {
+    use crate::cli::lsp::hover_for_symbol_test;
+    let src = r#"
+component Counter {
+    state { count: Number = 0 }
+    view { p "{count}" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let hover = hover_for_symbol_test(&doc, "count").expect("should find count");
+    assert!(
+        hover.contains("Number"),
+        "type should appear in hover: {hover}"
+    );
+    assert!(
+        hover.contains("count"),
+        "name should appear in hover: {hover}"
+    );
+}
+
+#[test]
+fn lsp_hover_returns_component_info_with_props() {
+    use crate::cli::lsp::hover_for_symbol_test;
+    let src = r#"
+component Badge {
+    props { label: String color: String = "blue" }
+    view { span "{label}" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let hover = hover_for_symbol_test(&doc, "Badge").expect("should find Badge");
+    assert!(hover.contains("Badge"), "component name in hover: {hover}");
+    assert!(hover.contains("label"), "prop listed in hover: {hover}");
+}
+
+#[test]
+fn lsp_hover_returns_none_for_unknown_symbol() {
+    use crate::cli::lsp::hover_for_symbol_test;
+    let src = r#"
+component Empty {
+    view { p "hello" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    assert!(
+        hover_for_symbol_test(&doc, "unknown").is_none(),
+        "unknown symbol should return None"
     );
 }

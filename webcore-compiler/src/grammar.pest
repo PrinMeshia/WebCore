@@ -13,14 +13,14 @@ import_decl = { "import" ~ identifier ~ "from" ~ string_literal }
 // ============ APP DECLARATION ============
 app_decl = { "app" ~ identifier ~ "{" ~ app_body ~ "}" }
 app_body = { app_field* }
-app_field = { app_theme | app_layout | app_routes }
+app_field = { app_theme | app_layout | app_routes | head_block }
 app_theme = { "theme" ~ ":" ~ string_literal }
 app_layout = { "layout" ~ ":" ~ identifier }
 app_routes = { "routes" ~ "{" ~ route_entry* ~ "}" }
 route_entry = { string_literal ~ ":" ~ identifier ~ ("each" ~ identifier)? }
 
 // ============ STORE DECLARATION ============
-store_decl = { "store" ~ "{" ~ state_def* ~ "}" }
+store_decl = { "store" ~ "{" ~ (state_def | computed_block)* ~ "}" }
 
 // ============ LAYOUT DECLARATION ============
 layout_decl = { "layout" ~ identifier ~ "{" ~ element* ~ "}" }
@@ -30,9 +30,10 @@ page_decl = { "page" ~ string_literal ~ "{" ~ head_block? ~ element* ~ "}" }
 
 // ============ HEAD BLOCK (inside page) ============
 head_block = { "head" ~ "{" ~ head_item* ~ "}" }
-head_item  = _{ head_title | head_meta }
+head_item  = _{ head_title | head_meta | head_favicon }
 head_title = { "title" ~ string_literal }
 head_meta  = { "meta" ~ meta_key ~ "=" ~ string_literal }
+head_favicon = { "favicon" ~ string_literal }
 // meta_key allows og:title, twitter:card etc. (colon-separated namespace)
 meta_key   = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ":")* }
 
@@ -101,8 +102,8 @@ element = { control_flow | slot_element | fragment_element | tag_element | text_
 // Fragment shorthand: <>...</> renders children inline with no wrapper tag
 fragment_element = { "<>" ~ element* ~ "</>" }
 
-// Control flow: @for, @if, @switch, @error
-control_flow = { for_loop | if_statement | switch_statement | error_block }
+// Control flow: @for, @if, @switch, @error, @loading, @catch, @defer
+control_flow = { for_loop | if_statement | switch_statement | error_block | loading_block | catch_block | defer_block }
 
 for_loop = { "@for" ~ identifier ~ ("," ~ identifier)? ~ for_key_decl? ~ "in" ~ expression ~ "{" ~ element* ~ "}" }
 for_key_decl = { "key" ~ "=" ~ for_key_value }
@@ -124,6 +125,15 @@ case_value       = @{ (!("{" | "}") ~ ANY)+ }
 // Form validation error display: @error "fieldname" { ... }
 error_block = { "@error" ~ string_literal ~ "{" ~ element* ~ "}" }
 
+// HTTP state sugar: @loading { ... } = shorthand for @if loading { ... }
+loading_block = { "@loading" ~ "{" ~ element* ~ "}" }
+
+// HTTP error sugar: @catch { ... } = shorthand for @if error { ... }
+catch_block = { "@catch" ~ "{" ~ element* ~ "}" }
+
+// Lazy-render: @defer { ... } hides content until after DOMContentLoaded
+defer_block = { "@defer" ~ "{" ~ element* ~ "}" }
+
 // Slot element: placeholder (`slot header`) or content provision (`slot header { ... }`)
 slot_element = { ("slot" ~ identifier ~ "{" ~ element* ~ "}") | ("slot" ~ identifier?) }
 
@@ -138,7 +148,12 @@ mixed_content = _{ string_with_interpolation | element }
 text_element = { string_with_interpolation }
 
 // ============ ATTRIBUTES ============
-attribute = { attr_name ~ "=" ~ attr_value }
+// attribute: ordered choice — spread first, then shorthand prop, then regular name=value
+attribute = { spread_attr | shorthand_attr | (attr_name ~ "=" ~ attr_value) }
+// Spread all properties of an object onto the element: `...obj`
+spread_attr = { "..." ~ identifier }
+// Shorthand prop binding: `{count}` ≡ `count={count}`
+shorthand_attr = { "{" ~ identifier ~ "}" }
 attr_name = @{ (ASCII_ALPHA | "_" | "-" | ":" | "|")+ }
 attr_value = { expression_attr | string_literal | "true" | "false" }
 expression_attr = { "{" ~ expression_content ~ "}" }

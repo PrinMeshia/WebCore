@@ -7,14 +7,37 @@ use std::fs;
 use std::path::Path;
 
 /// Iterate files with a given extension in a flat directory, calling `loader(path, source)` for each.
+/// Loader failure: keeps parse errors structured (file/span/message) so
+/// `webc check --json` can emit precise editor diagnostics, while remaining
+/// printable for the human-facing build/check paths.
+pub(crate) enum LoadError {
+    Parse(crate::parser::ParseError),
+    Other(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::Parse(e) => write!(f, "{e}"),
+            LoadError::Other(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl From<String> for LoadError {
+    fn from(s: String) -> Self {
+        LoadError::Other(s)
+    }
+}
+
 pub(crate) fn load_webc_dir<F>(
     dir: &Path,
     label: &str,
     ext: &str,
     mut loader: F,
-) -> Result<(), String>
+) -> Result<(), LoadError>
 where
-    F: FnMut(&Path, &str) -> Result<(), String>,
+    F: FnMut(&Path, &str) -> Result<(), LoadError>,
 {
     if !dir.exists() {
         return Ok(());
@@ -60,10 +83,11 @@ where
 ///
 /// Scans `src/app.webc`, `src/layouts/`, `src/components/`, `src/pages/`, and `locales/`.
 /// Does not touch `dist/` or run any build tools — pure parsing.
-pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDocument, String> {
+pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDocument, LoadError> {
     let mut document = ast::WebCoreDocument {
         app: None,
         store: Vec::new(),
+        store_computed: Vec::new(),
         locales: BTreeMap::new(),
         default_locale: default_locale.to_string(),
         wasm_module: None,
@@ -72,6 +96,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         components: BTreeMap::new(),
         imports: Vec::new(),
         data_imports: BTreeMap::new(),
+        source_files: BTreeMap::new(),
     };
 
     // Load app.webc first
@@ -81,7 +106,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
             fs::read_to_string(app_path).map_err(|e| format!("Failed to read app.webc: {e}"))?;
         let parsed = parser::parse_webc(&content).map_err(|mut e| {
             e.file = Some(app_path.to_path_buf());
-            e.to_string()
+            LoadError::Parse(e)
         })?;
         document.app = parsed.app;
         document.store.extend(parsed.store);
@@ -96,9 +121,12 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         |path, source| {
             let parsed = parser::parse_webc(source).map_err(|mut e| {
                 e.file = Some(path.to_path_buf());
-                e.to_string()
+                LoadError::Parse(e)
             })?;
             for (name, layout) in parsed.layouts {
+                document
+                    .source_files
+                    .insert(name.clone(), path.to_path_buf());
                 document.layouts.insert(name, layout);
             }
             document.imports.extend(parsed.imports);
@@ -114,9 +142,12 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         |path, source| {
             let parsed = parser::parse_webc(source).map_err(|mut e| {
                 e.file = Some(path.to_path_buf());
-                e.to_string()
+                LoadError::Parse(e)
             })?;
             for (name, component) in parsed.components {
+                document
+                    .source_files
+                    .insert(name.clone(), path.to_path_buf());
                 document.components.insert(name, component);
             }
             document.imports.extend(parsed.imports);
@@ -128,12 +159,18 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
     load_webc_dir(Path::new("src/pages"), "pages", "webc", |path, source| {
         let parsed = parser::parse_webc(source).map_err(|mut e| {
             e.file = Some(path.to_path_buf());
-            e.to_string()
+            LoadError::Parse(e)
         })?;
         for (name, page) in parsed.pages {
+            document
+                .source_files
+                .insert(name.clone(), path.to_path_buf());
             document.pages.insert(name, page);
         }
         for (name, component) in parsed.components {
+            document
+                .source_files
+                .insert(name.clone(), path.to_path_buf());
             document.components.insert(name, component);
         }
         document.imports.extend(parsed.imports);

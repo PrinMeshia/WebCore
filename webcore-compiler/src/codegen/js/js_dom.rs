@@ -36,6 +36,10 @@ pub(super) struct RuntimeFeatures {
     pub has_style_binding: bool,
     /// Any element has a `webc:transition` attribute
     pub has_transition: bool,
+    /// Any element uses `@defer { }` (lazy render after DOMContentLoaded)
+    pub has_defer: bool,
+    /// Any element has a spread attribute `...obj`
+    pub has_spread: bool,
 }
 
 pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
@@ -100,6 +104,10 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                         f.has_transition = true;
                     }
                     match &attr.value {
+                        AttributeValue::Spread(_) => {
+                            f.has_spread = true;
+                            f.has_dynamic_attrs = true;
+                        }
                         AttributeValue::Expression(expr) => {
                             if !attr.name.starts_with("on:")
                                 && !attr.name.starts_with("class:")
@@ -122,6 +130,10 @@ pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeF
                         _ => {}
                     }
                 }
+                detect_features_in_elements(content, f);
+            }
+            Element::Defer { content, .. } => {
+                f.has_defer = true;
                 detect_features_in_elements(content, f);
             }
             Element::Component { content, .. }
@@ -211,6 +223,9 @@ pub(super) fn rebind_seq(f: &RuntimeFeatures, needs_bind: bool) -> String {
     if f.has_validation {
         parts.push("bindValidation()");
     }
+    if f.has_defer {
+        parts.push("bindDefer()");
+    }
     parts.join(";")
 }
 
@@ -253,7 +268,8 @@ fn collect_event_listeners_from_elements(
             }
             Element::ErrorBlock { content, .. }
             | Element::SlotContent { content, .. }
-            | Element::Fragment { content, .. } => {
+            | Element::Fragment { content, .. }
+            | Element::Defer { content, .. } => {
                 collect_event_listeners_from_elements(content, out);
             }
             _ => {}

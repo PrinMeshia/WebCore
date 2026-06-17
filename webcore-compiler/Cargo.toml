@@ -1,6 +1,6 @@
 [package]
 name = "webcore-compiler"
-version = "2.7.2"
+version = "2.10.1"
 edition = "2021"
 license = "MIT"
 
@@ -21,3 +21,13 @@ imagesize = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 serde_json = "1.0"
+
+# Optimized release profile for distributed binaries:
+# - lto + codegen-units=1: whole-program optimization (smaller, faster)
+# - strip: remove debug symbols from the shipped binary
+# - panic=abort: drop unwinding machinery (the CLI never catches panics)
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

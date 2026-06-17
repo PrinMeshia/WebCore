@@ -102,6 +102,8 @@ pub(super) fn emit_evalcond(f: &RuntimeFeatures, has_locales: bool) -> String {
     };
     // Pre-compile per-variable regexes once (at page load) instead of inside evalCond.
     // _VR: array of [RegExp, replacement] pairs, longest-var-first to avoid partial matches.
+    // Variable names are pure identifiers (alphanumeric + _), so no RegExp metacharacters
+    // to escape — plain string interpolation is safe and avoids the ES2025 RegExp.escape().
     // VARS_SET: Set<string> for O(1) fast-path lookup instead of Array.indexOf O(n).
     // Fast path: simple state-var → S.get(name); $store.x → STORE.get(x);
     // optional $route.x → ROUTE_PARAMS[x]; optional $query.x → QUERY_PARAMS[x].
@@ -109,7 +111,7 @@ pub(super) fn emit_evalcond(f: &RuntimeFeatures, has_locales: bool) -> String {
     // (not false) so interpolation spans show '' rather than the string "false".
     // Note: local var named _c (not t) to avoid shadowing the i18n t() function.
     format!(
-        "const _VR=[...VARS].sort((a,b)=>b.length-a.length).map(v=>[new RegExp('\\\\b'+v+'\\\\b','g'),\"S.get('\"+v+\"')\"]);\n\
+        "const _VR=[...VARS].sort((a,b)=>b.length-a.length).map(v=>[new RegExp('\\\\b'+RegExp.escape(v)+'\\\\b','g'),\"S.get('\"+v+\"')\"]);\n\
          const VARS_SET=new Set(VARS);\n\
          const evalCond=c=>{{const _c=c.trim();if(VARS_SET.has(_c))return S.get(_c);const sm=_c.match(/^\\$store\\.([a-zA-Z_]\\w*)$/);if(sm)return STORE.get(sm[1]);{route_fast_path}{query_fast_path}let e=_c;e=e.replace(/\\$store\\.([a-zA-Z_]\\w*)/g,\"STORE.get('$1')\");{route_replace}{query_replace}_VR.forEach(([re,r])=>{{e=e.replace(re,r)}});try{{return {fn_call}}}catch(_){{return undefined}}}};\n"
     )
@@ -190,42 +192,29 @@ pub(super) fn emit_bind_fns(f: &RuntimeFeatures) -> String {
         js.push_str("const bindFor=(root=document)=>{root.querySelectorAll('template[data-webcore-for]').forEach(tmpl=>{if(tmpl._wc_b)return;tmpl._wc_b=1;const iN=tmpl.dataset.webcoreFor,rawItN=tmpl.dataset.webcoreIn,keyExpr=tmpl.dataset.webcoreForKey,idxN=tmpl.dataset.webcoreForIndex,rangeStr=tmpl.dataset.webcoreForRange,pCtx=tmpl._wc_ctx??{},cont=tmpl.nextElementSibling,getItems=()=>{if(rangeStr){const[f,t]=rangeStr.split('..').map(Number);return Array.from({length:t-f},(_,i)=>String(f+i));}for(const[n,v]of Object.entries(pCtx)){if(rawItN===n)return Array.isArray(v)?v:[];if(rawItN.startsWith(n+'.')){const r=rawItN.slice(n.length+1).split('.').reduce((o,k)=>o?.[k],v);return Array.isArray(r)?r:[];}}const isStore=rawItN.startsWith('$store.'),itN=isStore?rawItN.slice(7):rawItN;return(isStore?STORE:S).get(itN)??[];},evalKey=keyExpr?(val=>keyExpr.split('.').reduce((o,k)=>o?.[k],{[iN]:val})):null,fillItem=(el,val,i)=>{el.querySelectorAll('[data-webcore-interpolation]').forEach(s=>{const ie=s.dataset.webcoreInterpolation;if(ie===iN){s.textContent=String(val??'');return;}if(idxN&&ie===idxN){s.textContent=String(i);return;}if(ie.startsWith(iN+'.')){s.textContent=String(ie.slice(iN.length+1).split('.').reduce((o,k)=>o?.[k],val)??'');return;}for(const[n,v]of Object.entries(pCtx)){if(ie===n){s.textContent=String(v??'');return;}if(ie.startsWith(n+'.')){s.textContent=String(ie.slice(n.length+1).split('.').reduce((o,k)=>o?.[k],v)??'');return;}}});el.dataset.webcoreIdx=String(i);if(val&&typeof val==='object')Object.entries(val).forEach(([k,v])=>{if(typeof v!=='object')el.dataset[k]=String(v)});},render=()=>{if(!tmpl.isConnected)return;const items=getItems();if(evalKey){const newKeys=items.map(evalKey);const existing=new Map([...cont.children].map(c=>[c.dataset.webcoreKey,c]));const keep=new Set(newKeys);[...existing.keys()].filter(k=>!keep.has(k)).forEach(k=>existing.get(k).remove());const frag=document.createDocumentFragment();newKeys.forEach((key,i)=>{if(existing.has(key)){const el=existing.get(key);fillItem(el,items[i],i);frag.appendChild(el);}else{const cl=tmpl.content.cloneNode(true);const fe=cl.firstElementChild;if(fe){fe.dataset.webcoreKey=key;fillItem(fe,items[i],i);}cl.querySelectorAll('template[data-webcore-for]').forEach(t=>{t._wc_ctx={...pCtx,[iN]:items[i]};});frag.append(...Array.from(cl.children));}});cont.replaceChildren(frag);}else{const frag=document.createDocumentFragment();items.forEach((val,i)=>{const cl=tmpl.content.cloneNode(true);const firstEl=cl.firstElementChild;if(firstEl)fillItem(firstEl,val,i);cl.querySelectorAll('template[data-webcore-for]').forEach(t=>{t._wc_ctx={...pCtx,[iN]:val};});frag.appendChild(cl);});cont.replaceChildren(frag);}bindFor(cont);};$effect(render);});};\n");
     }
     if f.has_dynamic_attrs {
+        // Common scaffold: query bound elements, handle data-webcore-attr-* bindings.
+        // Style and spread loops are appended conditionally below.
+        js.push_str(
+            "const bindAttrs=()=>{\n\
+             document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
+               [...el.attributes]\n\
+                 .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
+                 .forEach(a=>{\n\
+                   const name=a.name.slice(18),expr=a.value,\n\
+                         upd=()=>{\n\
+                           const val=String(evalCond(expr)??'');\n\
+                           name in el?el[name]=val:el.setAttribute(name,val)\n\
+                         };\n\
+                   $effect(upd);\n\
+                 });\n",
+        );
         if f.has_style_binding {
-            js.push_str(
-                "const bindAttrs=()=>{\n\
-                 document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
-                   [...el.attributes]\n\
-                     .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
-                     .forEach(a=>{\n\
-                       const name=a.name.slice(18),expr=a.value,\n\
-                             upd=()=>{\n\
-                               const val=String(evalCond(expr)??'');\n\
-                               name in el?el[name]=val:el.setAttribute(name,val)\n\
-                             };\n\
-                       $effect(upd);\n\
-                     });\n\
-                   for(const a of el.attributes){if(a.name.startsWith('data-webcore-style-')){const p=a.name.slice('data-webcore-style-'.length);const styleUpd=()=>el.style.setProperty(p,String(evalCond(a.value)??''));$effect(styleUpd);}}\n\
-                 })\n\
-                 };\n"
-            );
-        } else {
-            js.push_str(
-                "const bindAttrs=()=>{\n\
-                 document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\n\
-                   [...el.attributes]\n\
-                     .filter(a=>a.name.startsWith('data-webcore-attr-'))\n\
-                     .forEach(a=>{\n\
-                       const name=a.name.slice(18),expr=a.value,\n\
-                             upd=()=>{\n\
-                               const val=String(evalCond(expr)??'');\n\
-                               name in el?el[name]=val:el.setAttribute(name,val)\n\
-                             };\n\
-                       $effect(upd);\n\
-                     })\n\
-                 })\n\
-                 };\n",
-            );
+            js.push_str("   for(const a of el.attributes){if(a.name.startsWith('data-webcore-style-')){const p=a.name.slice('data-webcore-style-'.length);const styleUpd=()=>el.style.setProperty(p,String(evalCond(a.value)??''));$effect(styleUpd);}}\n");
         }
+        if f.has_spread {
+            js.push_str("for(const a of el.attributes){if(a.name==='data-webcore-spread'){const upd=()=>{const obj=evalCond(a.value)??{};if(typeof obj==='object')Object.entries(obj).forEach(([k,v])=>{k in el?el[k]=v:el.setAttribute(k,String(v))})};$effect(upd);}}\n");
+        }
+        js.push_str("  })\n  };\n");
     } else if f.has_style_binding {
         // Only style bindings, no regular dynamic attrs — emit a simpler bindAttrs
         js.push_str(
@@ -255,6 +244,13 @@ $effect(styleUpd);\
                }\n\
              })\n\
              };\n",
+        );
+    }
+    if f.has_defer {
+        js.push_str(
+            "const bindDefer=()=>{\
+document.querySelectorAll('[data-webcore-defer]').forEach(el=>el.style.display='');\
+};\n",
         );
     }
     if f.has_validation {

@@ -4,7 +4,7 @@ name: Release
 # release in the GitHub UI (with immutable releases on, a UI-published release
 # is frozen before the build can attach its binaries). Two ways to trigger:
 #
-#   1. Push a version tag (recommended):  git tag 2.8.0 && git push origin 2.8.0
+#   1. Push a version tag (recommended):  git tag 2.10.1 && git push origin 2.10.1
 #   2. Actions ▸ Release ▸ Run workflow, entering an existing tag.
 #
 # Pipeline: verify (tag == crate version) → build (4 targets) + vsix →
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag to release (e.g. 2.8.0)"
+        description: "Existing version tag to release (e.g. 2.10.1)"
         required: true
 
 permissions:
@@ -35,16 +35,29 @@ jobs:
     name: verify tag ↔ crate version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Tag must match webcore-compiler/Cargo.toml version
         run: |
-          CRATE=$(grep -m1 '^version = ' webcore-compiler/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          # Read the version from the [package] table specifically — a plain
+          # `grep '^version ='` would pick up an earlier version line (e.g. a
+          # [workspace.package] table) and report the wrong number.
+          CRATE=$(awk '
+            /^\[package\]/      { in_pkg = 1; next }
+            /^\[/               { in_pkg = 0 }
+            in_pkg && /^[[:space:]]*version[[:space:]]*=/ {
+              gsub(/.*=[[:space:]]*"/, ""); gsub(/".*/, ""); print; exit
+            }
+          ' webcore-compiler/Cargo.toml)
+          if [ -z "$CRATE" ]; then
+            echo "::error::Could not read [package] version from webcore-compiler/Cargo.toml"
+            exit 1
+          fi
           if [ "$RELEASE_TAG" != "$CRATE" ]; then
             echo "::error::Tag '$RELEASE_TAG' does not match crate version '$CRATE'" \
-                 "(webcore-compiler/Cargo.toml). Bump the version, commit, then re-tag."
+                 "(webcore-compiler/Cargo.toml [package]). Bump the version, commit, then re-tag."
             exit 1
           fi
           echo "Tag '$RELEASE_TAG' matches crate version. Proceeding."
@@ -69,7 +82,7 @@ jobs:
       run:
         working-directory: webcore-compiler
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -113,12 +126,9 @@ jobs:
 
   vsix:
     name: package VS Code extension
-    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_REF }}
 
       - name: Package .vsix
         working-directory: editors/vscode
@@ -132,7 +142,8 @@ jobs:
 
   release:
     name: publish release
-    needs: [verify, build, vsix]
+    needs: [build, vsix]
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write

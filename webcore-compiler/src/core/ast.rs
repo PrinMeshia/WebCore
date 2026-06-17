@@ -59,6 +59,7 @@ impl Span {
 pub struct WebCoreDocument {
     pub app: Option<App>,
     pub store: Vec<StateVar>,
+    pub store_computed: Vec<ComputedVar>,
     /// Translations keyed by locale code then message key.
     pub locales: BTreeMap<String, BTreeMap<String, String>>,
     /// Default locale code (e.g. "fr").  Empty string = no i18n configured.
@@ -74,6 +75,11 @@ pub struct WebCoreDocument {
     /// Resolved data imports: name → JSON string.
     #[allow(dead_code)]
     pub data_imports: BTreeMap<String, String>,
+    /// Source file path for each top-level unit (page / component / layout),
+    /// keyed by its name. Populated by the loader so `webc check` can attach
+    /// precise `file:line:col` to diagnostics found while walking the AST.
+    /// Empty when the document is built outside the file loader (e.g. tests).
+    pub source_files: BTreeMap<String, std::path::PathBuf>,
 }
 
 /// A `$watch varName => { body }` hook inside a component.
@@ -105,6 +111,9 @@ pub struct App {
     /// `"/post/:slug": PostPage each posts` → `{"/post/:slug": "posts"}`.
     /// At build time one static page is generated per item of the collection.
     pub collections: BTreeMap<String, String>,
+    /// Site-wide `head { }` declared in `app { }`: merged into every page's
+    /// `<head>` (favicon, shared meta), overridable per page.
+    pub head: Option<HeadBlock>,
     #[allow(dead_code)]
     pub span: Span,
 }
@@ -129,10 +138,10 @@ pub struct HttpBlock {
 /// Head block inside a page: `head { title "..." meta key="value" }`
 #[derive(Debug, Clone)]
 pub struct HeadBlock {
-    #[allow(dead_code)]
     pub title: Option<String>,
-    #[allow(dead_code)]
     pub metas: Vec<(String, String)>,
+    /// Favicon path (`favicon "/logo.png"`) → `<link rel="icon" href="...">`.
+    pub favicon: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +247,11 @@ pub enum Element {
         content: Vec<Element>,
         span: Span,
     },
+    /// Lazy-render block: hidden until DOMContentLoaded fires
+    Defer {
+        content: Vec<Element>,
+        span: Span,
+    },
 }
 
 impl Element {
@@ -254,7 +268,8 @@ impl Element {
             | Element::For { span, .. }
             | Element::If { span, .. }
             | Element::ErrorBlock { span, .. }
-            | Element::Fragment { span, .. } => *span,
+            | Element::Fragment { span, .. }
+            | Element::Defer { span, .. } => *span,
         }
     }
 
@@ -278,7 +293,8 @@ impl Element {
             | Element::SlotContent { content, .. }
             | Element::For { content, .. }
             | Element::ErrorBlock { content, .. }
-            | Element::Fragment { content, .. } => content,
+            | Element::Fragment { content, .. }
+            | Element::Defer { content, .. } => content,
             Element::If { then_branch, .. } => then_branch,
             _ => &[],
         }
@@ -323,6 +339,8 @@ pub enum AttributeValue {
     String(String),
     Expression(String),
     Boolean(bool),
+    /// Spread all properties of the named variable onto this element: `...obj`
+    Spread(String),
 }
 
 #[derive(Debug, Clone)]

@@ -11,7 +11,7 @@ mod slots;
 mod tags;
 mod utils;
 
-use crate::core::ast::WebCoreDocument;
+use crate::core::ast::{HeadBlock, WebCoreDocument};
 use crate::core::error::CompileError;
 use crate::core::ssg::SsgContext;
 #[cfg(test)]
@@ -96,6 +96,7 @@ pub(crate) fn generate_spa_html(
         needs_js,
         options.critical_css.as_deref(),
         options.csp_meta.as_deref(),
+        None,
     );
 
     // Generate layout shell (without page content, just the structure)
@@ -147,6 +148,38 @@ pub(crate) fn generate_spa_html(
     })
 }
 
+/// Merge the site-wide head (`app { head { } }`) with a page's `head { }`.
+///
+/// Precedence — page over global: `title` and `favicon` use the page value
+/// when set, else the global one; `meta` entries are the union of both, with
+/// global metas first and a page meta overriding a global one sharing its key.
+/// Returns `None` only when neither side declares a head block.
+fn merge_head(global: Option<&HeadBlock>, page: Option<&HeadBlock>) -> Option<HeadBlock> {
+    if global.is_none() && page.is_none() {
+        return None;
+    }
+    let mut metas: Vec<(String, String)> = Vec::new();
+    if let Some(g) = global {
+        metas.extend(g.metas.iter().cloned());
+    }
+    if let Some(p) = page {
+        for (k, v) in &p.metas {
+            if let Some(slot) = metas.iter_mut().find(|(mk, _)| mk == k) {
+                slot.1 = v.clone();
+            } else {
+                metas.push((k.clone(), v.clone()));
+            }
+        }
+    }
+    let pick =
+        |f: fn(&HeadBlock) -> Option<String>| page.and_then(f).or_else(|| global.and_then(f));
+    Some(HeadBlock {
+        title: pick(|h| h.title.clone()),
+        metas,
+        favicon: pick(|h| h.favicon.clone()),
+    })
+}
+
 /// Generate one full page (shell + layout + content).
 ///
 /// `ssg` enables compile-time pre-rendering of initial state values; pass
@@ -168,6 +201,13 @@ pub(crate) fn generate_page(
 
     let layout = find_layout(document)?;
 
+    // Merge the site-wide `app { head { } }` with this page's `head { }`
+    // (page wins on title/favicon and on any meta key it redefines).
+    let merged_head = merge_head(
+        document.app.as_ref().and_then(|a| a.head.as_ref()),
+        page.head.as_ref(),
+    );
+
     // critical_css injects a deferred <link> whose media swap requires JS;
     // force needs_js=true so webcore.js is included even on otherwise static pages.
     let needs_js = document_needs_js(document, page_name) || options.critical_css.is_some();
@@ -178,6 +218,7 @@ pub(crate) fn generate_page(
         needs_js,
         options.critical_css.as_deref(),
         options.csp_meta.as_deref(),
+        merged_head.as_ref(),
     );
 
     // Generate layout content, replacing slots with page content
@@ -230,6 +271,7 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
+            store_computed: vec![],
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
@@ -238,6 +280,7 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -290,6 +333,7 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
+            store_computed: vec![],
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
@@ -298,6 +342,7 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),
@@ -354,6 +399,7 @@ mod tests {
         let mut doc = WebCoreDocument {
             app: None,
             store: vec![],
+            store_computed: vec![],
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
@@ -362,6 +408,7 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
             "MainLayout".to_string(),

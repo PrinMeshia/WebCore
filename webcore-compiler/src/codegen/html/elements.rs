@@ -111,6 +111,7 @@ pub(super) fn generate_element(
             scope_id,
         ),
         Element::Fragment { content, .. } => generate_elements(content, ctx, scope_id),
+        Element::Defer { content, .. } => render_defer_element(content, ctx, scope_id),
     }
 }
 
@@ -171,6 +172,29 @@ fn render_for_element(
     Ok((result, handlers))
 }
 
+fn scope_attr_str(scope_id: Option<&str>) -> String {
+    scope_id.map_or(String::new(), |sid| {
+        format!(" {}=\"{}\"", attr_names::SCOPE, sid)
+    })
+}
+
+fn render_defer_element(
+    content: &[Element],
+    ctx: &mut GenContext,
+    scope_id: Option<&str>,
+) -> Result<(String, Vec<HandlerMapping>), CompileError> {
+    let scope_attr = scope_attr_str(scope_id);
+    let mut result = format!(
+        "<div {}=\"\" style=\"display:none\"{}>\n",
+        attr_names::DEFER,
+        scope_attr
+    );
+    let (content_html, handlers) = generate_elements(content, ctx, scope_id)?;
+    result.push_str(&content_html);
+    result.push_str("</div>\n");
+    Ok((result, handlers))
+}
+
 fn render_if_element(
     condition: &str,
     then_branch: &[Element],
@@ -178,9 +202,7 @@ fn render_if_element(
     ctx: &mut GenContext,
     scope_id: Option<&str>,
 ) -> Result<(String, Vec<HandlerMapping>), CompileError> {
-    let scope_attr = scope_id.map_or(String::new(), |sid| {
-        format!(" {}=\"{}\"", attr_names::SCOPE, sid)
-    });
+    let scope_attr = scope_attr_str(scope_id);
     // SSG: show/hide the branch on first paint when the condition is
     // statically known; bindIf() takes over reactively after load.
     let initial_cond = ctx.ssg.and_then(|ssg| ssg.eval_cond(condition));

@@ -137,6 +137,14 @@ impl From<String> for CompileErrors {
     }
 }
 
+impl From<crate::cli::loader::LoadError> for CompileErrors {
+    fn from(e: crate::cli::loader::LoadError) -> Self {
+        // Keep the rich ParseError rendering (caret + hints) for humans;
+        // structured consumers go through `webc check --json` instead.
+        Self(vec![CompileError::Custom(e.to_string())])
+    }
+}
+
 /// Find the closest match using Levenshtein distance (threshold: 3 edits).
 #[cfg(test)]
 pub fn find_closest_match<'a>(

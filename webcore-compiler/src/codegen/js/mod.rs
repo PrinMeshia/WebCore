@@ -28,7 +28,7 @@
 //! Simple pages (no `@if`, no `@for`, no validation) get a runtime of ~300 bytes.
 
 mod js_dom;
-mod js_events;
+pub(crate) mod js_events;
 mod js_runtime;
 
 use crate::codegen::html::HandlerMapping;
@@ -59,10 +59,15 @@ pub(crate) fn collect_state_variables(document: &WebCoreDocument) -> HashSet<Str
     vars
 }
 
-/// Collect global store variable names
+/// Collect global store variable names (state vars + computed vars).
 #[must_use]
 pub(crate) fn collect_store_variables(document: &WebCoreDocument) -> HashSet<String> {
-    document.store.iter().map(|v| v.name.clone()).collect()
+    document
+        .store
+        .iter()
+        .map(|v| v.name.clone())
+        .chain(document.store_computed.iter().map(|c| c.name.clone()))
+        .collect()
 }
 
 /// Return the JS literal that should initialise a state variable.
@@ -96,14 +101,23 @@ fn escape_js_str(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
-#[must_use]
+#[cfg(test)]
 pub(crate) fn generate_runtime_js(
     handlers: &[HandlerMapping],
     document: &WebCoreDocument,
 ) -> String {
+    generate_runtime_js_prod(handlers, document, false)
+}
+
+#[must_use]
+pub(crate) fn generate_runtime_js_prod(
+    handlers: &[HandlerMapping],
+    document: &WebCoreDocument,
+    prod: bool,
+) -> String {
     let state_vars = collect_state_variables(document);
     let store_vars = collect_store_variables(document);
-    generate_runtime_js_with_vars(handlers, &state_vars, &store_vars, document)
+    generate_runtime_js_with_vars(handlers, &state_vars, &store_vars, document, prod)
 }
 
 #[must_use]
@@ -112,6 +126,7 @@ pub(crate) fn generate_runtime_js_with_vars(
     state_vars: &HashSet<String>,
     store_vars: &HashSet<String>,
     document: &WebCoreDocument,
+    prod: bool,
 ) -> String {
     // Pre-compile variable regexes once for this document — avoids recompiling N regexes
     // for every expression in handlers, computed vars, listeners, etc.
@@ -159,7 +174,7 @@ pub(crate) fn generate_runtime_js_with_vars(
 
     let mut js = String::new();
 
-    js.push_str("// WebCore Runtime (ES2024+)\n");
+    js.push_str("// WebCore Runtime (ES2022+)\n");
     js.push_str("{\n");
 
     // ── State class ─────────────────────────────────────────────────────────
@@ -183,6 +198,21 @@ pub(crate) fn generate_runtime_js_with_vars(
         let value = js_default_value(&store_var.type_, store_var.default_value.as_deref());
         writeln!(js, "STORE.set('{}',{});", store_var.name, value)
             .expect("write! to String is infallible");
+    }
+    // Store computed: reactive via $effect — runs immediately and re-runs when store deps change.
+    // A try-catch guards against null initial values (e.g. list not yet loaded via http {}).
+    if !document.store_computed.is_empty() {
+        let sc_store_vars: HashSet<String> =
+            document.store.iter().map(|v| v.name.clone()).collect();
+        for sc in &document.store_computed {
+            let expr = js_events::compile_store_computed_expr(&sc.expr, &sc_store_vars);
+            writeln!(
+                js,
+                "$effect(()=>{{try{{STORE.setQ('{}',{});}}catch(_){{}}}});",
+                sc.name, expr
+            )
+            .expect("write! to String is infallible");
+        }
     }
 
     // ── VARS / STORE_VARS (only when needed by reactive binding) ─────────────
@@ -249,19 +279,60 @@ pub(crate) fn generate_runtime_js_with_vars(
 
     // ── Handlers ─────────────────────────────────────────────────────────────
     // Debounce handlers are wired up in DOMContentLoaded; regular handlers go in H.
-    js.push_str("const H={\n");
     let mut sorted_handlers: Vec<_> = unique_handlers.values().collect();
     sorted_handlers.sort_by(|a, b| a.id.cmp(&b.id));
-    for handler in &sorted_handlers {
-        // Skip debounce handlers — they get wired up in DOMContentLoaded instead
-        if handler.event_type.contains("|debounce") {
-            continue;
+
+    // Handler deduplication: identical compiled expressions share a single _wh<n> helper,
+    // reducing bundle size when the same action is wired to multiple elements.
+    {
+        let non_debounce: Vec<_> = sorted_handlers
+            .iter()
+            .filter(|h| !h.event_type.contains("|debounce"))
+            .collect();
+
+        let mut expr_count: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let compiled_exprs: Vec<String> = non_debounce
+            .iter()
+            .map(|h| compile_expression_full(&h.expression, &compiled_vars))
+            .collect();
+        for expr in &compiled_exprs {
+            *expr_count.entry(expr.clone()).or_insert(0) += 1;
         }
-        let compiled = compile_expression_full(&handler.expression, &compiled_vars);
-        writeln!(js, "{}(event){{{}}},", handler.id, compiled)
-            .expect("write! to String is infallible");
+
+        // Assign helper names to expressions used more than once.
+        // BTreeMap iteration is sorted, so helper indices (_wh0, _wh1, …) are
+        // assigned in lexicographic expression order — deterministic across runs.
+        let mut expr_to_helper: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        let mut helper_idx = 0usize;
+        for (expr, count) in &expr_count {
+            if *count > 1 {
+                expr_to_helper.insert(expr.clone(), format!("_wh{helper_idx}"));
+                helper_idx += 1;
+            }
+        }
+
+        // Emit shared helper functions before H{}.
+        // BTreeMap iterates by key (expression) in sorted order, and helper
+        // names (_wh0, _wh1, …) were assigned in that same order, so no
+        // additional sort step is needed here.
+        for (expr, name) in &expr_to_helper {
+            writeln!(js, "const {}=(event)=>{{{}}};", name, expr)
+                .expect("write! to String is infallible");
+        }
+
+        js.push_str("const H={\n");
+        for (handler, compiled) in non_debounce.iter().zip(compiled_exprs.iter()) {
+            if let Some(helper) = expr_to_helper.get(compiled) {
+                writeln!(js, "{}:{},", handler.id, helper).expect("write! to String is infallible");
+            } else {
+                writeln!(js, "{}(event){{{}}},", handler.id, compiled)
+                    .expect("write! to String is infallible");
+            }
+        }
+        js.push_str("};\n\n");
     }
-    js.push_str("};\n\n");
 
     // ── bind() — re-evaluate computed, then wire interpolation spans ──────────
     if needs_bind {
@@ -498,10 +569,9 @@ pub(crate) fn generate_runtime_js_with_vars(
                     format!("{all_rebinds};")
                 };
                 write!(js,
-                    ";(async()=>{{try{{const __r=await fetch(\"{}\");if(!__r.ok)throw new Error(__r.statusText);const __d=await __r.json();S.set('{}',__d);S.set('loading',false);{}}}catch(__e){{S.set('error',__e.message);S.set('loading',false);{}}}}})()",
+                    ";Promise.resolve().then(async()=>{{const __r=await fetch(\"{}\");if(!__r.ok)throw new Error(__r.statusText);const __d=await __r.json();S.set('{}',__d);S.set('loading',false);}}).catch(__e=>{{S.set('error',__e instanceof Error?__e.message:String(__e));S.set('loading',false);}}).finally(()=>{{{}}})",
                     escape_js_str(url),
                     escape_js_str(into_var),
-                    rb,
                     rb,
                 ).expect("write! to String is infallible");
             }
@@ -509,6 +579,22 @@ pub(crate) fn generate_runtime_js_with_vars(
     }
     if has_destroy {
         js.push_str(";window.addEventListener('beforeunload',runDestroyHooks)");
+    }
+    // Prod-only: strip data-webcore-* attributes that are no longer needed after binding.
+    // data-webcore-e, data-webcore-error, and data-v must be kept (event delegation,
+    // form validation re-queries, and CSS scoping respectively).
+    if prod {
+        js.push_str(
+            ";(['data-webcore-if','data-webcore-else','data-webcore-interpolation',\
+'data-webcore-ref','data-webcore-defer','data-webcore-spread']).forEach(a=>{\
+document.querySelectorAll('['+a+']').forEach(el=>el.removeAttribute(a))});\
+document.querySelectorAll('[data-webcore-bound]').forEach(el=>{\
+const ns=[...el.attributes].filter(a=>a.name==='data-webcore-bound'||a.name.startsWith('data-webcore-attr-')||a.name.startsWith('data-webcore-style-')).map(a=>a.name);\
+ns.forEach(n=>el.removeAttribute(n))});\
+document.querySelectorAll('[data-webcore-class-bound]').forEach(el=>{\
+const ns=[...el.attributes].filter(a=>a.name.startsWith('data-webcore-class-')&&a.name!=='data-webcore-class-bound').map(a=>a.name);\
+ns.forEach(n=>el.removeAttribute(n))})"
+        );
     }
     js.push_str("});\n");
 

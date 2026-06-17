@@ -115,69 +115,96 @@ fn parse_attribute(pair: Pair<Rule>) -> Result<Attribute, ParseError> {
     let span = Span::from_pest(pair.as_span());
     let mut inner = pair.into_inner();
 
-    let name = inner
+    let first = inner
         .next()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_default();
+        .ok_or_else(|| ParseError::with_span("Empty attribute", span))?;
 
-    let value = if let Some(val_pair) = inner.next() {
-        // val_pair is attr_value, we need to look inside it
-        if val_pair.as_rule() == Rule::attr_value {
-            // Get the inner content of attr_value
-            if let Some(inner_val) = val_pair.into_inner().next() {
-                match inner_val.as_rule() {
-                    Rule::expression_attr => {
-                        let expr = inner_val
-                            .into_inner()
-                            .next()
-                            .map(|p| p.as_str().trim().to_string())
-                            .unwrap_or_default();
-                        AttributeValue::Expression(expr)
+    // Dispatch on what kind of attribute syntax was matched
+    match first.as_rule() {
+        Rule::spread_attr => {
+            let ident = first
+                .into_inner()
+                .next()
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_default();
+            Ok(Attribute {
+                name: "...".to_string(),
+                value: AttributeValue::Spread(ident),
+                span,
+            })
+        }
+        Rule::shorthand_attr => {
+            let ident = first
+                .into_inner()
+                .next()
+                .map(|p| p.as_str().to_string())
+                .unwrap_or_default();
+            Ok(Attribute {
+                name: ident.clone(),
+                value: AttributeValue::Expression(ident),
+                span,
+            })
+        }
+        Rule::attr_name => {
+            // Regular `name = value` attribute — first is attr_name, next is attr_value
+            let name = first.as_str().to_string();
+            let value = if let Some(val_pair) = inner.next() {
+                if val_pair.as_rule() == Rule::attr_value {
+                    if let Some(inner_val) = val_pair.into_inner().next() {
+                        match inner_val.as_rule() {
+                            Rule::expression_attr => {
+                                let expr = inner_val
+                                    .into_inner()
+                                    .next()
+                                    .map(|p| p.as_str().trim().to_string())
+                                    .unwrap_or_default();
+                                AttributeValue::Expression(expr)
+                            }
+                            Rule::string_literal => {
+                                AttributeValue::String(extract_string_literal(inner_val.as_str()))
+                            }
+                            _ => {
+                                let text = inner_val.as_str();
+                                match text {
+                                    "true" => AttributeValue::Boolean(true),
+                                    "false" => AttributeValue::Boolean(false),
+                                    _ => AttributeValue::String(text.to_string()),
+                                }
+                            }
+                        }
+                    } else {
+                        AttributeValue::Boolean(true)
                     }
-                    Rule::string_literal => {
-                        AttributeValue::String(extract_string_literal(inner_val.as_str()))
-                    }
-                    _ => {
-                        let text = inner_val.as_str();
-                        match text {
-                            "true" => AttributeValue::Boolean(true),
-                            "false" => AttributeValue::Boolean(false),
-                            _ => AttributeValue::String(text.to_string()),
+                } else {
+                    match val_pair.as_rule() {
+                        Rule::expression_attr => {
+                            let expr = val_pair
+                                .into_inner()
+                                .next()
+                                .map(|p| p.as_str().trim().to_string())
+                                .unwrap_or_default();
+                            AttributeValue::Expression(expr)
+                        }
+                        Rule::string_literal => {
+                            AttributeValue::String(extract_string_literal(val_pair.as_str()))
+                        }
+                        _ => {
+                            let text = val_pair.as_str();
+                            match text {
+                                "true" => AttributeValue::Boolean(true),
+                                "false" => AttributeValue::Boolean(false),
+                                _ => AttributeValue::String(text.to_string()),
+                            }
                         }
                     }
                 }
             } else {
                 AttributeValue::Boolean(true)
-            }
-        } else {
-            // Direct match (shouldn't happen with current grammar)
-            match val_pair.as_rule() {
-                Rule::expression_attr => {
-                    let expr = val_pair
-                        .into_inner()
-                        .next()
-                        .map(|p| p.as_str().trim().to_string())
-                        .unwrap_or_default();
-                    AttributeValue::Expression(expr)
-                }
-                Rule::string_literal => {
-                    AttributeValue::String(extract_string_literal(val_pair.as_str()))
-                }
-                _ => {
-                    let text = val_pair.as_str();
-                    match text {
-                        "true" => AttributeValue::Boolean(true),
-                        "false" => AttributeValue::Boolean(false),
-                        _ => AttributeValue::String(text.to_string()),
-                    }
-                }
-            }
+            };
+            Ok(Attribute { name, value, span })
         }
-    } else {
-        AttributeValue::Boolean(true)
-    };
-
-    Ok(Attribute { name, value, span })
+        _ => Err(ParseError::with_span("Unknown attribute form", span)),
+    }
 }
 
 pub(super) fn parse_tag_content(pair: Pair<Rule>) -> Result<Vec<Element>, ParseError> {

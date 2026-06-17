@@ -42,6 +42,24 @@ impl ParseError {
             file: None,
         }
     }
+
+    /// One-line, ANSI-free summary suitable for editor diagnostics:
+    /// the `expected …` clause when Pest provides one (plus the contextual
+    /// hint), otherwise the first line of the raw message.
+    pub(crate) fn concise_message(&self) -> String {
+        let mut msg = extract_expected_clause(&self.message).unwrap_or_else(|| {
+            self.message
+                .lines()
+                .next()
+                .unwrap_or("parse error")
+                .to_string()
+        });
+        if let Some(hint) = parse_hint(&self.message) {
+            msg.push_str(" — hint: ");
+            msg.push_str(hint);
+        }
+        msg
+    }
 }
 
 fn use_color() -> bool {
@@ -49,7 +67,7 @@ fn use_color() -> bool {
 }
 
 /// Extract the first `expected …` clause from a Pest error message.
-fn extract_expected_clause(pest_msg: &str) -> Option<String> {
+pub(crate) fn extract_expected_clause(pest_msg: &str) -> Option<String> {
     pest_msg
         .lines()
         .find(|l| l.trim_start().starts_with("= expected"))
@@ -60,7 +78,7 @@ fn extract_expected_clause(pest_msg: &str) -> Option<String> {
         })
 }
 
-fn parse_hint(msg: &str) -> Option<&'static str> {
+pub(crate) fn parse_hint(msg: &str) -> Option<&'static str> {
     if msg.contains("interp_expr") {
         Some("{} est vide — écris {maVar} ou utilise un attribut string: attr=\"valeur\"")
     } else if msg.contains("expected element") {
@@ -131,6 +149,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
     let mut document = WebCoreDocument {
         app: None,
         store: Vec::new(),
+        store_computed: Vec::new(),
         locales: BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
@@ -139,6 +158,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
         components: BTreeMap::new(),
         imports: Vec::new(),
         data_imports: BTreeMap::new(),
+        source_files: BTreeMap::new(),
     };
 
     for pair in pairs {
@@ -157,8 +177,9 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                         document.pages.insert(page.name.clone(), page);
                     }
                     Rule::store_decl => {
-                        let mut vars = declarations::parse_state_block(inner)?;
+                        let (mut vars, mut cvars) = declarations::parse_store_block(inner)?;
                         document.store.append(&mut vars);
+                        document.store_computed.append(&mut cvars);
                     }
                     Rule::component_decl => {
                         let component = declarations::parse_component(inner)?;

@@ -421,27 +421,30 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
         source: e,
     })?;
 
+    let prod = config.mode == "prod";
+
     // Generate WebCore runtime JS with compiled handlers and state variables
-    let runtime_js = codegen::js::generate_runtime_js(&all_handlers, &document);
-    let final_js = if config.mode == "prod" {
+    let runtime_js = codegen::js::generate_runtime_js_prod(&all_handlers, &document, prod);
+    let final_js = if prod {
         codegen::js::minify_js(&runtime_js)
     } else {
         runtime_js
     };
 
-    let js_path = assets_dir.join("webcore.js");
+    // Content-hash filename: webcore.<hash8>.js (cache-busting without query params)
+    let (js_hash, js_sri) = assets::hash_asset(final_js.as_bytes(), prod);
+    let js_filename = format!("webcore.{}.js", &js_hash[..8]);
+    let js_path = assets_dir.join(&js_filename);
     fs::write(&js_path, &final_js).map_err(|e| error::CompileError::Io {
         path: js_path.clone(),
         source: e,
     })?;
 
-    let prod = config.mode == "prod";
-    let (js_hash, js_sri) = assets::hash_asset(final_js.as_bytes(), prod);
     let (css_hash, css_sri) = assets::hash_asset(processed_css.as_bytes(), prod);
 
     assets::patch_asset_hashes(
         dist_dir,
-        &js_hash,
+        &js_filename,
         &css_hash,
         js_sri.as_deref(),
         css_sri.as_deref(),

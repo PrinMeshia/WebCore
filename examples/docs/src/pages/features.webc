@@ -477,6 +477,201 @@ page \"post\" \{
 
     section class="doc-section" {
         h2 {
+            "v2.10.0 – v2.10.1 highlights "
+            span class="version-tag" { "v2.10.1" }
+        }
+        p { "Five new DSL features, build optimisations, LSP rename, and three browser-compatibility fixes." }
+
+        h3 { "@defer { } — lazy render block" }
+        p {
+            "Wrap non-critical content in "
+            code { "@defer { }" }
+            " to hide it during hydration ("
+            code { "display:none" }
+            ") and reveal it once "
+            code { "DOMContentLoaded" }
+            " fires. Eliminates flicker without a separate loading state."
+        }
+        pre class="code-block" {
+"component Hero \{
+    view \{
+        h1 \"Welcome\"
+        @defer \{
+            HeavyWidget \{\}
+        \}
+    \}
+\}"
+        }
+
+        h3 { "Shorthand props" }
+        p {
+            code { "<Component {count}>" }
+            " is sugar for "
+            code { "<Component count={count}>" }
+            " — pass a variable whose name matches the prop. Round-trip preserved by "
+            code { "webc fmt" }
+            "."
+        }
+
+        h3 { "Spread attributes" }
+        p {
+            code { "<div ...attrs>" }
+            " spreads the properties of an expression object as individual DOM attributes at runtime via "
+            code { "bindAttrs" }
+            "."
+        }
+
+        h3 { "LSP textDocument/rename" }
+        p {
+            "The built-in LSP server now supports "
+            code { "textDocument/rename" }
+            " — rename a state variable, prop, or identifier across all occurrences in the file with a single editor command."
+        }
+
+        h3 { "Content-hash JS filename" }
+        p {
+            "The compiled runtime is emitted as "
+            code { "webcore.<fnv8>.js" }
+            " instead of "
+            code { "webcore.js?v=hash" }
+            ". The hash is in the filename so CDNs cache-bust correctly without query-param tricks."
+        }
+
+        h3 { "Browser-compatibility fixes (v2.10.1)" }
+        p {
+            code { "RegExp.escape()" }
+            " (Chrome 127+ only) and "
+            code { "Promise.try()" }
+            " (Chrome 130+ only) removed from the runtime — replaced with equivalent ES2022 constructs. Also fixed: the prod attribute strip no longer removes the "
+            code { "data-webcore-class-bound" }
+            " sentinel, which broke class bindings silently after SPA navigation."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "v2.8.0 highlights "
+            span class="version-tag" { "v2.8.0" }
+        }
+        p { "Three new features: reactive List mutations, HTTP sugar syntax, and a built-in LSP server." }
+
+        h3 { "Reactive List methods" }
+        p {
+            "Mutate "
+            code { "List" }
+            " state variables directly in event handlers — no spread syntax needed."
+        }
+        pre class="code-block" {
+"component TodoList \{
+    state \{ todos: List = null \}
+    view \{
+        input ref:draft=true placeholder=\"New task\"
+        button on:click=\{todos.push(refs.draft.value)\} \{ \"Add\" \}
+        @for todo, i in todos \{
+            li \{
+                \"\{todo\}\"
+                button on:click=\{todos.remove(i)\} \{ \"×\" \}
+            \}
+        \}
+        button on:click=\{todos.clear()\} \{ \"Clear all\" \}
+    \}
+\}"
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Method" }
+                    th { "Compiled to" }
+                } }
+                tbody {
+                    tr { td { code { "items.push(val)" } } td { code { "S.set('items',[...S.get('items'),val])" } } }
+                    tr { td { code { "items.remove(i)" } } td { code { "S.set('items',S.get('items').filter((_,_i)=>_i!==(i)))" } } }
+                    tr { td { code { "items.clear()" } } td { code { "S.set('items',[])" } } }
+                }
+            }
+        }
+        div class="callout-tip" {
+            "Works on store variables too: "
+            code { "$store.cart.push(item)" }
+            " compiles to "
+            code { "STORE.set('cart',[...STORE.get('cart'),item])" }
+            "."
+        }
+
+        h3 { "@loading / @catch" }
+        p {
+            "Shorthand for "
+            code { "@if loading" }
+            " and "
+            code { "@if error" }
+            " inside HTTP components."
+        }
+        pre class="code-block" {
+"component Posts \{
+    state \{ posts: List = null \}
+    http \{ get: \"/api/posts\"  into: posts \}
+    view \{
+        @loading \{
+            p \"Loading…\"
+        \}
+        @catch \{
+            p class=\"error\" \"Error: \{error\}\"
+        \}
+        @for post in posts \{
+            article \{ h2 \"\{post.title\}\" \}
+        \}
+    \}
+\}"
+        }
+        div class="callout" {
+            code { "@loading" }
+            " and "
+            code { "@catch" }
+            " compile directly to "
+            code { "Element::If" }
+            " nodes — no runtime changes, zero overhead."
+        }
+
+        h3 { "Built-in LSP server" }
+        p {
+            "Run "
+            code { "webc lsp" }
+            " to start a Language Server Protocol 3.17 server on stdin/stdout. "
+            "Wire it to any LSP-capable editor for hover docs, completions, and jump-to-definition."
+        }
+        pre class="code-block" {
+"# VS Code settings.json (example)
+\{
+  \"languageServerExample.serverOptions\": \{
+    \"command\": \"webc\",
+    \"args\": [\"lsp\"]
+  \}
+\}"
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Capability" }
+                    th { "Description" }
+                } }
+                tbody {
+                    tr { td { code { "textDocument/hover" } } td { "Docs for the symbol under the cursor" } }
+                    tr { td { code { "textDocument/completion" } } td { "Keywords, blocks, and directives" } }
+                    tr { td { code { "textDocument/definition" } } td { "Jump to component or variable definition" } }
+                    tr { td { "Sync" } td { code { "didOpen" } " / " code { "didChange" } " / " code { "didClose" } } }
+                }
+            }
+        }
+        div class="callout-tip" {
+            strong { "Zero extra dependencies: " }
+            "The LSP server is implemented in pure Rust using only "
+            code { "serde_json" }
+            " (already a compiler dependency). No separate language server binary to install."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
             "v2.6.0 highlights "
             span class="version-tag" { "v2.6.0" }
         }
