@@ -17,7 +17,7 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 | | |
 |---|---|
 | **Version** | 3.2.0 |
-| **Statut** | Preview |
+| **Statut** | Release |
 | **Compilateur** | Rust + Pest PEG parser |
 | **Tests** | 218 tests (unitaires, golden, intégration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
