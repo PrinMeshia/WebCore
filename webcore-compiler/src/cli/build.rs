@@ -3,7 +3,8 @@
 use super::assets::{self, copy_dir_recursive, fingerprint_images, rewrite_asset_refs};
 use super::config::{read_config, read_wasm_module_name};
 use super::loader::{
-    build_temp_doc_for_component, expand_collection, load_webc_document, resolve_data_imports,
+    build_temp_doc_for_component, expand_collection, load_webc_document, resolve_component_imports,
+    resolve_data_imports,
 };
 use super::output::{print_bundle_analysis, print_dist_tree};
 
@@ -54,6 +55,9 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     // Resolve build-time data imports (JSON/TOML → document.data_imports)
     resolve_data_imports(&mut document)?;
+
+    // Resolve component imports (.webc → document.components + document.page_imports)
+    resolve_component_imports(&mut document)?;
 
     // Detect and compile WASM module (wasm/Cargo.toml → dist/wasm/)
     let wasm_cargo = Path::new("wasm/Cargo.toml");
@@ -123,12 +127,19 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
     } else {
         None
     };
+    let is_prod = config.mode == "prod";
     let options = codegen::html::HtmlPageOptions {
         lang: config.app_lang.clone(),
         title: config.app_title.clone(),
         extra_css_files,
         critical_css: None,
         csp_meta,
+        prod: is_prod,
+        // Enable source maps in dev mode (non-prod) for browser devtools debugging
+        source_maps: !is_prod,
+        // Pages reference a single shared /assets/webcore.js (cached once across
+        // the whole site) instead of inlining the runtime in every page.
+        inline_runtime: false,
     };
 
     // Generate CSS up front (theme + scoped component styles) so prod mode can
@@ -175,6 +186,10 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     // Generate separate HTML files for each page/component
     let mut all_handlers = Vec::new();
+    // Union of every page's compiled expressions (id → closure). The shared
+    // runtime file's `_e` map is built from this so one cached webcore.js
+    // serves all pages. Page-prefixed ids keep them unique across pages.
+    let mut all_exprs: Vec<(String, String)> = Vec::new();
     // Collect errors during page rendering to report all at once (error aggregation).
     let mut page_errors: Vec<error::CompileError> = Vec::new();
 
@@ -184,6 +199,19 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
         state: &initial_state,
         locales: &document.locales,
         locale: &config.locale,
+    };
+
+    // Return a document view scoped to the components available for `page_name`.
+    // If the page file declared explicit imports, only those components are kept.
+    // If no imports were declared, all components are available (v2 compat).
+    let page_scoped_doc = |page_name: &str| -> ast::WebCoreDocument {
+        if let Some(imports) = document.page_imports.get(page_name) {
+            let mut scoped = document.clone();
+            scoped.components.retain(|name, _| imports.contains(name));
+            scoped
+        } else {
+            document.clone()
+        }
     };
 
     // Helper to convert page name to clean-URL path (e.g. "syntax" → "syntax/index.html")
@@ -204,12 +232,15 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
     for (idx, page_name) in document.pages.keys().enumerate() {
         println!("  [{}/{}] {page_name}", idx + 1, page_count);
         let filename = page_to_filename(page_name);
+        // Build a document view restricted to the components this page imports.
+        // Falls back to the full component pool for pages without import declarations.
+        let page_doc = page_scoped_doc(page_name);
         let page_options = codegen::html::HtmlPageOptions {
-            critical_css: critical_css_for(&document, page_name),
+            critical_css: critical_css_for(&page_doc, page_name),
             ..options.clone()
         };
         match codegen::html::generate_page(
-            &document,
+            &page_doc,
             page_name,
             &page_options,
             Some(Path::new(".")),
@@ -217,6 +248,17 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
         ) {
             Ok(html_result) => {
                 all_handlers.extend(html_result.handlers);
+                all_exprs.extend(html_result.compiled_exprs);
+                // Write source map alongside the HTML when present (dev mode)
+                if let Some(ref map_json) = html_result.source_map_json {
+                    let map_path = dist_dir
+                        .join(filename.trim_end_matches("index.html"))
+                        .join(format!("{page_name}.js.map"));
+                    if let Some(parent) = map_path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::write(&map_path, map_json);
+                }
                 let final_html = if config.mode == "prod" {
                     codegen::html::minify_html(&html_result.html)
                 } else {
@@ -271,6 +313,7 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
             ) {
                 Ok(html_result) => {
                     all_handlers.extend(html_result.handlers);
+                    all_exprs.extend(html_result.compiled_exprs);
                     let final_html = if config.mode == "prod" {
                         codegen::html::minify_html(&html_result.html)
                     } else {
@@ -379,6 +422,7 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
             ) {
                 Ok(html_result) => {
                     all_handlers.extend(html_result.handlers);
+                    all_exprs.extend(html_result.compiled_exprs);
                     let final_html = if config.mode == "prod" {
                         codegen::html::minify_html(&html_result.html)
                     } else {
@@ -423,8 +467,12 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     let prod = config.mode == "prod";
 
-    // Generate WebCore runtime JS with compiled handlers and state variables
-    let runtime_js = codegen::js::generate_runtime_js_prod(&all_handlers, &document, prod);
+    // Generate the single shared v3 runtime: same emitter as the inline path,
+    // but fed the UNION of every page's compiled expressions and handlers so
+    // one cached webcore.js serves the whole site. Page-prefixed expression ids
+    // keep the `_e` map keys unique across pages.
+    let runtime_js =
+        codegen::js::generate_inline_js(&all_handlers, &all_exprs, &[], &document, prod).js;
     let final_js = if prod {
         codegen::js::minify_js(&runtime_js)
     } else {

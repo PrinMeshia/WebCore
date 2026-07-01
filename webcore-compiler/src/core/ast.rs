@@ -1,18 +1,14 @@
 //! AST definition for `WebCore` with source positions
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 /// Source location for error reporting
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Span {
     /// Byte offset of the start of the span within the source file.
-    /// Not used by the current compiler but retained for future LSP/IDE integration
-    /// (go-to-definition, inline diagnostics, hover ranges, etc.).
-    #[allow(dead_code)]
     pub start: usize,
     /// Byte offset of the end of the span within the source file.
-    /// Not used by the current compiler but retained for future LSP/IDE integration.
-    #[allow(dead_code)]
     pub end: usize,
     pub line: u32,
     pub col: u32,
@@ -39,7 +35,6 @@ impl Span {
     }
 
     /// Merge two spans into one covering both ranges.
-    /// Retained for future LSP/IDE integration (e.g. error range spanning multiple tokens).
     #[allow(dead_code)]
     pub fn merge(self, other: Self) -> Self {
         Self {
@@ -75,6 +70,16 @@ pub struct WebCoreDocument {
     /// Resolved data imports: name → JSON string.
     #[allow(dead_code)]
     pub data_imports: BTreeMap<String, String>,
+    /// Component import declarations collected during parsing (transient).
+    /// Consumed by `resolve_component_imports` to populate `page_imports`.
+    pub component_imports: Vec<ComponentImport>,
+    /// Per-page component availability graph (v3 import system).
+    ///
+    /// - Key present → page declared explicit imports; only those component
+    ///   names are in scope when compiling that page.
+    /// - Key absent → no import declarations in the page file; all components
+    ///   in `self.components` are available (v2-compatible behaviour).
+    pub page_imports: BTreeMap<String, BTreeSet<String>>,
     /// Source file path for each top-level unit (page / component / layout),
     /// keyed by its name. Populated by the loader so `webc check` can attach
     /// precise `file:line:col` to diagnostics found while walking the AST.
@@ -91,12 +96,22 @@ pub struct WatchHook {
     pub body: String,
 }
 
-/// A build-time data import: `import name from "path"`.
+/// A build-time data import: `import name from "data/posts.json"`.
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
     #[allow(dead_code)]
     pub name: String,
     #[allow(dead_code)]
+    pub path: String,
+}
+
+/// A build-time component import: `import Button from "./Button.webc"`.
+/// Routed separately from data imports by the parser (`.webc` extension).
+#[derive(Debug, Clone)]
+pub struct ComponentImport {
+    /// Name used in the importing file (e.g. `Button`).
+    pub alias: String,
+    /// Path as written in the source (relative to the importing file or to the project root).
     pub path: String,
 }
 

@@ -11,7 +11,7 @@ mod slots;
 mod tags;
 mod utils;
 
-use crate::core::ast::{HeadBlock, WebCoreDocument};
+use crate::core::ast::{HeadBlock, Span, WebCoreDocument};
 use crate::core::error::CompileError;
 use crate::core::ssg::SsgContext;
 #[cfg(test)]
@@ -23,6 +23,8 @@ use shell::emit_html_shell;
 #[cfg(test)]
 use shell::{generate_component_content, generate_layout_shell, generate_page_content};
 use slots::generate_layout_with_page_and_components;
+
+use crate::codegen::js::collect_state_variables;
 
 pub(crate) use analysis::collect_page_components;
 pub(crate) use minify::minify_html;
@@ -39,6 +41,32 @@ pub struct HtmlPageOptions {
     /// When set (prod mode with CSP enabled), emitted as a
     /// `<meta http-equiv="Content-Security-Policy" content="...">` tag.
     pub csp_meta: Option<String>,
+    /// Production mode: enables JS minification and cleanup of data-webcore-* attrs.
+    /// Default: false (dev mode).
+    pub prod: bool,
+    /// When true (dev mode), generate a source map JSON for the inline script.
+    /// Default: false.
+    pub source_maps: bool,
+    /// When true, the full WebCore runtime is inlined in each page's `<script>`.
+    /// When false, pages reference a single shared `/assets/webcore.js` (built
+    /// from the union of all pages' expressions + handlers) so the browser
+    /// caches it once across the whole site. Default: true (legacy / tests).
+    pub inline_runtime: bool,
+}
+
+impl Default for HtmlPageOptions {
+    fn default() -> Self {
+        HtmlPageOptions {
+            lang: "en".into(),
+            title: String::new(),
+            extra_css_files: vec![],
+            critical_css: None,
+            csp_meta: None,
+            prod: false,
+            source_maps: false,
+            inline_runtime: true,
+        }
+    }
 }
 
 /// Tracks a compiled event handler so the JS runtime can wire it up.
@@ -59,6 +87,12 @@ pub struct HtmlGenerationResult {
     /// All event handlers collected while generating this page's HTML,
     /// to be emitted into `webcore.js` as `onclick`/`onsubmit` assignments.
     pub handlers: Vec<HandlerMapping>,
+    /// Compiled expression map: (id, JS closure string). Populated during HTML generation.
+    pub compiled_exprs: Vec<(String, String)>,
+    /// Source spans for each entry in `compiled_exprs` (parallel vec).
+    pub expr_spans: Vec<Span>,
+    /// Source map v3 JSON, when `HtmlPageOptions::source_maps` was true.
+    pub source_map_json: Option<String>,
 }
 
 /// Shared, page-scoped generation state threaded through the HTML emitters.
@@ -78,6 +112,46 @@ pub(super) struct GenContext<'a> {
     pub ssg: Option<&'a SsgContext<'a>>,
     /// Monotonic counter for unique handler ids within the page.
     pub counter: usize,
+    // v3: compiled expression fields
+    /// Pre-compiled variable regexes for read-expression compilation.
+    /// When `None`, `register_expr` returns the raw expression (v2 compat / tests).
+    pub compiled_vars: Option<&'a crate::codegen::js::js_events::CompiledVars>,
+    /// Accumulated (id, closure) pairs for all read expressions registered this page.
+    pub expr_map: Vec<(String, String)>,
+    /// Source spans for each entry in `expr_map` (parallel vec).
+    pub expr_spans: Vec<Span>,
+    /// Counter for unique expression IDs (`e0`, `e1`, …).
+    pub expr_counter: usize,
+    /// Whether the document uses `$route.` param expressions (for closure compilation).
+    pub has_route_params: bool,
+    /// Whether the document uses `$query.` param expressions (for closure compilation).
+    pub has_query_params: bool,
+}
+
+impl<'a> GenContext<'a> {
+    /// Register a read expression: compile it to a closure, assign an ID, and return the ID.
+    /// Falls back to returning the raw expression when compiled_vars is not set (v2 compat / tests).
+    pub(super) fn register_expr(&mut self, expr: &str, span: Span) -> String {
+        if let Some(vars) = self.compiled_vars {
+            let closure = crate::codegen::js::js_events::compile_read_expr(
+                expr,
+                vars,
+                self.has_route_params,
+                self.has_query_params,
+            );
+            // Prefix with the page-scoped id prefix so expression IDs stay
+            // unique across pages — required when all pages share one runtime
+            // file whose `_e` map is the union of every page's expressions.
+            let id = format!("{}e{}", self.prefix, self.expr_counter);
+            self.expr_counter += 1;
+            self.expr_map.push((id.clone(), closure));
+            self.expr_spans.push(span);
+            id
+        } else {
+            self.expr_spans.push(span);
+            expr.to_string()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -145,6 +219,9 @@ pub(crate) fn generate_spa_html(
     Ok(HtmlGenerationResult {
         html,
         handlers: all_handlers,
+        compiled_exprs: vec![],
+        expr_spans: vec![],
+        source_map_json: None,
     })
 }
 
@@ -178,6 +255,58 @@ fn merge_head(global: Option<&HeadBlock>, page: Option<&HeadBlock>) -> Option<He
         metas,
         favicon: pick(|h| h.favicon.clone()),
     })
+}
+
+/// Scan the document AST to check whether any expression uses `$query.`.
+fn document_has_query_params(document: &WebCoreDocument) -> bool {
+    use crate::core::ast::{AttributeValue, Element};
+    fn check_elements(elements: &[Element]) -> bool {
+        elements.iter().any(|e| match e {
+            Element::Interpolation(expr, _) => expr.contains("$query."),
+            Element::Text(t, _) => t.contains("$query."),
+            Element::Tag {
+                attributes,
+                content,
+                ..
+            } => {
+                attributes.iter().any(|a| match &a.value {
+                    AttributeValue::Expression(expr) | AttributeValue::Spread(expr) => {
+                        expr.contains("$query.")
+                    }
+                    AttributeValue::String(s) => s.contains("$query."),
+                    _ => false,
+                }) || check_elements(content)
+            }
+            Element::For {
+                iterable, content, ..
+            } => iterable.contains("$query.") || check_elements(content),
+            Element::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                condition.contains("$query.")
+                    || check_elements(then_branch)
+                    || else_branch.as_ref().is_some_and(|eb| check_elements(eb))
+            }
+            Element::Component { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::Fragment { content, .. }
+            | Element::ErrorBlock { content, .. }
+            | Element::Defer { content, .. } => check_elements(content),
+            _ => false,
+        })
+    }
+    document.pages.values().any(|p| check_elements(&p.content))
+        || document
+            .components
+            .values()
+            .any(|c| check_elements(&c.view))
+        || document
+            .layouts
+            .values()
+            .any(|l| check_elements(&l.content))
 }
 
 /// Generate one full page (shell + layout + content).
@@ -221,17 +350,94 @@ pub(crate) fn generate_page(
         merged_head.as_ref(),
     );
 
-    // Generate layout content, replacing slots with page content
-    let (layout_content, handlers) =
-        generate_layout_with_page_and_components(layout, page, document, project_root, ssg)?;
-    html.push_str(&layout_content);
+    // Build CompiledVars for v3 expression compilation
+    let state_vars = collect_state_variables(document);
+    let compiled_vars = crate::codegen::js::js_events::CompiledVars::new(&state_vars);
 
-    if needs_js {
+    // Detect route params: any route pattern contains `:param`
+    let has_route_params = document
+        .app
+        .as_ref()
+        .is_some_and(|a| a.routes.keys().any(|p| p.contains(':')));
+    // Detect query params: any expression/text contains `$query.`
+    let has_query_params = document_has_query_params(document);
+
+    // Generate layout content, replacing slots with page content (v3: compiles exprs to closures)
+    let layout_result = generate_layout_with_page_and_components(
+        layout,
+        page,
+        document,
+        project_root,
+        ssg,
+        Some(&compiled_vars),
+        has_route_params,
+        has_query_params,
+    )?;
+    html.push_str(&layout_result.html);
+
+    let mut source_map_json: Option<String> = None;
+
+    if needs_js && !options.inline_runtime {
+        // Shared-runtime mode: reference the single cached /assets/webcore.js
+        // (built from the union of every page's expressions + handlers). The
+        // `webcore.js` placeholder is rewritten to the hashed filename by the
+        // asset pipeline. No per-page inline runtime.
         html.push_str("  <script defer src=\"/assets/webcore.js\"></script>\n");
+    } else if needs_js {
+        let inline_js_result = crate::codegen::js::generate_inline_js(
+            &layout_result.handlers,
+            &layout_result.compiled_exprs,
+            if options.source_maps {
+                &layout_result.expr_spans
+            } else {
+                &[]
+            },
+            document,
+            options.prod,
+        );
+        let mut script_content = inline_js_result.js;
+
+        // Build source map when requested and there are expression mappings
+        if options.source_maps && !inline_js_result.expr_mappings.is_empty() {
+            // Find the source file for this page (use page_name as fallback)
+            let source_name = format!("{page_name}.webc");
+            // source_files maps basename → PathBuf; read content for source map embedding
+            let source_content = document
+                .source_files
+                .get(&source_name)
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .unwrap_or_default();
+            let mut builder =
+                crate::codegen::js::SourceMapBuilder::new(&source_name, source_content);
+            for (output_line, span) in &inline_js_result.expr_mappings {
+                // Span.line is 1-indexed; source map uses 0-indexed
+                let source_line = if span.line > 0 { span.line - 1 } else { 0 };
+                builder.add(crate::codegen::js::SourceMapMapping {
+                    output_line: *output_line,
+                    output_col: 0,
+                    source_line,
+                    source_col: span.col.saturating_sub(1),
+                });
+            }
+            let map_json = builder.build();
+            // Append source mapping URL comment to inline script
+            script_content.push_str(&format!("\n//# sourceMappingURL={page_name}.js.map\n"));
+            source_map_json = Some(map_json);
+        }
+
+        html.push_str("  <script>\n");
+        html.push_str(&script_content);
+        html.push_str("  </script>\n");
     }
     html.push_str("</body>\n</html>");
 
-    Ok(HtmlGenerationResult { html, handlers })
+    Ok(HtmlGenerationResult {
+        html,
+        handlers: layout_result.handlers,
+        compiled_exprs: layout_result.compiled_exprs,
+        expr_spans: layout_result.expr_spans,
+        source_map_json,
+    })
 }
 
 /// Test-only alias of [`generate_page`] without root/SSG, kept for the golden tests.
@@ -280,6 +486,8 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            component_imports: vec![],
+            page_imports: std::collections::BTreeMap::new(),
             source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
@@ -308,6 +516,9 @@ mod tests {
             extra_css_files: vec![],
             critical_css: None,
             csp_meta: None,
+            prod: false,
+            source_maps: false,
+            inline_runtime: true,
         };
         let res = generate_spa_html(&doc, &opts).expect("spa ok");
 
@@ -342,6 +553,8 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            component_imports: vec![],
+            page_imports: std::collections::BTreeMap::new(),
             source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
@@ -376,15 +589,18 @@ mod tests {
             extra_css_files: vec![],
             critical_css: None,
             csp_meta: None,
+            prod: false,
+            source_maps: false,
+            inline_runtime: true,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
         assert!(
             res.html.contains("data-webcore-bound"),
             "marker attribute missing"
         );
+        // v3: value is a compiled expression ID, not the raw expr name
         assert!(
-            res.html
-                .contains("data-webcore-attr-class=\"dynamicClass\""),
+            res.html.contains("data-webcore-attr-class=\""),
             "binding attribute missing"
         );
         assert!(
@@ -408,6 +624,8 @@ mod tests {
             components: std::collections::BTreeMap::new(),
             imports: vec![],
             data_imports: std::collections::BTreeMap::new(),
+            component_imports: vec![],
+            page_imports: std::collections::BTreeMap::new(),
             source_files: std::collections::BTreeMap::new(),
         };
         doc.layouts.insert(
@@ -443,6 +661,9 @@ mod tests {
             extra_css_files: vec![],
             critical_css: None,
             csp_meta: None,
+            prod: false,
+            source_maps: false,
+            inline_runtime: true,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
         assert!(res.html.contains("data-webcore-e=\"foo\""));

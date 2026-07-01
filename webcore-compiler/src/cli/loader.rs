@@ -96,6 +96,8 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         components: BTreeMap::new(),
         imports: Vec::new(),
         data_imports: BTreeMap::new(),
+        component_imports: Vec::new(),
+        page_imports: BTreeMap::new(),
         source_files: BTreeMap::new(),
     };
 
@@ -155,12 +157,28 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         },
     )?;
 
-    // Load pages
+    // Load pages — capture per-file component imports before merging.
     load_webc_dir(Path::new("src/pages"), "pages", "webc", |path, source| {
         let parsed = parser::parse_webc(source).map_err(|mut e| {
             e.file = Some(path.to_path_buf());
             LoadError::Parse(e)
         })?;
+
+        // If this file declares component imports, record them against every
+        // page declared in the same file before the data is merged globally.
+        if !parsed.component_imports.is_empty() {
+            let aliases: std::collections::BTreeSet<String> = parsed
+                .component_imports
+                .iter()
+                .map(|ci| ci.alias.clone())
+                .collect();
+            for name in parsed.pages.keys() {
+                document.page_imports.insert(name.clone(), aliases.clone());
+            }
+            // Queue the component imports for resolution after all files are loaded.
+            document.component_imports.extend(parsed.component_imports);
+        }
+
         for (name, page) in parsed.pages {
             document
                 .source_files
@@ -268,6 +286,102 @@ pub(crate) fn resolve_data_imports(document: &mut ast::WebCoreDocument) -> Resul
         document.data_imports.insert(imp.name.clone(), json);
         println!("📦 Data import: {} ← {}", imp.name, imp.path);
     }
+    Ok(())
+}
+
+/// Resolve `import Button from "./Button.webc"` declarations.
+///
+/// For each unique component import path collected during file loading:
+/// 1. Loads the target `.webc` file (path relative to project root or to the
+///    importing file — `./` and `../` prefixes resolved from `src/pages/`).
+/// 2. Extracts its component declarations and merges them into `document.components`.
+///
+/// Cycle detection: a visited-path set prevents infinite recursion when two
+/// component files import each other.
+///
+/// Pages without import declarations are unaffected (they see all components,
+/// preserving v2 single-file project behaviour).
+pub(crate) fn resolve_component_imports(document: &mut ast::WebCoreDocument) -> Result<(), String> {
+    if document.component_imports.is_empty() {
+        return Ok(());
+    }
+
+    let root = std::env::current_dir()
+        .and_then(|d| d.canonicalize())
+        .map_err(|e| format!("Cannot resolve project directory: {e}"))?;
+
+    // Deduplicate: multiple pages can import the same component file.
+    let mut to_load: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for ci in &document.component_imports {
+        to_load.insert(ci.alias.clone(), ci.path.clone());
+    }
+
+    let mut visited: std::collections::BTreeSet<std::path::PathBuf> =
+        std::collections::BTreeSet::new();
+
+    for (alias, raw_path) in &to_load {
+        load_component_file(document, alias, raw_path, &root, &mut visited)?;
+    }
+
+    Ok(())
+}
+
+fn load_component_file(
+    document: &mut ast::WebCoreDocument,
+    alias: &str,
+    raw_path: &str,
+    root: &Path,
+    visited: &mut std::collections::BTreeSet<std::path::PathBuf>,
+) -> Result<(), String> {
+    // Resolve path: `./X.webc` or `../X.webc` → relative to `src/pages/`;
+    // no-prefix path → relative to project root.
+    let base = if raw_path.starts_with("./") || raw_path.starts_with("../") {
+        Path::new("src/pages").to_path_buf()
+    } else {
+        root.to_path_buf()
+    };
+    let resolved = base.join(raw_path);
+    let canon = resolved
+        .canonicalize()
+        .map_err(|e| format!("import '{alias}': cannot find '{raw_path}': {e}"))?;
+
+    if !canon.starts_with(root) {
+        return Err(format!(
+            "import '{alias}': path '{raw_path}' escapes the project directory"
+        ));
+    }
+    if visited.contains(&canon) {
+        return Ok(()); // already loaded — skip (handles cycles)
+    }
+    visited.insert(canon.clone());
+
+    let source = fs::read_to_string(&canon)
+        .map_err(|e| format!("import '{alias}': failed to read '{raw_path}': {e}"))?;
+    let parsed = parser::parse_webc(&source)
+        .map_err(|e| format!("import '{alias}': parse error in '{raw_path}': {e}"))?;
+
+    // Verify that the expected component name exists in the imported file.
+    if !parsed.components.contains_key(alias) && !parsed.components.is_empty() {
+        let available: Vec<&str> = parsed.components.keys().map(String::as_str).collect();
+        println!(
+            "⚠️  import '{alias}': component '{alias}' not found in '{raw_path}' \
+             (available: {})",
+            available.join(", ")
+        );
+    }
+
+    // Merge components into the global pool (first definition wins).
+    for (name, component) in parsed.components {
+        document.source_files.insert(name.clone(), canon.clone());
+        document.components.entry(name).or_insert(component);
+    }
+
+    // Recursively resolve any component imports declared in the imported file.
+    for ci in &parsed.component_imports {
+        load_component_file(document, &ci.alias, &ci.path, root, visited)?;
+    }
+
+    println!("📦 Component import: {alias} ← {raw_path}");
     Ok(())
 }
 

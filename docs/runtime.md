@@ -5,14 +5,25 @@
 
 ## Vue d'ensemble
 
-WebCore ne livre **aucun framework côté client**. Le compilateur émet un unique
-fichier `dist/assets/webcore.js` assemblé à partir de fragments (`src/codegen/js/js_runtime.rs`,
-`js_dom.rs`, `js_events.rs`), **tree-shaké par fonctionnalité** : si un document
-n'utilise ni `@for`, ni i18n, ni validation, les fonctions correspondantes ne sont
-pas émises. La détection se fait à la compilation via `RuntimeFeatures` (`js_dom.rs`).
+WebCore ne livre **aucun framework côté client**. En v3, le compilateur émet un
+`<script>` inline à la fin du `<body>` de chaque page, **tree-shaké par fonctionnalité** :
+si un document n'utilise ni `@for`, ni i18n, ni validation, les fonctions correspondantes
+ne sont pas émises. La détection se fait à la compilation via `RuntimeFeatures` (`js_dom.rs`).
 
 Le contrat entre le HTML généré et le runtime passe exclusivement par des
 attributs `data-webcore-*` (constantes centralisées dans `src/codegen/attr_names.rs`).
+
+### v2 vs v3 — changement d'architecture
+
+| Aspect | v2.x | v3.0 |
+|---|---|---|
+| Livraison JS | `webcore.<hash>.js` partagé | `<script>` inline par page |
+| Expressions | Strings dans le DOM évaluées par `evalCond` | Fermetures compilées dans `_e` |
+| CSP `unsafe-eval` | Requis (nouveau `Function()`) | Non requis — supprimé structurellement |
+| Identifiants prod | Lisibles (`bindIf`, `bindFor`, …) | Renommés (`_bi`, `_bf`, …) |
+| JS page sans réactivité | Absent | Absent |
+
+---
 
 ## Réactivité : `State` et `$effect`
 
@@ -31,15 +42,63 @@ const STORE = new State();  // store global ($store.x)
   l'injection des imports de données et le recalcul des `computed`.
 - `$effect(fn)` — exécute `fn` immédiatement en s'enregistrant dans `__wcfx` ;
   `fn` est ré-exécutée automatiquement quand une de ses dépendances change.
-  `__wcfx` est déclaré avec `var` pour être visible depuis les corps `new Function()`.
 
 Invariant : **toutes** les fonctions `bind*` s'appuient sur `$effect`, donc un
 composant n'est re-rendu que si une dépendance réellement lue a changé.
 
-## Compilation des expressions (compile-time) — `compile_list_method`
+---
 
-Avant d'atteindre `evalCond` au runtime, certaines expressions sont réécrites
-**au moment de la compilation** par `compile_list_method()` (`src/codegen/js/js_events.rs`) :
+## Expressions compilées — carte `_e` (v3.0)
+
+En v3, chaque expression de binding est compilée au build en une **fermeture JS réelle**
+par `compile_read_expr()` (`src/codegen/js/js_events.rs`). Les fermetures sont émises
+en tête du `<script>` inline dans une map d'ID :
+
+```js
+const _e = {
+  e0: () => S.get('count') > 0,
+  e1: () => S.get('count') * 2,
+  e2: () => S.get('name') + ' World',
+};
+```
+
+Les attributs `data-webcore-*` stockent l'ID (`e0`, `e1`) au lieu d'une string :
+
+```html
+<!-- v2 — expression stockée comme string dans le DOM -->
+<div data-webcore-if="count > 0">...</div>
+<span data-webcore-interpolation="count * 2"></span>
+
+<!-- v3 — ID vers une fermeture inline -->
+<div data-webcore-if="e0">...</div>
+<span data-webcore-interpolation="e1"></span>
+<script>
+const _e={e0:()=>S.get('count')>0, e1:()=>S.get('count')*2};
+bindIf(_e); bind(_e);
+</script>
+```
+
+### `compile_read_expr` — règles de réécriture
+
+Le compilateur réécrit les identifiants de portée `.webc` en accès `State` :
+
+| Pattern source | Code JS dans la fermeture |
+|---|---|
+| `count` (var d'état) | `S.get('count')` |
+| `$store.theme` | `STORE.get('theme')` |
+| `$route.slug` | `__route.slug` |
+| `$query.q` | `new URLSearchParams(location.search).get('q')` |
+| `item.price * qty` | `S.get('item').price * S.get('qty')` |
+
+Conséquence directe : `VARS`, `STORE_VARS`, `_VR`, `VARS_SET` et `evalCond`
+**n'existent plus dans le runtime v3**. Une expression qui référence un identifiant
+non déclaré dans `state {}` / `props {}` / `computed {}` produit désormais une
+**erreur de compilation** (pas un `undefined` silencieux).
+
+### Compilation des méthodes de liste (v2 + v3)
+
+`compile_list_method()` réécrit les appels de mutation réactive **avant** toute
+autre transformation :
 
 | Expression source | Code JS émis |
 |---|---|
@@ -48,57 +107,43 @@ Avant d'atteindre `evalCond` au runtime, certaines expressions sont réécrites
 | `items.clear()` | `S.set('items',[])` |
 | `$store.items.push(val)` | `STORE.set('items',[...STORE.get('items'),val])` |
 
-La détection se fait par scan de chaîne (`.push(`, `.remove(`, `.clear(`) avant
-toute autre réécriture — `compile_list_method` court-circuite le reste du pipeline
-dès qu'une correspondance est trouvée.
-
 ---
 
-## `evalCond(expr)` — évaluation d'expressions
+## Fonctions de binding (v3)
 
-Évalue une expression `.webc` (`count > 0`, `item.price * qty`, `$store.user`)
-dans le contexte de l'état courant. Stratégie en trois temps :
+Les fonctions `bind*` reçoivent la map `_e` en paramètre et appellent directement
+`_e[id]()` — aucune évaluation de string.
 
-1. **Fast paths sans `new Function`** : identifiant simple (`VARS_SET`),
-   `$store.x`, `$route.x`, `$query.x` — lecture directe.
-2. **Réécriture** : `$store.x` → `STORE.get('x')`, variables d'état → `S.get('x')`
-   (regex pré-compilées `_VR`, triées par longueur décroissante pour éviter les
-   correspondances partielles).
-3. **`new Function('S','STORE','U',…,'"use strict";return(<expr>)')`** — les
-   identifiants block-scopés sont passés en paramètres car `Function()` s'exécute
-   en portée globale. En cas d'erreur, retourne `undefined` (et non `false`) pour
-   que les interpolations affichent `''`.
+| Fonction | Signature v3 | Émise si | Rôle |
+|---|---|---|---|
+| `bind` | `bind(_e)` | interpolation présente | Met à jour `el.textContent` et attributs liés via `_e[id]()`. |
+| `bindIf` | `bindIf(_e)` | `@if` présent | Affiche/masque les `div[data-webcore-if]` et leur `else` adjacent ; gère `webc:transition`. |
+| `bindFor` | `bindFor()` | `@for` présent | Rend les `<template data-webcore-for>` dans le conteneur adjacent. |
+| `bindAttrs` | `bindAttrs(_e)` | attr dynamique présent | `_e[id]()` pour chaque `data-webcore-attr-<name>` / `data-webcore-style-*`. |
+| `bindClassBindings` | `bindClassBindings(_e)` | `class:` présent | `classList.toggle(cls, !!_e[id]())` pour chaque `data-webcore-class-*`. |
+| `bindValidation` | `bindValidation()` | `validate:` présent | Validation `blur`/`submit` ; messages dans `[data-webcore-error]`. |
+| `bindDefer` | `bindDefer()` | `@defer` présent | Révèle le contenu masqué après `DOMContentLoaded`. |
 
-Sécurité : les expressions proviennent **exclusivement des fichiers `.webc`
-compilés** (entrée du développeur, pas de l'utilisateur final) ; aucune chaîne
-d'origine runtime n'atteint `new Function`.
+### `DOMContentLoaded` — séquence de rebind v3
 
-## Fonctions de binding
+```js
+document.addEventListener('DOMContentLoaded', () => {
+  bind(_e); bindIf(_e); bindFor(); bindAttrs(_e); bindClassBindings(_e);
+});
+```
 
-| Fonction | Émise si | Rôle |
-|---|---|---|
-| `bindIf` | `@if` présent | Affiche/masque les `div[data-webcore-if]` et leur `else` adjacent ; gère `webc:transition` (classes `webc-<nom>-enter/leave`). |
-| `bindFor` | `@for` présent | Rend les `<template data-webcore-for>` dans le conteneur `data-webcore-for-container` adjacent. |
-| `bindAttrs` | attribut dynamique présent | Pour chaque `data-webcore-attr-<name>` sur un élément `data-webcore-bound` : propriété DOM si elle existe, sinon `setAttribute`. Gère aussi `data-webcore-style-<prop>` → `style.setProperty`. |
-| `bindClassBindings` | `class:` présent | `classList.toggle(cls, !!evalCond(expr))` pour chaque `data-webcore-class-<cls>` (sélecteur ciblé `data-webcore-class-bound`). |
-| `bindValidation` | `validate:` présent | Validation au `blur`/`input` (après premier blur) et au `submit` (bloquant) ; messages dans `[data-webcore-error="<field>"]`. |
+En mode `prod`, les noms courts sont utilisés : `_b(_e);_bi(_e);_bf();_ba(_e);_bc(_e);`
 
-### `bindFor` en détail (la partie la plus complexe du runtime)
+### `bindFor` en détail
 
-- `fillItem(el, val, i)` : remplit les spans `data-webcore-interpolation`
-  (chemins `item.prop.sub` supportés), écrit `data-webcore-idx`, et reflète les
-  propriétés scalaires de l'objet en `data-*` (ciblage CSS).
-- **Diffing par clé** (`@for item key=item.id`) : la clé est stockée sur
-  `firstElementChild.dataset.webcoreKey` ; les éléments existants sont réutilisés
-  (suppression de ceux absents, remplissage de ceux conservés, clonage des nouveaux).
-- **Boucles imbriquées** : les templates internes reçoivent `_wc_ctx`
-  (map `{varExterne: valeur}`) ; `fillItem` et `getItems()` y puisent les
-  variables des boucles englobantes (`post.comments`, etc.).
-- Garde-fous : `_wc_b` (anti double-binding lors des appels récursifs
-  `bindFor(cont)`), `tmpl.isConnected` (les effets de templates retirés du DOM
-  sortent immédiatement).
-- `@for i in 0..5` : `data-webcore-for-range` — le tableau est généré côté
-  runtime, sans donnée d'état.
+- `fillItem(el, val, i)` : remplit les spans `data-webcore-interpolation` (chemins
+  `item.prop.sub` supportés), écrit `data-webcore-idx`.
+- **Diffing par clé** (`@for item key=item.id`) : clé sur `firstElementChild.dataset.webcoreKey` ;
+  les éléments existants sont réutilisés.
+- **Boucles imbriquées** : `_wc_ctx` propagé aux templates internes.
+- Garde-fous : `_wc_b` (anti double-binding), `tmpl.isConnected`.
+
+---
 
 ## Délégation d'événements (CSP-safe)
 
@@ -110,40 +155,60 @@ sont dans la map `H[id]`. Un seul listener par type d'événement :
 const D = (t, p) => document.addEventListener(t, e => { /* closest('[data-webcore-e]') → H[el.id](e) */ });
 ```
 
-Modificateurs `on:click|stop|prevent|once|self` encodés dans la valeur de
-l'attribut et interprétés par `D`. Liens SPA : `data-webcore-nav` + History API.
-CSS différé (critical CSS) : `data-webcore-defer` basculé en `media="all"` à
-`DOMContentLoaded`.
+Modificateurs `on:click|stop|prevent|once|self` encodés dans la valeur de l'attribut.
+Liens SPA : `data-webcore-nav` + History API.
+
+---
+
+## Renommage prod (v3.0.5)
+
+Appliqué en post-pass par `rename_runtime_ids()` dans `generate_inline_js` :
+
+```
+bindClassBindings → _bc    rebindComputed → _rc    bindValidation → _bv
+validateField     → _vf    matchRoute     → _mr    bindAttrs      → _ba
+bindDefer         → _bd    bindFor        → _bf    bindIf         → _bi
+bind(             → _b(    const bind=    → const _b=
+```
+
+L'ordre de remplacement est du plus long au plus court pour éviter les collisions
+de sous-chaînes (ex. `bindFor` avant `bind(`).
+
+---
 
 ## Référence des attributs `data-webcore-*`
 
-| Attribut | Émis par | Consommé par |
-|---|---|---|
-| `data-webcore-if` / `data-webcore-else` | `render_if_element` | `bindIf`, SSG (`display` initial) |
-| `data-webcore-for`, `-in`, `-for-key`, `-for-index`, `-for-range` | `render_for_element` | `bindFor` |
-| `data-webcore-for-container` | `render_for_element` | `bindFor` (cible de rendu) |
-| `data-webcore-interpolation` | `Element::Interpolation` | `bind` / `fillItem`, SSG (valeur initiale) |
-| `data-webcore-bound`, `data-webcore-attr-*` | `generate_tag_element` | `bindAttrs` |
-| `data-webcore-class-bound`, `data-webcore-class-*` | `handle_class_binding` | `bindClassBindings` |
-| `data-webcore-style-*` | `handle_style_binding` | `bindAttrs` |
-| `data-webcore-field`, `data-webcore-validate-*`, `data-webcore-error` | attrs de validation | `bindValidation`, `validateField` |
-| `data-webcore-e` | `handle_event_attr` | délégation `D(t, p)` |
-| `data-webcore-nav` | liens internes | délégation SPA |
-| `data-webcore-ref` | `handle_ref_attr` | enregistrement `refs[name]` |
-| `data-webcore-transition` | `webc:transition` | `bindIf` |
-| `data-webcore-defer` | critical CSS (prod) | swap `media` à `DOMContentLoaded` |
-| `data-v` | scoping CSS | sélecteurs CSS scopés (pas de JS) |
-| `data-webcore-key`, `data-webcore-idx`, `data-webcore-onced` | **runtime** (`bindFor`, `D`) | runtime uniquement — jamais émis par le compilateur |
+| Attribut | Émis par | Consommé par | v3 : valeur |
+|---|---|---|---|
+| `data-webcore-if` / `data-webcore-else` | `render_if_element` | `bindIf(_e)`, SSG | ID expression (`e0`) |
+| `data-webcore-for`, `-in`, `-for-key`, `-for-index`, `-for-range` | `render_for_element` | `bindFor()` | — |
+| `data-webcore-for-container` | `render_for_element` | `bindFor()` | — |
+| `data-webcore-interpolation` | `Element::Interpolation` | `bind(_e)`, SSG | ID expression (`e1`) |
+| `data-webcore-bound`, `data-webcore-attr-*` | `generate_tag_element` | `bindAttrs(_e)` | ID expression |
+| `data-webcore-class-bound`, `data-webcore-class-*` | `handle_class_binding` | `bindClassBindings(_e)` | ID expression |
+| `data-webcore-style-*` | `handle_style_binding` | `bindAttrs(_e)` | ID expression |
+| `data-webcore-field`, `data-webcore-validate-*`, `data-webcore-error` | validation attrs | `bindValidation()` | — |
+| `data-webcore-e` | `handle_event_attr` | délégation `D(t, p)` | — |
+| `data-webcore-nav` | liens internes | délégation SPA | — |
+| `data-webcore-ref` | `handle_ref_attr` | `refs[name]` | — |
+| `data-webcore-transition` | `webc:transition` | `bindIf(_e)` | — |
+| `data-webcore-defer` | critical CSS (prod) | swap `media` à DCL | — |
+| `data-v` | scoping CSS | sélecteurs CSS scopés (pas de JS) | — |
+| `data-webcore-key`, `data-webcore-idx`, `data-webcore-onced` | **runtime** | runtime uniquement | — |
 
-## Cycle de vie d'une page
+---
 
-1. `<script defer>` : le runtime s'exécute après le parsing HTML.
-2. Déclarations : `State`, `VARS`, `evalCond`, fonctions `bind*`, `H`, `D`.
-3. `DOMContentLoaded` : `refs`, `on:mount`, `$watch`, `bind()` (interpolations),
-   `bindIf()`, `bindFor()`, `bindAttrs()`, `bindValidation()`, router.
-4. Navigation SPA : `on:destroy` des composants quittés, puis re-bind de la
-   nouvelle page (`__docsEnhance` compris).
+## Cycle de vie d'une page (v3)
+
+1. **HTML parsé** — le `<script>` inline en fin de `<body>` est exécuté.
+2. **Déclarations** : classe `State`, `const S`, `const STORE`, map `_e`, handlers `H`,
+   fonctions `bind*`, délégation `D`.
+3. **`DOMContentLoaded`** : `bind(_e)`, `bindIf(_e)`, `bindFor()`, `bindAttrs(_e)`,
+   `bindClassBindings(_e)`, `bindValidation()`, `bindDefer()`, router (si SPA),
+   `on:mount` des composants.
+4. **Navigation SPA** : `on:destroy` des composants quittés, puis `bind(_e)` + rebind
+   séquence sur la nouvelle page.
 
 Le SSG (`src/core/ssg.rs`) pré-remplit interpolations et `display` initiaux dans
-le HTML ; le runtime ré-écrit ces valeurs au premier bind, ce qui rend les deux
-mécanismes indépendants mais cohérents.
+le HTML ; le runtime ré-écrit ces valeurs au premier bind, les deux mécanismes
+étant indépendants mais cohérents.

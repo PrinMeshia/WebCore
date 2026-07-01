@@ -112,7 +112,9 @@ for_key_braced = { "{" ~ expression_content ~ "}" }
 for_key_expr = @{ (ASCII_ALPHANUMERIC | "_" | "." | "[" | "]" | "$")+ }
 
 if_statement = { "@if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
-else_branch = { "@else" ~ ("{" ~ element* ~ "}" | if_statement) }
+// else_if_stmt matches the `if cond { ... }` fragment after `@else` (no `@` prefix)
+else_if_stmt = { "if" ~ expression ~ "{" ~ element* ~ "}" ~ else_branch? }
+else_branch = { "@else" ~ ("{" ~ element* ~ "}" | else_if_stmt | if_statement) }
 
 // Switch: @switch expr { @case val { ... } @default { ... } }
 // switch_expr stops at { or newline (avoids lookahead ambiguity with @case inside the body)
@@ -165,12 +167,18 @@ string_literal = ${ "\"" ~ string_inner ~ "\"" }
 string_inner = @{ (!"\"" ~ !"\\" ~ ANY | "\\" ~ ANY)* }
 
 string_with_interpolation = ${ "\"" ~ interpolated_content ~ "\"" }
-interpolated_content = { (interpolation | text_fragment)* }
-interpolation = { "{" ~ interp_expr ~ "}" }
-// Accepts any expression: {count}, {count + 1}, {user.name}, etc.
-interp_expr = @{ (!"}" ~ ANY)+ }
-// text_fragment: plain text inside a string, supporting \{ and \" escape sequences
-text_fragment = @{ ("\\" ~ "{" | "\\" ~ "\"" | !"\"" ~ !"{" ~ ANY)+ }
+// Capture the raw string body. An interpolation segment `{…}` is consumed as a
+// unit so inner quotes (e.g. {t("key")}) don't end the string; everything else
+// is a plain char. A `{` only opens an interpolation when immediately followed
+// by a non-space expression that closes with `}` on the same line — otherwise
+// it is a literal brace, so code samples no longer need to escape `\{` `\}`.
+// The same rule is mirrored in the parser (split_interpolated_text).
+interpolated_content = @{
+    ( "\\" ~ ANY
+    | ("{" ~ !" " ~ !"}" ~ (!("}" | "{" | NEWLINE) ~ ANY)* ~ "}")
+    | (!"\"" ~ ANY)
+    )*
+}
 
 // ============ EXPRESSIONS ============
 expression = @{ (!("{" | "}") ~ ANY)+ }

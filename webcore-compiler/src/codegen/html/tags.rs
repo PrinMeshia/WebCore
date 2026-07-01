@@ -186,10 +186,10 @@ pub(super) fn generate_tag_element(
             }
             continue;
         }
-        // style:prop={expr} → data-webcore-style-prop="expr"
+        // style:prop={expr} → data-webcore-style-prop="id"
         if attr.name.starts_with("style:") {
             if let AttributeValue::Expression(expr) = &attr.value {
-                if let Some(s) = handle_style_binding(&attr.name, expr) {
+                if let Some(s) = handle_style_binding(&attr.name, expr, attr.span, ctx) {
                     result.push_str(&s);
                 }
             }
@@ -210,13 +210,14 @@ pub(super) fn generate_tag_element(
             AttributeValue::Boolean(false) => {}
             AttributeValue::Spread(expr) => {
                 // Spread: `...obj` — all properties of obj become attributes at runtime
-                write!(result, " {}=\"{}\"", attr_names::SPREAD, html_escape(expr))
+                let id = ctx.register_expr(expr, attr.span);
+                write!(result, " {}=\"{}\"", attr_names::SPREAD, html_escape(&id))
                     .expect("write! to String is infallible");
             }
             AttributeValue::Expression(expr) => {
                 if attr.name.starts_with("class:") {
-                    // Conditional class binding: class:name={expr} → data-webcore-class-name="expr"
-                    if let Some(s) = handle_class_binding(&attr.name, expr) {
+                    // Conditional class binding: class:name={expr} → data-webcore-class-name="id"
+                    if let Some(s) = handle_class_binding(&attr.name, expr, attr.span, ctx) {
                         result.push_str(&s);
                     }
                 } else if attr.name.starts_with("on:") {
@@ -234,11 +235,12 @@ pub(super) fn generate_tag_element(
                     }
                 } else {
                     // Dynamic attribute: bound at runtime via bindAttrs()
+                    let id = ctx.register_expr(expr, attr.span);
                     write!(
                         result,
                         " data-webcore-attr-{}=\"{}\"",
                         attr.name,
-                        html_escape(expr)
+                        html_escape(&id)
                     )
                     .expect("write! to String is infallible");
                 }

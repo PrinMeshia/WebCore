@@ -1057,13 +1057,13 @@
     },
     "interpolation": {
       "name": "meta.embedded.interpolation.webc",
-      "begin": "\\{",
-      "end": "\\}",
-      "patterns": [
-        {
-          "include": "#expression"
-        }
-      ]
+      "comment": "An interpolation is `{` followed immediately by a non-space expression closing with `}` on the same line. `{ x }` (space after {), `{}` (empty) and multi-line `{` are literal text.",
+      "match": "(\\{)(?=[^\\s{}])([^{}\\n]*)(\\})",
+      "captures": {
+        "1": { "name": "punctuation.section.embedded.begin.webc" },
+        "2": { "patterns": [{ "include": "#expression" }] },
+        "3": { "name": "punctuation.section.embedded.end.webc" }
+      }
     },
     "expression": {
       "patterns": [
@@ -1103,18 +1103,11 @@
       "end": "\"",
       "patterns": [
         {
-          "name": "meta.embedded.interpolation.webc",
-          "begin": "\\{",
-          "end": "\\}",
-          "patterns": [
-            {
-              "include": "#expression"
-            }
-          ]
-        },
-        {
           "name": "constant.character.escape.webc",
           "match": "\\\\."
+        },
+        {
+          "include": "#interpolation"
         }
       ]
     },

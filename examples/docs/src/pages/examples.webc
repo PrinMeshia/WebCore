@@ -1,11 +1,11 @@
 page "examples" {
     div class="page-header" {
-        div class="page-header-badge" { "6 projets • open source" }
+        div class="page-header-badge" { "6 projects • open source" }
         h1 { "Examples" }
         p class="page-sub" {
-            "Projets complets construits avec WebCore — chacun compile vers un "
+            "Complete projects built with WebCore — each compiles to a standalone "
             code { "dist/" }
-            " autonome, sans framework ni bundler."
+            " with no framework or bundler."
         }
     }
 
@@ -23,7 +23,7 @@ page "examples" {
                 }
             }
             h3 { "Counter" }
-            p { "Le point de départ idéal — compteur réactif avec incrément, décrément et pas variable. Démontre l'état, les computed et les directives conditionnelles." }
+            p { "The ideal starting point — reactive counter with increment, decrement and variable step. Demonstrates state, computed vars and conditional directives." }
             pre class="code-block" { "cd examples/counter && webc serve" }
         }
 
@@ -41,11 +41,11 @@ page "examples" {
             }
             h3 { "Todo" }
             p {
-                "Liste de tâches avec ajout, toggle et suppression. Démontre "
+                "Todo list with add, toggle and delete. Demonstrates "
                 code { "@for" }
-                " avec key-diffing, "
+                " with key-diffing, "
                 code { "@if" }
-                ", les computed et le CSS nesting."
+                ", computed vars and CSS nesting."
             }
             pre class="code-block" { "cd examples/todo && webc serve" }
         }
@@ -64,9 +64,9 @@ page "examples" {
             }
             h3 { "Blog" }
             p {
-                "Blog multi-pages avec routes paramétrées ("
+                "Multi-page blog with parameterized routes ("
                 code { "/post/:slug" }
-                "). Montre le routage SPA, les params de route et le store global pour le thème."
+                "). Shows SPA routing, route params and the global store for theming."
             }
             pre class="code-block" { "cd examples/blog && webc serve" }
         }
@@ -85,9 +85,9 @@ page "examples" {
             }
             h3 { "Forms" }
             p {
-                "SignupForm et ContactForm avec validation déclarative complète — required, email, minlength, maxlength, pattern et blocs "
+                "SignupForm and ContactForm with full declarative validation — required, email, minlength, maxlength, pattern and "
                 code { "@error" }
-                "."
+                " blocks."
             }
             pre class="code-block" { "cd examples/forms && webc serve" }
         }
@@ -105,7 +105,7 @@ page "examples" {
                 }
             }
             h3 { "i18n" }
-            p { "Internationalisation — appels t(), formes plurielles (items_one / items_other), paramètres positionnels et changement de locale réactif." }
+            p { "Internationalisation — t() calls, plural forms (items_one / items_other), positional parameters and reactive locale switching." }
             pre class="code-block" { "cd examples/i18n && webc serve" }
         }
 
@@ -121,23 +121,23 @@ page "examples" {
                     }
                 }
             }
-            h3 { "Docs — ce site" }
-            p { "Ce site de documentation — 5 pages, routage SPA, slots nommés, sidebar TOC, copy-to-clipboard, barre d'annonce et système de design minimal." }
+            h3 { "Docs — this site" }
+            p { "This documentation site — 5 pages, SPA routing, named slots, sidebar TOC, copy-to-clipboard, announcement bar and minimal design system." }
             pre class="code-block" { "cd examples/docs && webc serve" }
         }
     }
 
     section class="doc-section" {
-        h2 { "Structure d'un projet" }
-        p { "Tous les exemples suivent le même schéma :" }
+        h2 { "Project structure" }
+        p { "All examples follow the same layout:" }
         pre class="code-block" {
 "my-project/
-├── webc.toml          # nom, point d'entrée, mode (dev | prod)
-├── theme.toml         # tokens de design (couleurs, espacements, fontes)
+├── webc.toml          # name, entry point, mode (dev | prod)
+├── theme.toml         # design tokens (colors, spacing, fonts)
 ├── public/
-│   └── styles.css     # styles globaux optionnels
+│   └── styles.css     # optional global styles
 └── src/
-    ├── app.webc       # routes + déclaration du layout
+    ├── app.webc       # routes + layout declaration
     ├── layouts/
     │   └── Main.webc
     ├── pages/
@@ -148,25 +148,25 @@ page "examples" {
     }
 
     section class="doc-section" {
-        h2 { "Créer un nouveau projet" }
+        h2 { "Create a new project" }
         p {
             code { "webc new" }
-            " génère un squelette complet — webc.toml, theme.toml, layout, page d'accueil et un composant Counter avec état réactif."
+            " scaffolds a complete project — webc.toml, theme.toml, layout, home page and a reactive Counter component."
         }
         pre class="code-block" {
 "webc new my-app
 cd my-app
-webc serve        # serveur dev avec HMR"
+webc serve        # dev server with HMR"
         }
     }
 
     section class="doc-section" {
-        h2 { "Build de production" }
+        h2 { "Production build" }
         p {
             code { "webc build" }
-            " produit un "
+            " produces a minified "
             code { "dist/" }
-            " minifié, avec CSS inliné, SRI sur les assets et analyse de bundle."
+            " with inlined CSS, asset SRI and bundle analysis."
         }
         pre class="code-block" {
 "webc build

@@ -17,8 +17,8 @@ component SyntaxBlock {
     style {
         .syntax-block {
             background: var(--color-code-bg);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
+            border: 1px solid #2A2A28;
+            border-radius: var(--radius-md);
             overflow: hidden;
             margin: var(--spacing-md) 0;
         }
@@ -27,26 +27,28 @@ component SyntaxBlock {
             align-items: center;
             gap: var(--spacing-sm);
             padding: var(--spacing-sm) var(--spacing-md);
-            background: var(--color-surface);
-            border-bottom: 1px solid var(--color-border);
+            background: #1C1B18;
+            border-bottom: 1px solid #2A2A28;
         }
         .syntax-lang {
-            font-size: 0.7rem;
-            font-weight: 700;
+            font-size: 0.65rem;
+            font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--color-secondary);
+            letter-spacing: 0.1em;
+            color: var(--color-primary);
+            font-family: var(--font-mono);
         }
         .syntax-title {
-            font-size: 0.8rem;
-            color: var(--color-muted);
+            font-size: 0.78rem;
+            color: #6B6861;
+            font-family: var(--font-mono);
         }
         .syntax-body {
             padding: var(--spacing-md);
             font-family: var(--font-mono);
-            font-size: 0.85rem;
-            line-height: 1.65;
-            color: var(--color-text);
+            font-size: 0.8rem;
+            line-height: 1.7;
+            color: #C9C3B5;
             white-space: pre;
             overflow-x: auto;
         }

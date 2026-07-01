@@ -243,25 +243,46 @@ pub(super) fn parse_text_element(pair: Pair<Rule>) -> Result<Element, ParseError
         text
     };
 
-    // Check for interpolations
-    if clean_text.contains('{') && clean_text.contains('}') {
-        // If it's just a single interpolation, return Interpolation
-        if clean_text.starts_with('{')
-            && clean_text.ends_with('}')
-            && clean_text.matches('{').count() == 1
-        {
-            return Ok(Element::Interpolation(
-                clean_text[1..clean_text.len() - 1].to_string(),
-                span,
-            ));
-        }
+    let mut elems = split_interpolated_text(clean_text);
+    match elems.len() {
+        0 => Ok(Element::Text(String::new(), span)),
+        1 => Ok(elems.pop().expect("len checked")),
+        _ => Ok(Element::Fragment {
+            content: elems,
+            span,
+        }),
     }
-
-    Ok(Element::Text(clean_text.to_string(), span))
 }
 
-/// Split a string potentially containing multiple {var} interpolations into Elements.
-/// Handles escape sequences: \{ → literal '{', \" → literal '"'.
+/// Return `Some(offset_of_closing_brace)` (relative to `rest`, the slice just
+/// after a `{`) when `rest` opens a real interpolation, else `None` — in which
+/// case the `{` is a literal brace.
+///
+/// A `{` opens an interpolation only when it is immediately followed by a
+/// non-space, non-`}` character and the body closes with `}` on the same line
+/// without any nested `{`. This lets literal code samples carry unescaped
+/// braces: `{ status: "x" }` (space after `{`), `{}` (empty), and multi-line
+/// `component App {\n…\n}` are all treated as plain text, while `{count}` and
+/// `{count + 1}` remain interpolations.
+fn interpolation_close(rest: &[char]) -> Option<usize> {
+    match rest.first() {
+        Some(&c) if c == ' ' || c == '}' => return None,
+        None => return None,
+        _ => {}
+    }
+    for (k, &c) in rest.iter().enumerate() {
+        match c {
+            '}' => return Some(k),
+            '{' | '\n' | '\r' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a string potentially containing `{var}` interpolations into Elements.
+/// Handles escape sequences (`\{`, `\}`, `\"`, `\\`) for backward compatibility,
+/// but bare literal braces no longer need escaping (see `interpolation_close`).
 pub(super) fn split_interpolated_text(text: &str) -> Vec<Element> {
     let mut elements: Vec<Element> = Vec::new();
     let default_span = Span::default();
@@ -273,42 +294,35 @@ pub(super) fn split_interpolated_text(text: &str) -> Vec<Element> {
     while i < len {
         if chars[i] == '\\' && i + 1 < len {
             match chars[i + 1] {
-                '{' => {
-                    current_text.push('{');
-                    i += 2;
-                }
-                '"' => {
-                    current_text.push('"');
-                    i += 2;
-                }
-                '\\' => {
-                    current_text.push('\\');
-                    i += 2;
-                }
+                '{' => current_text.push('{'),
+                '}' => current_text.push('}'),
+                '"' => current_text.push('"'),
+                '\\' => current_text.push('\\'),
                 other => {
                     current_text.push('\\');
                     current_text.push(other);
-                    i += 2;
                 }
             }
+            i += 2;
         } else if chars[i] == '{' {
-            // Start of interpolation — flush pending text
-            if !current_text.is_empty() {
-                elements.push(Element::Text(current_text.clone(), default_span));
-                current_text.clear();
-            }
-            // Find matching '}'
-            if let Some(close) = chars[i + 1..].iter().position(|&c| c == '}') {
-                let var_name: String = chars[i + 1..i + 1 + close].iter().collect();
+            if let Some(close) = interpolation_close(&chars[i + 1..]) {
+                // Real interpolation — flush pending text first.
+                if !current_text.is_empty() {
+                    elements.push(Element::Text(
+                        std::mem::take(&mut current_text),
+                        default_span,
+                    ));
+                }
+                let expr: String = chars[i + 1..i + 1 + close].iter().collect();
                 elements.push(Element::Interpolation(
-                    var_name.trim().to_string(),
+                    expr.trim().to_string(),
                     default_span,
                 ));
                 i += close + 2;
             } else {
-                // No closing brace — treat rest as literal text
-                current_text.extend(chars[i..].iter());
-                break;
+                // Literal brace.
+                current_text.push('{');
+                i += 1;
             }
         } else {
             current_text.push(chars[i]);

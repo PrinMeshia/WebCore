@@ -5,6 +5,177 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+---
+
+## [3.2.0]
+
+### Ajouts
+
+- **Accolades littérales sans échappement** — dans une chaîne, `{` n'ouvre une
+  interpolation que s'il est immédiatement suivi d'une expression (pas d'espace)
+  qui se ferme par `}` sur la même ligne. Tout le reste — `{ x }` (espace après
+  `{`), `{}` (vide), blocs multi-lignes `component App { … }` — est désormais du
+  **texte littéral**. Les exemples de code dans la doc n'ont plus besoin d'écrire
+  `\{` `\}`. L'échappement `\{` / `\}` reste accepté pour la rétro-compatibilité ;
+  les interpolations contenant des guillemets (`{t("clé")}`) continuent de
+  fonctionner.
+
+- **Runtime partagé et mis en cache** — au lieu d'inliner ~8 ko de runtime dans
+  le `<script>` de chaque page (dupliqué d'une page à l'autre, jamais mis en cache
+  entre les navigations), toutes les pages référencent désormais un seul
+  `/assets/webcore.<hash>.js`. Ce fichier est construit à partir de **l'union** des
+  expressions compilées et des handlers de toutes les pages, si bien que le
+  navigateur télécharge et met en cache le runtime **une seule fois** pour tout le
+  site. Les pages émettent `<script defer src="/assets/webcore.js">` (placeholder
+  réécrit avec le nom hashé par le pipeline d'assets).
+  - Les IDs d'expression sont désormais préfixés par page (`homee0`, `skillse0`, …)
+    pour rester uniques dans la map `_e` partagée. Effet de bord : la **navigation
+    SPA inter-pages** est corrigée (elle entrait auparavant en collision sur des IDs
+    réinitialisés par page : `e0`, `e1`, …).
+  - `HtmlPageOptions` gagne le champ `inline_runtime` (défaut `true` pour la
+    rétro-compatibilité et les tests) ; le build le met à `false`.
+  - Exemple `portfolio` : poids total 158 → 118 ko (runtime non dupliqué ×5).
+
+### Nettoyage interne
+
+- **Suppression de l'ancien runtime v2** — tout le chemin de génération v2
+  (`generate_runtime_js_prod`, `generate_runtime_js_with_vars`, `rebind_seq`,
+  `emit_vars_array`, `emit_evalcond`, `emit_bind_fns`) n'était plus livré depuis le
+  passage au runtime partagé v3. Il est entièrement retiré (~500 lignes) ; le helper
+  de test `generate_runtime_js` délègue désormais à l'émetteur v3, et l'analyse de
+  bundle ne liste plus la feature `evalCond` (inexistante en v3).
+
+### Corrections
+
+- **Accolades non échappées dans `examples/docs/features.webc`** — des exemples de
+  code contenaient des `{...}` littéraux interprétés comme des interpolations,
+  produisant du JS invalide dans le runtime (désormais partagé et validé par
+  `node --check`). Échappés avec `\{` `\}`.
+
+- **`bind()` appelable depuis le code utilisateur `on:mount`** — les fonctions de
+  binding réactif v3 (`bind`, `bindIf`, `bindAttrs`, `bindClassBindings`) recevaient
+  la map d'expressions compilées `_e` en **paramètre**. Le framework la passait, mais
+  un appel `bind()` écrit à la main dans un bloc `on:mount` était dépourvu d'argument :
+  `_e` valait `undefined` et `_e[id]` levait *« Cannot read properties of undefined »*.
+  `_e` étant déjà un `const` de portée module, les fonctions le capturent désormais par
+  closure au lieu de le recevoir en argument — les appels utilisateur et ceux du
+  framework se comportent à l'identique.
+
+- **`bind()` appelable depuis le code utilisateur `on:mount`** — les fonctions de
+  binding réactif v3 (`bind`, `bindIf`, `bindAttrs`, `bindClassBindings`) recevaient
+  la map d'expressions compilées `_e` en **paramètre**. Le framework la passait, mais
+  un appel `bind()` écrit à la main dans un bloc `on:mount` était dépourvu d'argument :
+  `_e` valait `undefined` et `_e[id]` levait *« Cannot read properties of undefined »*.
+  `_e` étant déjà un `const` de portée module, les fonctions le capturent désormais par
+  closure au lieu de le recevoir en argument — les appels utilisateur et ceux du
+  framework se comportent à l'identique.
+
+- **Double-emballage des closures dans la map `_e` (mode dev)** — en build dev
+  (source maps), la map `_e` est émise une closure par ligne. `compile_read_expr`
+  renvoie déjà une closure complète `()=>expr` ; l'émission ajoutait à tort un second
+  `()=>` (`e0:()=>()=>S.get('x')`), si bien que `fn()` retournait une fonction
+  (toujours *truthy*) et que toutes les branches `@if` restaient affichées en
+  permanence. Le chemin prod (mono-ligne) n'était pas touché.
+
+- 2 tests de régression ajoutés (`v3_bind_fns_close_over_expr_map`,
+  `dev_expr_map_not_double_wrapped`).
+
+---
+
+## [3.1.0]
+
+### Ajouts (v3.1)
+
+- **LSP `textDocument/codeAction`** (v3.1.3) — deux quick-fixes disponibles via Ctrl+.
+  dans VS Code / Neovim : « Import component 'X' » (prépend `import X from "./X.webc"`
+  pour tout identifiant majuscule non reconnu) et « Add 'x' to state » (insère
+  `varName: String = ""` dans le bloc `state {}` le plus proche pour tout identifiant
+  minuscule inconnu). `"codeActionProvider": true` ajouté aux capabilities LSP.
+
+- **Source maps JS v3** (v3.2) — les scripts inline générés incluent désormais un
+  commentaire `//# sourceMappingURL=<page>.js.map` en mode dev. Le fichier `.map`
+  (source map v3 avec encodage Base64-VLQ) est écrit dans `dist/<page>/` et fait
+  correspondre chaque closure compilée (`e0`, `e1`, …) à sa ligne d'origine dans le
+  fichier `.webc`. Activé automatiquement quand `HtmlPageOptions::source_maps = true`
+  (désactivé en prod). 5 nouveaux tests.
+
+- **LSP `textDocument/publishDiagnostics`** (v3.1.1) — le serveur LSP pousse désormais
+  des diagnostics en temps réel après chaque `didOpen` et `didChange`. Les erreurs de
+  syntaxe apparaissent comme squiggles dans l'éditeur sans lancer `webc check`.
+  La position est calculée depuis les offsets byte du `Span` (`start`/`end`) pour une
+  précision sous-caractère. `didClose` efface les diagnostics.
+  `Span.start`, `Span.end` et `Span::merge` activés (annotations `#[allow(dead_code)]`
+  retirées).
+
+---
+
+## [3.0.7]
+
+### Ajouts (v3.0)
+
+- **Imports build-time** (v3.0.1) — `import Button from "./Button.webc"` : les composants
+  vivent dans des fichiers séparés, résolus à la compilation comme un `#include` C —
+  zéro footprint runtime, zéro chunk dynamique, zéro `<script type="module">`.
+  Chaque page reçoit exactement les composants qu'elle importe, rien de plus.
+
+- **Expressions compilées** (v3.0.2 + v3.0.3) — chaque expression de binding
+  (`{count}`, `@if`, attrs dynamiques, class bindings, style bindings) est compilée
+  en fermeture JS réelle au build :
+
+  ```
+  // v2 — string évaluée au runtime via new Function()
+  <div data-webcore-if="count > 0">
+
+  // v3 — ID référençant une fermeture émise inline
+  <div data-webcore-if="e0">
+  <script>
+    const _e={e0:()=>S.get('count')>0, ...};
+    bindIf(_e); bind(_e);
+  </script>
+  ```
+
+  `evalCond`, `new Function()`, `VARS`, `STORE_VARS`, `_VR`, `VARS_SET` supprimés.
+  **CSP `script-src 'self'` sans `unsafe-eval` désormais garanti structurellement.**
+
+- **JS inline par page** — chaque page reçoit un `<script>` autonome en fin de `<body>`
+  (au lieu d'un `webcore.js` partagé). Zéro requête HTTP supplémentaire ; les pages sans
+  réactivité n'incluent aucun script.
+
+- **Renommage prod** (v3.0.5) — en mode `prod = true`, les identifiants runtime sont
+  renommés après génération pour réduire la taille du script inline :
+
+  | Long | Court | | Long | Court |
+  |---|---|---|---|---|
+  | `bindIf` | `_bi` | | `bindFor` | `_bf` |
+  | `bindAttrs` | `_ba` | | `bindClassBindings` | `_bc` |
+  | `bindValidation` | `_bv` | | `bindDefer` | `_bd` |
+  | `rebindComputed` | `_rc` | | `matchRoute` | `_mr` |
+  | `validateField` | `_vf` | | `bind(` | `_b(` |
+
+  Gain estimé : 25–30 % sur la taille du runtime inline. Appliqué en post-pass dans
+  `generate_inline_js` après génération complète (pas de renommage source-level).
+
+- **`@else if` chainé** (v3.0.7) — `@if a { } @else if b { } @else { }` désormais
+  valide nativement. Nouvelle règle de grammaire `else_if_stmt` (sans `@` après `@else`) ;
+  compile vers une chaîne `Element::If` imbriquée. Rétrocompatible : `@else @if` (avec `@`)
+  continue de fonctionner.
+
+### Architecture interne (v3.0)
+
+- **Map d'expressions `_e`** — `const _e={e0:()=>…, e1:()=>…}` émise en tête du `<script>`
+  inline ; les attributs `data-webcore-if`, `data-webcore-interpolation` et
+  `data-webcore-attr-*` stockent un ID court (`e0`, `e1`, …) au lieu d'une string d'expression.
+- **Fonctions bind v3** — `bindIf(_e)`, `bind(_e)`, `bindAttrs(_e)`, `bindClassBindings(_e)`
+  reçoivent la map `_e` et appellent directement `_e[id]()` au lieu de `evalCond(string)`.
+- **`rebind_seq_v3`** — séquence DOMContentLoaded : `bind(_e);bindIf(_e);bindFor();bindAttrs(_e);…`
+- **`compile_read_expr`** — nouveau compilateur d'expressions dans `js_events.rs` :
+  réécrit les identifiants d'état et de store en appels `S.get()` / `STORE.get()` pour
+  produire des fermetures valides en portée globale.
+
+---
+
 ## [2.10.1]
 
 ### Correctifs (v2.10.1)
@@ -34,7 +205,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Qualité & outillage (v2.10.0)
 
-- 12 nouveaux tests — 182 tests au total (172 unitaires + 10 intégration)
 - Refactorisation : `collect_block_content()`, `scope_attr_str()`, `is_word_char()` extraits comme helpers ; `bindAttrs` JS unifié en un seul scaffold paramétré ; branche morte `else if has_spread` supprimée
 
 ---
@@ -49,7 +219,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Qualité & outillage (v2.8.0)
 
-- 28 nouveaux tests — 170 tests au total (unitaires sur méthodes List, golden sur `@loading`/`@catch`, helpers LSP)
 - `CompiledVars` et `compile_list_method` promus `pub(crate)` pour les tests inter-modules
 - Module `js_events` rendu `pub(crate)` (tests uniquement)
 
@@ -82,7 +251,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`codegen/html` découpé** — `mod.rs` (1 483 lignes) éclaté en modules ciblés (`shell`, `slots`, `elements`, `tags`, `components`) ; les signatures à 8 paramètres remplacées par un `GenContext` partagé
 - **Zéro `unwrap()` hors tests** — lint `clippy::unwrap_used` actif au niveau du crate ; les écritures infaillibles documentées par `.expect()`, les vrais risques éliminés
 - **`docs/runtime.md`** — référence d'architecture du runtime JS : modèle de réactivité, contrat des `data-webcore-*`, `bindFor` détaillé, délégation d'événements
-- 161 tests au total (unitaires, golden, intégration, perf)
 
 ---
 
@@ -99,7 +267,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Corrections (v2.6.0)
 
 - **Détection core bytes** — `class State{` remplace `class _S` dans `output.rs` ; le core était systématiquement compté à 420 octets fixes au lieu de refléter le nombre réel de composants réactifs
-- 8 nouveaux tests — 147 tests au total
 
 ---
 
@@ -112,7 +279,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Couleurs ANSI conditionnelles** — `error[parse]` (rouge gras), gutter `|` (cyan), caret `^` (rouge) ; désactivés automatiquement si `NO_COLOR=1` ou `TERM=dumb` ; `CompileError::Io` et `MissingLayout/Page/Component` reçoivent aussi des préfixes colorés
 - **Hints contextuels élargis** — cinq patterns déclenchent un message `= hint:` : `{}` vide, accolade fermante manquante, guillemets attendus, expression JS attendue, nom sans espaces
 - **`webc build` — suppression du préfixe redondant** — `"Build failed:"` retiré de `cli.rs` ; `CompileErrors::Display` affiche directement les erreurs puis le compte final
-- 2 nouveaux tests (NO_COLOR, file path) — 139 tests au total
 
 ### Performances internes (v2.5.2)
 
@@ -176,7 +342,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Améliorations (v2.5.0)
 
 - Exports `globalThis` nettoyés : `webcore_handle_click`, `webcore_handle_submit`, etc. retirés (plus nécessaires avec la délégation) ; seuls `webcore_navigate` (si routing) et `setLocale` (si i18n) restent exportés
-- 4 nouveaux tests — 132 tests au total
 
 ---
 
@@ -192,10 +357,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Hash + SRI sur `<link rel="preload">`** — le patch cherchait `href="..." as="script"` alors que la balise est émise `as="script" href="..."` ; le hint preload ne recevait donc jamais son `?v=hash` ni son attribut `integrity` ; corrigé
 - **Exemple `docs`** — `"style {}"` littéral dans `syntax.webc` était interprété comme interpolation vide ; échappé en `"style \{\}"`
-
-### Améliorations
-
-- 10 nouveaux tests — 128 tests au total
 
 ---
 
@@ -224,10 +385,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Expressions SSG étendues** — `eval_expr_with_locale` supporte maintenant : `items.length` (nombre d'éléments d'un tableau ou longueur d'une chaîne), `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; élimine les valeurs vides au pré-rendu SSG
 - **Validation des props à la compilation** — si un composant reçoit un prop non déclaré dans son bloc `props {}`, un avertissement `warning[props]: component 'X' received unknown prop 'y'` est émis sur stderr ; avertissement uniquement (la compilation continue)
 - **Imports de données build-time (JSON/TOML)** — `import posts from "data/posts.json"` dans un fichier `.webc` injecte les données à la compilation ; les fichiers JSON sont validés et émis comme `S.setQ("posts", <json>)` dans le runtime ; les fichiers TOML sont convertis en JSON via la crate `toml` ; sécurité : les chemins qui sortent du répertoire projet sont refusés
-
-### Améliorations
-
-- 5 nouveaux tests — 118 tests au total
 
 ---
 
@@ -275,7 +432,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Améliorations
 
-- 19 nouveaux tests par rapport à v1.5.0 — 105 tests au total
 - **Extension VSCode** — support de la coloration syntaxique pour `ref:`, `style:`, `webc:img`, `webc:transition`, CSS nesting (`&:hover`), `on:mount`/`on:destroy`, `key={}` dans `@for` ; 25 snippets ajoutés
 
 ---
@@ -287,10 +443,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`webc:img` — images optimisées** — directive `img webc:img src="/hero.png" alt="Hero"` compilée en `<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">` ; `loading="lazy"` et `decoding="async"` injectés automatiquement ; dimensions (`width`/`height`) lues dans `public/` à la compilation (prévient le layout shift / CLS) ; avertissement `warning[a11y]: <img> with webc:img is missing alt attribute` si `alt` est absent ; `webc:img` n'apparaît pas dans le HTML généré ; aucun JS émis — transformation purement compile-time ; nécessite le crate `imagesize`
 - **Fingerprinting des images** — chaque image dans `public/` reçoit un hash de contenu à `webc build` : `logo.png` → `logo.a3f9c1b2.png` ; extensions concernées : `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.ico`, `.avif` ; algorithme : FNV-1a 32 bits sur les octets du fichier → 8 caractères hex ; toutes les références dans les `.html` et `.css` générés sont mises à jour automatiquement ; toujours actif (aucune configuration nécessaire) ; avantage : cache-busting parfait — le navigateur met les images en cache indéfiniment, un nouveau contenu produit un nouveau nom de fichier
 
-### Améliorations
-
-- 3 nouveaux tests (fingerprinting, `webc:img`, avertissement `alt`) — 92 tests au total
-
 ---
 
 ## [1.4.0]
@@ -301,10 +453,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`style:prop={expr}`** — styles inline dynamiques : `div style:color={myColor}` émet `data-webcore-style-color="myColor"` ; `bindAttrs()` appelle `el.style.setProperty('color', evalCond(myColor, ...))` ; les tirets dans le nom de propriété sont préservés (`style:background-color`) ; peut coexister avec `style="..."` statique et `class:` sur le même élément ; tree-shaké via le flag `has_style_binding`
 - **Contenu par défaut des slots** — les layouts peuvent définir un contenu de repli pour les slots nommés : `slot sidebar { p "Contenu par défaut" }` ; si la page remplit le slot → contenu de la page utilisé ; si la page ne remplit pas le slot → contenu par défaut du layout utilisé ; les slots non remplis étaient précédemment supprimés silencieusement ; le slot `content` par défaut continue d'utiliser le corps de la page
 - **`webc:transition="name"`** — animations CSS sur les blocs conditionnels : `div webc:transition="fade" { ... }` ou `div webc:transition="slide" { ... }` ; transitions intégrées : `fade` (opacité 0→1) et `slide` (translateY -10px→0) ; fonctionne avec les blocs `@if` : entrée avec animation d'entrée, sortie avec animation de sortie ; attribut HTML `data-webcore-transition="name"` ; le JS injecte le CSS et utilise `requestAnimationFrame` + `transitionend` ; tree-shaké via le flag `has_transition`
-
-### Améliorations
-
-- 4 nouveaux golden tests (`ref:`, `style:`, slot default content, `webc:transition`) — 89 tests au total
 
 ---
 
@@ -321,10 +469,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Corrections
 
 - **Auto-injection `loading` / `error`** — les variables `loading: Boolean = true` et `error: String = ""` sont désormais injectées automatiquement par le parser lorsqu'un composant possède un bloc `http {}` ; les développeurs n'ont plus besoin de les déclarer manuellement dans `state`
-
-### Améliorations
-
-- 5 nouveaux golden tests (`http {}`, `head {}`, `$query.`, `class:`, `|debounce`) — 85 tests au total
 
 ---
 
@@ -393,7 +537,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `evalCond` gère le préfixe `$route.xxx` → `ROUTE_PARAMS['xxx']` lorsque des routes
   paramétrées sont présentes.
-- 7 nouveaux golden tests (76 au total).
 
 ---
 
@@ -550,7 +693,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.0] — (MVP initial)
+## [0.1.0]
 
 ### Ajouts
 

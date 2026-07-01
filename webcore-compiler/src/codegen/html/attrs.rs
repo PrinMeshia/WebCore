@@ -1,7 +1,7 @@
 use super::utils::html_escape;
 use super::HandlerMapping;
 use crate::codegen::attr_names;
-use crate::core::ast::{Attribute, AttributeValue};
+use crate::core::ast::{Attribute, AttributeValue, Span};
 use std::fmt::Write as _;
 
 /// Expand `bind:attr={expr}` into a value/checked attr + event handler pair.
@@ -50,25 +50,39 @@ pub(super) fn handle_ref_attr(attr_name: &str) -> Option<String> {
     ))
 }
 
-/// `class:name={expr}` → `Some(" data-webcore-class-name=\"expr\"")`; returns `None` otherwise.
-pub(super) fn handle_class_binding(attr_name: &str, expr: &str) -> Option<String> {
+/// `class:name={expr}` → `Some(" data-webcore-class-name=\"id\"")`; returns `None` otherwise.
+/// In v3, `id` is a compiled expression ID from `ctx.register_expr(expr, span)`.
+pub(super) fn handle_class_binding(
+    attr_name: &str,
+    expr: &str,
+    span: Span,
+    ctx: &mut super::GenContext<'_>,
+) -> Option<String> {
     let class_name = attr_name.strip_prefix("class:")?;
+    let id = ctx.register_expr(expr, span);
     Some(format!(
         " {}{}=\"{}\"",
         attr_names::CLASS_PREFIX,
         class_name,
-        html_escape(expr)
+        html_escape(&id)
     ))
 }
 
-/// `style:prop={expr}` → `Some(" data-webcore-style-prop=\"expr\"")`; returns `None` otherwise.
-pub(super) fn handle_style_binding(attr_name: &str, expr: &str) -> Option<String> {
+/// `style:prop={expr}` → `Some(" data-webcore-style-prop=\"id\"")`; returns `None` otherwise.
+/// In v3, `id` is a compiled expression ID from `ctx.register_expr(expr, span)`.
+pub(super) fn handle_style_binding(
+    attr_name: &str,
+    expr: &str,
+    span: Span,
+    ctx: &mut super::GenContext<'_>,
+) -> Option<String> {
     let prop_name = attr_name.strip_prefix("style:")?;
+    let id = ctx.register_expr(expr, span);
     Some(format!(
         " {}{}=\"{}\"",
         attr_names::STYLE_PREFIX,
         prop_name,
-        html_escape(expr)
+        html_escape(&id)
     ))
 }
 

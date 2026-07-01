@@ -108,8 +108,16 @@ fn parse_if_block(inner: Pair<Rule>) -> Result<Element, ParseError> {
             Rule::else_branch => {
                 let mut else_content = Vec::new();
                 for elem in part.into_inner() {
-                    if elem.as_rule() == Rule::element {
-                        else_content.push(parse_element(elem)?);
+                    match elem.as_rule() {
+                        Rule::element => {
+                            else_content.push(parse_element(elem)?);
+                        }
+                        // `@else @if cond { ... }` or `@else if cond { ... }` —
+                        // both have identical inner structure; parse the same way.
+                        Rule::if_statement | Rule::else_if_stmt => {
+                            else_content.push(parse_if_block(elem)?);
+                        }
+                        _ => {}
                     }
                 }
                 else_branch = Some(else_content);

@@ -3,12 +3,11 @@ layout DocsLayout {
         DocsShell {}
         div class="announcement-bar" {
             span class="announcement-text" {
-                "🎉 "
-                strong { "WebCore v2.10.1" }
-                " — @defer, shorthand props, spread attrs, LSP rename, content-hash JS, correctifs compatibilité navigateur"
+                strong { "WebCore v3.2 Preview" }
+                " — shared cached runtime (one webcore.js for the whole site), LSP code actions, semantic tokens, real-time diagnostics"
             }
-            a href="https://github.com/PrinMeshia/Webcore/blob/main/CHANGELOG.md" class="announcement-link" { "Voir le changelog →" }
-            button class="announcement-close" aria-label="Fermer" { "×" }
+            a href="https://github.com/PrinMeshia/Webcore/blob/main/CHANGELOG.md" class="announcement-link" { "Changelog →" }
+            button class="announcement-close" aria-label="Close" { "×" }
         }
         div class="scroll-progress" {}
         header class="site-header" {
@@ -16,7 +15,7 @@ layout DocsLayout {
                 link to="/" class="logo" {
                     span class="logo-mark" { "▸" }
                     span class="logo-text" { "WebCore" }
-                    span class="logo-version" { "v2.10.1" }
+                    span class="logo-version" { "v3.2" }
                 }
                 nav class="site-nav" {
                     link to="/" { "Home" }
@@ -25,7 +24,7 @@ layout DocsLayout {
                     link to="/features" { "Features" }
                     link to="/examples" { "Examples" }
                 }
-                button class="nav-mobile-toggle" aria-label="Menu" { "☰" }
+                button class="nav-mobile-toggle" aria-label="Open menu" { "☰" }
             }
         }
         div class="site-body" {
@@ -38,7 +37,7 @@ layout DocsLayout {
             p {
                 "Built with "
                 strong { "WebCore" }
-                " v2.10.1 · "
+                " v3.2 · "
                 a href="https://github.com/PrinMeshia/Webcore" { "GitHub" }
                 " · "
                 a href="https://github.com/PrinMeshia/Webcore/releases" { "Releases" }

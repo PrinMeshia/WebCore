@@ -97,7 +97,6 @@ pub(crate) fn print_bundle_analysis(js: &str) {
         ("bindAttrs", "bindAttrs (dyn attrs)", 180),
         ("bindClassBindings", "bindClassBindings (class:)", 140),
         ("bindValidation", "bindValidation", 640),
-        ("evalCond", "evalCond (reactive eval)", 160),
         ("const LOCALES=", "i18n / t()", 210),
         ("const ROUTES=", "router (param routes)", 380),
         ("const toFile=", "router (simple nav)", 90),

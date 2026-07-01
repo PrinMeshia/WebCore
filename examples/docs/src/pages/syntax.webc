@@ -9,15 +9,17 @@ page "syntax" {
     }
 
     div class="quick-ref" {
-        code { "app \{\}" }
-        code { "layout \{\}" }
-        code { "page \{\}" }
-        code { "component \{\}" }
-        code { "store \{\}" }
-        code { "state \{\}" }
-        code { "computed \{\}" }
-        code { "props \{\}" }
+        code { "app {}" }
+        code { "layout {}" }
+        code { "page {}" }
+        code { "component {}" }
+        code { "import X from" }
+        code { "store {}" }
+        code { "state {}" }
+        code { "computed {}" }
+        code { "props {}" }
         code { "@if / @else" }
+        code { "@else if" }
         code { "@for" }
         code { "@for key=" }
         code { "@for item, i" }
@@ -34,8 +36,8 @@ page "syntax" {
         code { "slot content" }
         code { "link to=" }
         code { "validate:" }
-        code { "http \{\}" }
-        code { "head \{\}" }
+        code { "http {}" }
+        code { "head {}" }
         code { "$query." }
         code { "class:" }
         code { "|debounce" }
@@ -50,6 +52,7 @@ page "syntax" {
         code { "|once|self" }
         code { "props default" }
         code { "webc watch" }
+        code { "@defer" }
     }
 
     section class="doc-section" {
@@ -60,14 +63,55 @@ page "syntax" {
             " block is the entry point. It declares the theme, layout and route table."
         }
         pre class="code-block" {
-"app MyApp \{
+"app MyApp {
     theme: \"default\"
     layout: MainLayout
-    routes \{
+    routes {
         \"/\":      HomePage
         \"/about\": AboutPage
-    \}
-\}"
+    }
+}"
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "Component imports "
+            span class="version-tag" { "v3.0" }
+        }
+        p {
+            "Components live in separate files and are declared at the top of the file that uses them."
+            " Imports are resolved at compile time — like a C "
+            code { "#include" }
+            ". There is "
+            strong { "no runtime footprint" }
+            " and no chunk system: the component code is inlined into each page that imports it."
+        }
+        pre class="code-block" {
+"// src/pages/home.webc
+import Button  from \"../components/Button.webc\"
+import Counter from \"../components/Counter.webc\"
+
+page \"home\" {
+    Counter {}
+    Button label=\"Click me\" {}
+}
+
+// src/pages/about.webc
+import Button from \"../components/Button.webc\"
+// Counter is NOT imported — absent from the about page build
+
+page \"about\" {
+    Button label=\"Back\" {}
+}"
+        }
+        div class="callout-tip" {
+            strong { "Per-page dead-code elimination: " }
+            "A component not imported on a page contributes zero HTML, CSS or JS to that page."
+            " CSS dead-code elimination is automatic — only rules from imported components are compiled."
+        }
+        div class="callout" {
+            "Pages without import declarations have access to all components in the project (v2-compatible behaviour)."
         }
     }
 
@@ -80,30 +124,30 @@ page "syntax" {
         }
         pre class="code-block" {
 "// Single-slot layout
-layout MainLayout \{
-    header \{ nav \{ link to=\"/\" \{ \"Home\" \} \} \}
-    main   \{ slot content \}
-    footer \{ p \"2025 My App\" \}
-\}
+layout MainLayout {
+    header { nav { link to=\"/\" { \"Home\" } } }
+    main   { slot content }
+    footer { p \"2025 My App\" }
+}
 
 // Multi-zone layout (named slots)
-layout DashLayout \{
-    header \{ slot header  \}
-    aside  \{ slot sidebar \}
-    main   \{ slot content \}
-\}"
+layout DashLayout {
+    header { slot header  }
+    aside  { slot sidebar }
+    main   { slot content }
+}"
         }
         p {
             "Pages fill named slots with "
-            code { "slot name \{ ... \}" }
+            code { "slot name { ... }" }
             " blocks."
         }
         pre class="code-block" {
-"page \"dashboard\" \{
-    slot header  \{ h1 \"Dashboard\" \}
-    slot sidebar \{ nav \{ link to=\"/\" \"Home\" \} \}
+"page \"dashboard\" {
+    slot header  { h1 \"Dashboard\" }
+    slot sidebar { nav { link to=\"/\" \"Home\" } }
     p \"Main content\"   // -> default content slot
-\}"
+}"
         }
     }
 
@@ -111,16 +155,16 @@ layout DashLayout \{
         h2 { "Elements and content" }
         p { "Any standard HTML tag is valid. Inline text or block children — both work." }
         pre class="code-block" {
-"div class=\"container\" \{
+"div class=\"container\" {
     h1 \"Hello world\"
     p  \"Plain text node\"
-    p  \{ \"Mixed: \" strong \{ \"bold\" \} \" and plain.\" \}
+    p  { \"Mixed: \" strong { \"bold\" } \" and plain.\" }
     img src=\"/logo.png\" alt=\"Logo\"
-    ul \{
+    ul {
         li \"Item one\"
         li \"Item two\"
-    \}
-\}"
+    }
+}"
         }
     }
 
@@ -128,15 +172,15 @@ layout DashLayout \{
         h2 { "Interpolation" }
         p {
             "Expressions inside "
-            code { "\{\}" }
+            code { "{}" }
             " are evaluated reactively. They support arithmetic, comparisons, function calls and computed variables."
         }
         pre class="code-block" {
-"p \"Count: \{count\}\"
-p \"Next: \{count + 1\}\"
-p \"Max: \{max(a, b)\}\"
-p \"Full name: \{fullName\}\"    // computed var
-div class=\{dynamicClass\} \{ \}"
+"p \"Count: \{count}\"
+p \"Next: \{count + 1}\"
+p \"Max: \{max(a, b)}\"
+p \"Full name: \{fullName}\"    // computed var
+div class=\{dynamicClass} { }"
         }
     }
 
@@ -144,26 +188,37 @@ div class=\{dynamicClass\} \{ \}"
         h2 { "Control flow" }
         pre class="code-block" {
 "// Conditional
-@if count > 0 \{
+@if count > 0 {
     p \"Positive\"
-\} @else \{
+} @else {
     p \"Zero or negative\"
-\}
+}
+
+// @else if chain — v3.0
+@if status === \"idle\" {
+    span \"Waiting\"
+} @else if status === \"loading\" {
+    span \"Loading…\"
+} @else if status === \"error\" {
+    span \"Error\"
+} @else {
+    span \"Done\"
+}
 
 // List — full re-render on change
-@for item in items \{
-    li \"\{item\}\"
-\}
+@for item in items {
+    li \"\{item}\"
+}
 
 // List with key — DOM diffing (only changed nodes patched)
-@for post key=post.id in posts \{
-    article \"\{post.title\}\"
-\}
+@for post key=post.id in posts {
+    article \"\{post.title}\"
+}
 
 // Validation error block
-@error \"email\" \{
+@error \"email\" {
     span class=\"error\" \"Invalid email\"
-\}"
+}"
         }
         div class="callout" {
             strong { "Key diffing: " }
@@ -174,6 +229,14 @@ div class=\{dynamicClass\} \{ \}"
             " or "
             code { "item.slug" }
             ". Added nodes are inserted, removed ones deleted, unchanged ones stay — preserving focus and animation state."
+        }
+        div class="callout-tip" {
+            strong { "@else if (v3.0): " }
+            "Chain as many "
+            code { "@else if" }
+            " clauses as needed. Each compiles to a nested "
+            code { "Element::If" }
+            " in the AST — zero extra runtime overhead."
         }
     }
 
@@ -188,14 +251,14 @@ div class=\{dynamicClass\} \{ \}"
             " to receive the 0-based index of each item."
         }
         pre class="code-block" {
-"@for item, i in items \{
-    li \"\{i\}. \{item\}\"
-\}
+"@for item, i in items {
+    li \"\{i}. \{item}\"
+}
 
 // Ranking with computed position
-@for entry, rank in scores \{
-    li \"#\{rank + 1\} — \{entry.name\}: \{entry.score\}\"
-\}"
+@for entry, rank in scores {
+    li \"#\{rank + 1} — \{entry.name}: \{entry.score}\"
+}"
         }
     }
 
@@ -214,19 +277,19 @@ div class=\{dynamicClass\} \{ \}"
             " chain at parse time — zero runtime overhead."
         }
         pre class="code-block" {
-"@switch status \{
-    @case \"active\"   \{ span class=\"badge green\"  \"Active\"   \}
-    @case \"pending\"  \{ span class=\"badge yellow\" \"Pending\"  \}
-    @case \"archived\" \{ span class=\"badge gray\"   \"Archived\" \}
-    @default          \{ span class=\"badge\"        \"Unknown\"  \}
-\}
+"@switch status {
+    @case \"active\"   { span class=\"badge green\"  \"Active\"   }
+    @case \"pending\"  { span class=\"badge yellow\" \"Pending\"  }
+    @case \"archived\" { span class=\"badge gray\"   \"Archived\" }
+    @default          { span class=\"badge\"        \"Unknown\"  }
+}
 
 // Expression switch
-@switch count % 3 \{
-    @case 0 \{ p \"Divisible by 3\" \}
-    @case 1 \{ p \"Remainder 1\"    \}
-    @case 2 \{ p \"Remainder 2\"    \}
-\}"
+@switch count % 3 {
+    @case 0 { p \"Divisible by 3\" }
+    @case 1 { p \"Remainder 1\"    }
+    @case 2 { p \"Remainder 2\"    }
+}"
         }
         div class="callout" {
             "The expression is compared with "
@@ -243,25 +306,25 @@ div class=\{dynamicClass\} \{ \}"
         h2 { "Events" }
         p {
             "Use "
-            code { "on:<type>=\{expr\}" }
+            code { "on:<type>=\{expr}" }
             " on any element. Multiple instructions can be separated by "
             code { ";" }
             "."
         }
         pre class="code-block" {
-"button on:click=\{count += 1\}                    \{ \"+\" \}
-button on:click=\{count = max(0, count - 1)\}      \{ \"−\" \}
-input  on:input=\{name = event.target.value\}
-form   on:submit=\{handleSubmit\}
+"button on:click=\{count += 1}                    { \"+\" }
+button on:click=\{count = max(0, count - 1)}      { \"−\" }
+input  on:input=\{name = event.target.value}
+form   on:submit=\{handleSubmit}
 
 // Navigation
-button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
+button on:click=\{webcore_navigate(\"/about\")} { \"Go\" }
 
 // Multi-instruction handler
-button on:click=\{items = [...items, newItem]; draft = \"\"\} \{ \"Add\" \}
+button on:click=\{items = [...items, newItem]; draft = \"\"} { \"Add\" }
 
 // Inter-component event
-button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}"
+button on:click=\{emit(\"ping\", count)} { \"Ping\" }"
         }
     }
 
@@ -276,8 +339,8 @@ input disabled
 input required
 
 // Dynamic expression
-div class=\{dynamicClass\}
-input value=\{count\}
+div class=\{dynamicClass}
+input value=\{count}
 
 // Validation attributes
 input name=\"email\"
@@ -293,18 +356,18 @@ input name=\"email\"
             span class="version-tag" { "v1.2.0" }
         }
         p {
-            code { "bind:attr=\{var\}" }
+            code { "bind:attr=\{var}" }
             " is shorthand for the attribute + its update handler — keeps value and state in sync automatically."
         }
         pre class="code-block" {
 "// bind:value syncs on every keystroke (on:input)
-input type=\"text\" bind:value=\{name\}
+input type=\"text\" bind:value=\{name}
 
 // bind:checked syncs on toggle (on:change)
-input type=\"checkbox\" bind:checked=\{accepted\}
+input type=\"checkbox\" bind:checked=\{accepted}
 
 // Equivalent long form (what bind: expands to)
-input type=\"text\" value=\{name\} on:input=\{name = event.target.value\}"
+input type=\"text\" value=\{name} on:input=\{name = event.target.value}"
         }
         div class="callout-tip" {
             code { "bind:value" }
@@ -322,12 +385,12 @@ input type=\"text\" value=\{name\} on:input=\{name = event.target.value\}"
         h2 { "Navigation" }
         pre class="code-block" {
 "// Declarative SPA link
-link to=\"/about\" \{ \"About\" \}
-link to=\"/about\" class=\"nav-link\" \{ \"About\" \}
+link to=\"/about\" { \"About\" }
+link to=\"/about\" class=\"nav-link\" { \"About\" }
 
 // Programmatic
-button on:click=\{webcore_navigate(\"/about\")\} \{ \"Go\" \}
-button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
+button on:click=\{webcore_navigate(\"/about\")} { \"Go\" }
+button on:click=\{webcore_navigate(\"/user/\" + userId)} { \"Profile\" }"
         }
         div class="callout-tip" {
             "Navigation uses "
@@ -345,7 +408,7 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
         }
         p {
             "The "
-            code { "http \{\}" }
+            code { "http {}" }
             " block triggers a declarative JSON fetch inside "
             code { "DOMContentLoaded" }
             ". "
@@ -355,15 +418,15 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             " state variables are auto-injected — no need to declare them."
         }
         pre class="code-block" {
-"component Posts \{
-    state \{ posts: List = null \}
-    http \{ get: \"/api/posts\"  into: posts \}
-    view \{
-        @if loading \{ p \"Loading...\" \}
-        @if error   \{ p \"Error: \{error\}\" \}
-        @for post in posts \{ li \"\{post.title\}\" \}
-    \}
-\}"
+"component Posts {
+    state { posts: List = null }
+    http { get: \"/api/posts\"  into: posts }
+    view {
+        @if loading { p \"Loading...\" }
+        @if error   { p \"Error: \{error}\" }
+        @for post in posts { li \"\{post.title}\" }
+    }
+}"
         }
         div class="callout" {
             code { "loading" }
@@ -382,7 +445,7 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
         }
         p {
             "The "
-            code { "head \{\}" }
+            code { "head {}" }
             " block inside a "
             code { "page" }
             " customizes the HTML "
@@ -392,14 +455,14 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             "."
         }
         pre class="code-block" {
-"page \"article\" \{
-    head \{
+"page \"article\" {
+    head {
         title \"My Article\"
         meta description=\"A WebCore blog post\"
         meta og:title=\"My Article\"
-    \}
+    }
     h1 \"Hello\"
-\}"
+}"
         }
     }
 
@@ -418,9 +481,9 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             " reference is present."
         }
         pre class="code-block" {
-"p \"Search: \{$query.search\}\"
-p \"Page: \{$query.page\}\"
-p \"Sort: \{$query.sort\}\""
+"p \"Search: \{$query.search}\"
+p \"Page: \{$query.page}\"
+p \"Sort: \{$query.sort}\""
         }
     }
 
@@ -430,15 +493,15 @@ p \"Sort: \{$query.sort\}\""
             span class="version-tag" { "v1.3.0" }
         }
         p {
-            code { "class:name=\{expr\}" }
+            code { "class:name=\{expr}" }
             " binds a CSS class to a boolean expression. The class is added when truthy, removed when falsy. Handled reactively by "
             code { "bindAttrs()" }
             "."
         }
         pre class="code-block" {
-"div class:active=\{isOpen\} \{ \"Content\" \}
-div class:active=\{isOpen\} class:hidden=\{!visible\} \{ \"Content\" \}
-button class:disabled=\{count == 0\} on:click=\{count -= 1\} \{ \"-\" \}"
+"div class:active=\{isOpen} { \"Content\" }
+div class:active=\{isOpen} class:hidden=\{!visible} { \"Content\" }
+button class:disabled=\{count == 0} on:click=\{count -= 1} { \"-\" }"
         }
         div class="callout-tip" {
             "Multiple "
@@ -463,10 +526,10 @@ button class:disabled=\{count == 0\} on:click=\{count -= 1\} \{ \"-\" \}"
         }
         pre class="code-block" {
 "// Search field — avoids an API call on every keystroke
-input on:input|debounce=\{search = event.target.value\}
+input on:input|debounce=\{search = event.target.value}
 
 // Works with any event type
-input on:keyup|debounce=\{query = event.target.value\}"
+input on:keyup|debounce=\{query = event.target.value}"
         }
         div class="callout-tip" {
             "Useful for search inputs, list filters, or any handler that should wait for a pause in user activity."
@@ -482,27 +545,27 @@ input on:keyup|debounce=\{query = event.target.value\}"
             "Route segments prefixed with "
             code { ":" }
             " capture dynamic values. Access them in views with "
-            code { "\{$route.paramName\}" }
+            code { "\{$route.paramName}" }
             "."
         }
         pre class="code-block" {
 "// src/app.webc
-app MyApp \{
-    routes \{
+app MyApp {
+    routes {
         \"/\":           HomePage
         \"/post/:slug\": PostPage
         \"/user/:id\":   UserPage
-    \}
-\}
+    }
+}
 
 // src/pages/post.webc
-page \"post\" \{
-    h1 \"Article: \{$route.slug\}\"
-\}
+page \"post\" {
+    h1 \"Article: \{$route.slug}\"
+}
 
 // Navigate to a parameterized route
-link to=\"/post/hello-world\" \{ \"Hello World\" \}
-button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
+link to=\"/post/hello-world\" { \"Hello World\" }
+button on:click=\{webcore_navigate(\"/user/\" + userId)} { \"Profile\" }"
         }
         div class="callout" {
             "The compiler generates a "
@@ -529,23 +592,23 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             " needed — useful for focus management and imperative DOM calls."
         }
         pre class="code-block" {
-"component SearchBar \{
-    state \{ query: String = \"\" \}
-    on:mount \{
+"component SearchBar {
+    state { query: String = \"\" }
+    on:mount {
         refs['searchInput'].focus();
-    \}
-    view \{
+    }
+    view {
         input ref:searchInput=true
-              on:input=\{query = event.target.value\}
+              on:input=\{query = event.target.value}
               placeholder=\"Search...\"
-    \}
-\}"
+    }
+}"
         }
         div class="callout" {
             "The HTML attribute "
             code { "data-webcore-ref=\"name\"" }
             " is emitted on the element. "
-            code { "const refs = \{\}" }
+            code { "const refs = {}" }
             " is declared at block scope and populated in "
             code { "DOMContentLoaded" }
             ". Tree-shaken via "
@@ -560,7 +623,7 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             span class="version-tag" { "v1.4.0" }
         }
         p {
-            code { "style:prop=\{expr\}" }
+            code { "style:prop=\{expr}" }
             " binds a CSS property to a reactive expression. Applied via "
             code { "el.style.setProperty(...)" }
             " in "
@@ -568,16 +631,16 @@ button on:click=\{webcore_navigate(\"/user/\" + userId)\} \{ \"Profile\" \}"
             ". Dashes in property names are preserved."
         }
         pre class="code-block" {
-"div style:color=\{textColor\} \{ \"Colored text\" \}
-div style:background-color=\{bg\}
-    style:font-size=\{size\}
-    \{ \"Multiple style bindings\" \}
+"div style:color=\{textColor} { \"Colored text\" }
+div style:background-color=\{bg}
+    style:font-size=\{size}
+    { \"Multiple style bindings\" }
 
 // Coexists with static style and class:
 div style=\"padding: 1rem\"
-    style:color=\{textColor\}
-    class:active=\{isOpen\}
-    \{ \"Content\" \}"
+    style:color=\{textColor}
+    class:active=\{isOpen}
+    { \"Content\" }"
         }
         div class="callout-tip" {
             "Emits "
@@ -602,28 +665,28 @@ div style=\"padding: 1rem\"
         }
         pre class="code-block" {
 "// Layout with default sidebar content
-layout AppLayout \{
-    aside \{
-        slot sidebar \{
+layout AppLayout {
+    aside {
+        slot sidebar {
             p \"Default navigation\"
-            link to=\"/\" \{ \"Home\" \}
-        \}
-    \}
-    main \{ slot content \}
-\}
+            link to=\"/\" { \"Home\" }
+        }
+    }
+    main { slot content }
+}
 
 // Page A — overrides sidebar
-page \"dashboard\" \{
-    slot sidebar \{
-        nav \{ link to=\"/settings\" \{ \"Settings\" \} \}
-    \}
+page \"dashboard\" {
+    slot sidebar {
+        nav { link to=\"/settings\" { \"Settings\" } }
+    }
     h1 \"Dashboard\"
-\}
+}
 
 // Page B — uses default sidebar
-page \"about\" \{
+page \"about\" {
     h1 \"About\"
-\}"
+}"
         }
         div class="callout" {
             "Before v1.4.0, unfilled named slots were silently dropped. The default "
@@ -645,18 +708,18 @@ page \"about\" \{
         }
         pre class="code-block" {
 "// Fade transition (opacity 0→1)
-@if isOpen \{
-    div webc:transition=\"fade\" \{
+@if isOpen {
+    div webc:transition=\"fade\" {
         p \"This panel fades in and out\"
-    \}
-\}
+    }
+}
 
 // Slide transition (translateY -10px→0)
-@if showPanel \{
-    div webc:transition=\"slide\" \{
+@if showPanel {
+    div webc:transition=\"slide\" {
         p \"This panel slides down\"
-    \}
-\}"
+    }
+}"
         }
         div class="callout" {
             "Built-in transitions: "
@@ -750,7 +813,7 @@ icons/arrow.svg   →  icons/arrow.7b3c9e4d.svg
             "Nested rules using the "
             code { "&" }
             " selector are now valid inside "
-            code { "style \{\}" }
+            code { "style {}" }
             " blocks. They are flattened to scoped CSS at compile time."
         }
         pre class="code-block" {
@@ -865,23 +928,23 @@ $effect(() => {
         }
         pre class="code-block" {
 "// Multiple root elements — no div wrapper
-component CardContent \{
-    view \{
+component CardContent {
+    view {
         <>
             h2 \"Title\"
             p \"Description\"
-            span class=\"badge\" \{ \"New\" \}
+            span class=\"badge\" { \"New\" }
         </>
-    \}
-\}
+    }
+}
 
 // Inside @if — avoids an unnecessary wrapper
-@if isLoggedIn \{
+@if isLoggedIn {
     <>
         p \"Welcome back!\"
-        button on:click=\{logout\} \{ \"Sign out\" \}
+        button on:click=\{logout} { \"Sign out\" }
     </>
-\}"
+}"
         }
         div class="callout-tip" {
             "The compiler renders fragment children "
@@ -917,21 +980,21 @@ component CardContent \{
         }
         pre class="code-block" {
 "// Stop propagation
-button on:click|stop=\{count += 1\} \{ \"+\" \}
+button on:click|stop=\{count += 1} { \"+\" }
 
 // Prevent form submission default
-form on:submit|prevent=\{handleSubmit\} \{ ... \}
+form on:submit|prevent=\{handleSubmit} { ... }
 
 // Only fires once
-button on:click|once=\{showBanner = true\} \{ \"Show once\" \}
+button on:click|once=\{showBanner = true} { \"Show once\" }
 
 // Only fires when clicking the element itself, not a child
-div on:click|self=\{collapsed = !collapsed\} \{
-    span \{ \"Child click won't trigger parent\" \}
-\}
+div on:click|self=\{collapsed = !collapsed} {
+    span { \"Child click won't trigger parent\" }
+}
 
 // Combine modifiers
-form on:submit|stop|prevent=\{handleSubmit\} \{ ... \}"
+form on:submit|stop|prevent=\{handleSubmit} { ... }"
         }
     }
 
@@ -944,24 +1007,24 @@ form on:submit|stop|prevent=\{handleSubmit\} \{ ... \}"
             "Props can declare a default value used when the caller omits them."
         }
         pre class="code-block" {
-"component Badge \{
-    props \{
+"component Badge {
+    props {
         label: String = \"N/A\"
         color: String = \"gray\"
-    \}
-    view \{
-        span class=\{color\} \"Status: \{label\}\"
-    \}
-\}
+    }
+    view {
+        span class=\{color} \"Status: \{label}\"
+    }
+}
 
 // Fully omitted — both defaults apply
-Badge \{\}
+Badge {}
 
 // Partial override — color gets its default
-Badge label=\"Active\" \{\}
+Badge label=\"Active\" {}
 
 // Full override
-Badge label=\"Active\" color=\"green\" \{\}"
+Badge label=\"Active\" color=\"green\" {}"
         }
         div class="callout" {
             "Default values are injected "

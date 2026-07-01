@@ -7,86 +7,87 @@ component FeatureCard {
     }
     view {
         div class="feature-card" {
-            div class="feature-icon-wrap" {
-                span class="feature-icon" { "{icon}" }
-            }
             div class="feature-top" {
-                h3 class="feature-title" { "{title}" }
+                div class="feature-icon-wrap" {
+                    span class="feature-icon" { "{icon}" }
+                }
                 span class="feature-tag" { "{tag}" }
             }
+            h3 class="feature-title" { "{title}" }
             p class="feature-desc" { "{desc}" }
         }
     }
     style {
         .feature-card {
-            background: rgba(30, 41, 59, 0.5);
+            background: #fff;
             border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-md);
             padding: var(--spacing-lg);
             display: flex;
             flex-direction: column;
-            gap: var(--spacing-md);
+            gap: var(--spacing-sm);
             min-width: 0;
             position: relative;
             overflow: hidden;
-            transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+            transition: border-color 0.15s, transform 0.15s;
         }
-        .feature-card::after {
+        .feature-card::before {
             content: '';
             position: absolute;
             top: 0;
             left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, var(--color-primary), #818CF8);
+            bottom: 0;
+            width: 3px;
+            background: var(--color-primary);
             opacity: 0;
-            transition: opacity 0.2s;
+            transition: opacity 0.15s;
         }
         .feature-card:hover {
-            border-color: rgba(91, 74, 247, 0.4);
-            transform: translateY(-3px);
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+            border-color: rgba(200, 75, 17, 0.3);
+            transform: translateY(-2px);
         }
-        .feature-card:hover::after { opacity: 1; }
+        .feature-card:hover::before { opacity: 1; }
+        .feature-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-sm);
+        }
         .feature-icon-wrap {
-            width: 2.25rem;
-            height: 2.25rem;
+            width: 2rem;
+            height: 2rem;
             border-radius: var(--radius-md);
-            background: rgba(91, 74, 247, 0.1);
-            border: 1px solid rgba(91, 74, 247, 0.15);
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
         }
-        .feature-icon { font-size: 1.1rem; line-height: 1; }
-        .feature-top {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: var(--spacing-sm);
-        }
+        .feature-icon { font-size: 1rem; line-height: 1; }
         .feature-title {
-            font-size: 0.925rem;
-            font-weight: 700;
+            font-size: 0.875rem;
+            font-weight: 800;
             color: var(--color-text);
             line-height: 1.3;
+            letter-spacing: -0.01em;
         }
         .feature-tag {
-            font-size: 0.62rem;
-            font-weight: 700;
+            font-size: 0.58rem;
+            font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.07em;
+            letter-spacing: 0.08em;
             color: var(--color-primary);
-            background: rgba(91, 74, 247, 0.1);
-            border: 1px solid rgba(91, 74, 247, 0.18);
+            background: rgba(200, 75, 17, 0.07);
+            border: 1px solid rgba(200, 75, 17, 0.18);
             padding: 2px 6px;
-            border-radius: 999px;
+            border-radius: 2px;
             white-space: nowrap;
             flex-shrink: 0;
+            font-family: var(--font-mono);
         }
         .feature-desc {
-            font-size: 0.85rem;
+            font-size: 0.825rem;
             color: var(--color-muted);
             line-height: 1.65;
             overflow-wrap: break-word;

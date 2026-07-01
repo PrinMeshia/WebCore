@@ -148,10 +148,34 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Extract changelog notes
+        run: |
+          # Extract the section for this tag from CHANGELOG.md.
+          # Stops at the next ## [ header or at a --- separator line.
+          awk -v tag="[$RELEASE_TAG]" '
+            /^## / {
+              if (found) exit
+              if (index($0, tag)) found = 1
+              next
+            }
+            /^---$/ { if (found) exit }
+            found     { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [ ! -s release_notes.md ]; then
+            echo "::warning::No CHANGELOG entry found for $RELEASE_TAG — falling back to empty notes."
+            printf "No changelog entry found for this version.\nSee [CHANGELOG.md](CHANGELOG.md).\n" \
+              > release_notes.md
+          fi
 
       - name: Publish release with assets
         env:
@@ -171,7 +195,7 @@ jobs:
           else
             gh release create "$RELEASE_TAG" artifacts/* \
               --title "$RELEASE_TAG" \
-              --generate-notes \
+              --notes-file release_notes.md \
               --draft
           fi
           gh release edit "$RELEASE_TAG" --draft=false

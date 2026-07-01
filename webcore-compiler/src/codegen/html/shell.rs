@@ -101,9 +101,8 @@ pub(super) fn emit_html_shell(
         )
         .expect("write! to String is infallible");
     }
-    if needs_js {
-        html.push_str("  <link rel=\"preload\" as=\"script\" href=\"/assets/webcore.js\">\n");
-    }
+    // v3: JS is inlined per-page, no preload hint needed
+    let _ = needs_js; // consumed below in generate_page for inline <script>
     html.push_str("</head>\n<body>\n");
     html
 }
@@ -123,6 +122,12 @@ pub(super) fn generate_layout_shell(
         project_root,
         ssg: None,
         counter: 0,
+        compiled_vars: None,
+        expr_map: vec![],
+        expr_spans: vec![],
+        expr_counter: 0,
+        has_route_params: false,
+        has_query_params: false,
     };
 
     for element in &layout.content {
@@ -182,6 +187,12 @@ pub(super) fn generate_page_content(
         project_root,
         ssg: None,
         counter: 0,
+        compiled_vars: None,
+        expr_map: vec![],
+        expr_spans: vec![],
+        expr_counter: 0,
+        has_route_params: false,
+        has_query_params: false,
     };
 
     for element in &page.content {
@@ -210,6 +221,12 @@ pub(super) fn generate_component_content(
         project_root,
         ssg: None,
         counter: 0,
+        compiled_vars: None,
+        expr_map: vec![],
+        expr_spans: vec![],
+        expr_counter: 0,
+        has_route_params: false,
+        has_query_params: false,
     };
 
     for element in &component.view {

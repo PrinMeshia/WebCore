@@ -202,8 +202,12 @@ pub(super) fn collect_on_destroy_bodies(document: &WebCoreDocument) -> Vec<Strin
         .collect()
 }
 
-/// Build the semicolon-separated sequence of rebind calls for a given feature set.
-pub(super) fn rebind_seq(f: &RuntimeFeatures, needs_bind: bool) -> String {
+/// Build the rebind call sequence for v3.
+///
+/// v3 bind functions read the module-scoped `_e` expression map via closure
+/// (not as a parameter), so user-authored `bind()` calls inside `on:mount`
+/// blocks work identically to the framework's own rebind calls.
+pub(super) fn rebind_seq_v3(f: &RuntimeFeatures, needs_bind: bool) -> String {
     let mut parts: Vec<&str> = Vec::new();
     if needs_bind {
         parts.push("bind()");

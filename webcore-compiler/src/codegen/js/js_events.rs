@@ -12,7 +12,7 @@ static RE_SENT: OnceLock<Regex> = OnceLock::new();
 
 /// Pre-compiled, longest-first sorted variable replacement regexes for a document.
 ///
-/// Build once per `generate_runtime_js_with_vars` call instead of recompiling
+/// Build once per runtime-generation call instead of recompiling
 /// on every expression. Sorting longest-first prevents shorter names from
 /// matching inside longer ones (e.g. `count` inside `countdown`).
 pub(crate) struct CompiledVars(pub(crate) Vec<(String, Regex)>);
@@ -32,15 +32,21 @@ impl CompiledVars {
     }
 
     fn replace_into(&self, expr: &str) -> String {
-        let mut result = std::borrow::Cow::Borrowed(expr);
+        let mut result: String = expr.to_owned();
         for (var, re) in &self.0 {
+            // Sentinel-protect property accesses (e.g. `obj.done`) so `\bdone\b` doesn't
+            // match the property name — the dot is a word-boundary in regex but `obj.done`
+            // is not a state-var reference.
+            let prop_pat = format!(".{var}");
+            let sentinel = format!(".__WCPROP_{var}__");
+            let protected = result.replace(&prop_pat, &sentinel);
             let replacement = format!("S.get('{var}')");
-            let next = re.replace_all(&result, replacement.as_str());
-            if let std::borrow::Cow::Owned(s) = next {
-                result = std::borrow::Cow::Owned(s);
-            }
+            let replaced = re
+                .replace_all(&protected, replacement.as_str())
+                .into_owned();
+            result = replaced.replace(&sentinel, &prop_pat);
         }
-        result.into_owned()
+        result
     }
 }
 
@@ -298,6 +304,33 @@ pub(super) fn route_to_js_regex(pattern: &str) -> (String, Vec<String>) {
     (regex, params)
 }
 
+/// Compile a read expression into a JS closure string (v3 compiled expressions).
+/// e.g. `"count > 0"` → `"()=>S.get('count')>0"`
+/// Used for: interpolations, @if conditions, class:/style: bindings, dynamic attrs.
+pub(crate) fn compile_read_expr(
+    expr: &str,
+    vars: &CompiledVars,
+    has_route_params: bool,
+    has_query_params: bool,
+) -> String {
+    static RE_ROUTE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static RE_QUERY: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
+    let mut compiled = replace_store_and_local(expr.trim(), vars);
+    compiled = replace_utils_short(&compiled);
+    if has_route_params {
+        let re = RE_ROUTE
+            .get_or_init(|| Regex::new(r"\$route\.([a-zA-Z_]\w*)").expect("hardcoded regex"));
+        compiled = re.replace_all(&compiled, "ROUTE_PARAMS['$1']").into_owned();
+    }
+    if has_query_params {
+        let re = RE_QUERY
+            .get_or_init(|| Regex::new(r"\$query\.([a-zA-Z_]\w*)").expect("hardcoded regex"));
+        compiled = re.replace_all(&compiled, "QUERY_PARAMS['$1']").into_owned();
+    }
+    format!("()=>{compiled}")
+}
+
 /// Convert a component/page name to the expected HTML filename (mirrors main.rs logic).
 pub(super) fn page_name_to_file(name: &str) -> String {
     let route = name
@@ -496,5 +529,32 @@ mod tests {
         assert!(result.starts_with("S.set('total',"));
         assert!(result.contains("S.get('x')"));
         assert!(result.contains("S.get('y')"));
+    }
+
+    #[test]
+    fn test_property_access_not_replaced() {
+        // `i.done` must not become `i.S.get('done')` — dot-prefixed uses are object properties
+        let vars = cv(&["items", "done"]);
+        let expr = "(items ?? []).filter(i => i.done).length";
+        let result = vars.replace_into(expr);
+        assert!(
+            result.contains("i.done"),
+            "property access i.done should be preserved, got: {result}"
+        );
+        assert!(
+            !result.contains("i.S.get"),
+            "i.S.get must not appear, got: {result}"
+        );
+        assert!(
+            result.contains("S.get('items')"),
+            "standalone items should be replaced"
+        );
+    }
+
+    #[test]
+    fn test_standalone_var_still_replaced() {
+        let vars = cv(&["done", "total"]);
+        let result = vars.replace_into("done > 0 && total > 1");
+        assert_eq!(result, "S.get('done') > 0 && S.get('total') > 1");
     }
 }

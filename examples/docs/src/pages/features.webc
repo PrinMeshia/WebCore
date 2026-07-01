@@ -2,7 +2,194 @@ page "features" {
     div class="page-header" {
         h1 { "Features" }
         p class="page-sub" {
-            "Store · Validation · SSG · i18n · WASM · Tree-shaking · CSP · Critical CSS · HMR"
+            "v3.1 · v3.0 · Store · Validation · SSG · i18n · WASM · Tree-shaking · CSP · Critical CSS · HMR"
+        }
+    }
+
+    section class="doc-section doc-section-highlight" {
+        h2 {
+            "v3.1 — LSP quick-fixes (code actions) "
+            span class="version-tag version-tag-new" { "new" }
+        }
+        p {
+            "Press "
+            code { "Ctrl+." }
+            " (VS Code) or "
+            code { "ga" }
+            " (Neovim) on any unknown identifier to get a quick-fix. Two actions are available:"
+        }
+        div class="callout" {
+            strong { "Import component 'X'" }
+            " — cursor on an uppercase identifier not yet imported → prepends "
+            code { "import X from \"./X.webc\"" }
+            " at the top of the file."
+        }
+        div class="callout" {
+            strong { "Add 'x' to state" }
+            " — cursor on an unknown lowercase variable → inserts "
+            code { "x: String = \"\"" }
+            " into the nearest "
+            code { "state {}" }
+            " block."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "v3.1 — Semantic tokens "
+            span class="version-tag" { "v3.1" }
+        }
+        p {
+            "The LSP server implements "
+            code { "textDocument/semanticTokens/full" }
+            ". VS Code and Neovim use the token stream for accurate syntax highlighting — keywords, types, string literals, comments, state variables, computed (read-only), and class/component names each get a distinct colour."
+        }
+    }
+
+    section class="doc-section" {
+        h2 {
+            "v3.1 — Real-time LSP diagnostics "
+            span class="version-tag" { "v3.1" }
+        }
+        p {
+            "The built-in LSP server now pushes "
+            code { "textDocument/publishDiagnostics" }
+            " notifications on every "
+            code { "didOpen" }
+            " and "
+            code { "didChange" }
+            ". Syntax errors appear as squiggles in your editor instantly — no need to run "
+            code { "webc check" }
+            " manually."
+        }
+        p {
+            "Error ranges are computed from the "
+            code { "Span.start" }
+            " / "
+            code { "Span.end" }
+            " byte offsets stored in the AST, giving sub-character precision. "
+            code { "didClose" }
+            " clears diagnostics so stale squiggles never linger."
+        }
+    }
+
+    section class="doc-section doc-section-highlight" {
+        h2 {
+            "v3.0 — Core advances "
+            span class="version-tag" { "v3.0" }
+        }
+        p {
+            "Three architectural shifts in v3.0 that reduce output size and eliminate the last CSP exception."
+        }
+
+        h3 { "1 — Compiled expressions (no unsafe-eval)" }
+        p {
+            "In v2, expressions like "
+            code { "@if count > 0" }
+            " were stored as strings in HTML attributes and evaluated at runtime via "
+            code { "new Function()" }
+            " — requiring "
+            code { "script-src 'unsafe-eval'" }
+            " in the CSP."
+        }
+        p {
+            "In v3, every expression is compiled to a JS closure at build time."
+            " A "
+            code { "const _e" }
+            " map is emitted inline and the bind functions call closures directly — "
+            code { "evalCond" }
+            " does not exist in the runtime."
+        }
+        pre class="code-block" {
+"// v2 — string stored in DOM, eval'd at runtime
+<div data-webcore-if=\"count > 0\">
+<!-- runtime does: new Function('...return count>0')() -->
+
+// v3 — closure compiled at build time, zero eval
+<div data-webcore-if=\"e0\">
+<script>
+const _e = {
+  e0: ()=>S.get('count')>0,
+  e1: ()=>S.get('count')*2,
+};
+bindIf(_e); bind(_e);
+</script>"
+        }
+        div class="callout-tip" {
+            strong { "CSP: " }
+            code { "Content-Security-Policy: script-src 'self'" }
+            " works without "
+            code { "unsafe-eval" }
+            " — guaranteed structurally, not by configuration."
+        }
+
+        h3 { "2 — Build-time component imports" }
+        p {
+            "Components declare their dependencies at the top of the file."
+            " The compiler resolves, loads and inlines them at build time — no runtime module loader."
+        }
+        pre class="code-block" {
+"// Each page only compiles the components it imports
+import Button  from \"./Button.webc\"
+import Counter from \"./Counter.webc\"
+
+page \"home\" {
+    Counter {}
+    Button label=\"Go\" {}
+}
+// dist/index.html — contains Button + Counter code, nothing else
+// dist/about/index.html — contains only Button code (if about.webc imports only Button)"
+        }
+
+        h3 { "3 — Prod identifier renaming" }
+        p {
+            "In "
+            code { "prod" }
+            " mode, runtime identifiers are renamed in a post-pass: "
+            code { "bindIf→_bi" }
+            ", "
+            code { "bindFor→_bf" }
+            ", "
+            code { "bindAttrs→_ba" }
+            "…"
+            " Applied after full code generation — the readable names are preserved in dev mode."
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Dev name" }
+                    th { "Prod name" }
+                    th { "Dev name" }
+                    th { "Prod name" }
+                } }
+                tbody {
+                    tr {
+                        td { code { "bind(" } }         td { code { "_b(" } }
+                        td { code { "bindIf" } }         td { code { "_bi" } }
+                    }
+                    tr {
+                        td { code { "bindFor" } }        td { code { "_bf" } }
+                        td { code { "bindAttrs" } }      td { code { "_ba" } }
+                    }
+                    tr {
+                        td { code { "bindClassBindings" } } td { code { "_bc" } }
+                        td { code { "bindValidation" } }    td { code { "_bv" } }
+                    }
+                    tr {
+                        td { code { "bindDefer" } }      td { code { "_bd" } }
+                        td { code { "rebindComputed" } }  td { code { "_rc" } }
+                    }
+                }
+            }
+        }
+        div class="callout" {
+            "Activate with "
+            code { "prod = true" }
+            " in "
+            code { "webc.toml" }
+            " (or "
+            code { "HtmlPageOptions { prod: true }" }
+            " programmatically). Estimated gain: 25–30 % on the inline script size."
         }
     }
 
@@ -10,34 +197,34 @@ page "features" {
         h2 { "Global store" }
         p {
             "The "
-            code { "store \{ \}" }
+            code { "store { }" }
             " block declares reactive state shared across all components and pages."
         }
         pre class="code-block" {
 "// app.webc
-store \{
+store {
     count:  Number  = 0
     theme:  String  = \"dark\"
     active: Boolean = false
-\}
+}
 
 // Any component — prefix with $store.
-component Display \{
-    view \{
-        p \"Global count: \{$store.count\}\"
-        button on:click=\{$store.count += 1\} \{ \"+\" \}
-    \}
-\}
+component Display {
+    view {
+        p \"Global count: \{$store.count}\"
+        button on:click=\{$store.count += 1} { \"+\" }
+    }
+}
 
-component Badge \{
-    view \{
-        @if $store.active \{
+component Badge {
+    view {
+        @if $store.active {
             span \"Active\"
-        \} @else \{
+        } @else {
             span \"Inactive\"
-        \}
-    \}
-\}"
+        }
+    }
+}"
         }
         div class="callout-tip" {
             strong { "Scoped reactivity: " }
@@ -55,27 +242,27 @@ component Badge \{
         h2 { "Form validation" }
         p { "Declarative validation attributes on inputs — no JS event wiring needed." }
         pre class="code-block" {
-"component SignupForm \{
-    view \{
-        form on:submit=\{handleSubmit\} \{
+"component SignupForm {
+    view {
+        form on:submit=\{handleSubmit} {
             label \"Username\"
             input type=\"text\" name=\"username\"
                   validate:required=\"Username is required\"
                   validate:minlength=\"3,At least 3 characters\"
-            @error \"username\" \{
+            @error \"username\" {
                 span class=\"error-msg\" \"Check your username\"
-            \}
+            }
             label \"Email\"
             input type=\"email\" name=\"email\"
                   validate:required=\"Email is required\"
                   validate:email=\"Must be a valid email\"
-            @error \"email\" \{
+            @error \"email\" {
                 span class=\"error-msg\" \"Check your email\"
-            \}
-            button type=\"submit\" \{ \"Sign up\" \}
-        \}
-    \}
-\}"
+            }
+            button type=\"submit\" { \"Sign up\" }
+        }
+    }
+}"
         }
         p {
             "Validation fires on "
@@ -121,8 +308,8 @@ component Badge \{
         }
         pre class="code-block" {
 "// .webc source — state: count = 0
-p \"Counter: \{count\}\"
-@if count > 0 \{ p \"Positive\" \} @else \{ p \"Zero\" \}
+p \"Counter: \{count}\"
+@if count > 0 { p \"Positive\" } @else { p \"Zero\" }
 
 // HTML output (SSG pre-rendered)
 <p>Counter: <span data-webcore-interpolation=\"count\">0</span></p>
@@ -160,10 +347,10 @@ welcome   = \"Bienvenue\"
 increment = \"Incrementer\"
 
 // Component view
-h1 \"\{t(\"welcome\")\}\"
-button on:click=\{count += 1\} \{ \"\{t(\"increment\")\}\" \}
-button on:click=\{setLocale(\"fr\")\} \{ \"FR\" \}
-button on:click=\{setLocale(\"en\")\} \{ \"EN\" \}"
+h1 \"\{t(\"welcome\")}\"
+button on:click=\{count += 1} { \"\{t(\"increment\")}\" }
+button on:click=\{setLocale(\"fr\")} { \"FR\" }
+button on:click=\{setLocale(\"en\")} { \"EN\" }"
         }
     }
 
@@ -179,22 +366,22 @@ button on:click=\{setLocale(\"en\")\} \{ \"EN\" \}"
         }
         pre class="code-block" {
 "// locales/en.toml
-items_one   = \"{{count}} item\"
-items_other = \"{{count}} items\"
-greeting    = \"Hello, {{0}}!\"
+items_one   = \"\{\{count}} item\"
+items_other = \"\{\{count}} items\"
+greeting    = \"Hello, \{\{0}}!\"
 
 // locales/fr.toml
-items_one   = \"{{count}} element\"
-items_other = \"{{count}} elements\"
-greeting    = \"Bonjour, {{0}} !\""
+items_one   = \"\{\{count}} element\"
+items_other = \"\{\{count}} elements\"
+greeting    = \"Bonjour, \{\{0}} !\""
         }
         pre class="code-block" {
 "// Pluralization — picks _one or _other key
-p \"\{t(\"items\", 1)\}\"       // → \"1 item\"
-p \"\{t(\"items\", count)\}\"   // → \"3 items\" (reactive)
+p \"\{t(\"items\", 1)}\"       // → \"1 item\"
+p \"\{t(\"items\", count)}\"   // → \"3 items\" (reactive)
 
 // Positional substitution
-p \"\{t(\"greeting\", username)\}\"  // → \"Hello, Alice!\""
+p \"\{t(\"greeting\", username)}\"  // → \"Hello, Alice!\""
         }
         div class="table-wrap" {
             table {
@@ -204,8 +391,8 @@ p \"\{t(\"greeting\", username)\}\"  // → \"Hello, Alice!\""
                 } }
                 tbody {
                     tr { td { code { "t(\"key\")" } } td { "Simple lookup — returns the value or the key if missing" } }
-                    tr { td { code { "t(\"key\", n)" } } td { "Number → picks _one (n=1) or _other, replaces {{count}}" } }
-                    tr { td { code { "t(\"key\", val)" } } td { "Non-number → replaces {{0}} with val" } }
+                    tr { td { code { "t(\"key\", n)" } } td { "Number → picks _one (n=1) or _other, replaces \{\{count}}" } }
+                    tr { td { code { "t(\"key\", val)" } } td { "Non-number → replaces \{\{0}} with val" } }
                 }
             }
         }
@@ -224,16 +411,16 @@ p \"\{t(\"greeting\", username)\}\"  // → \"Hello, Alice!\""
 "// wasm/src/lib.rs
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
-pub fn compute(n: u32) -> u32 \{ n * n \}
+pub fn compute(n: u32) -> u32 { n * n }
 
 // WebCore component
-component WasmDemo \{
-    state \{ result: Number = 0 \}
-    view \{
-        button on:click=\{result = wasm.compute(result)\} \{ \"Compute\" \}
-        p \"Result: \{result\}\"
-    \}
-\}"
+component WasmDemo {
+    state { result: Number = 0 }
+    view {
+        button on:click=\{result = wasm.compute(result)} { \"Compute\" }
+        p \"Result: \{result}\"
+    }
+}"
         }
         div class="callout" {
             code { "globalThis.wasm" }
@@ -256,13 +443,13 @@ component WasmDemo \{
         }
         pre class="code-block" {
 "// Minimal bundle — no @for, @if, validation, routing, or WASM
-class State \{
+class State {
   #d=new Map(); #l=new Map();
-  set(k,v)\{ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) \}
-  setQ(k,v)\{ this.#d.set(k,v) \}
-  get(k)\{ return this.#d.get(k) \}
-  on(k,f)\{ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) \}
-\}
+  set(k,v){ this.#d.set(k,v); this.#l.get(k)?.forEach(f=>f(v)) }
+  setQ(k,v){ this.#d.set(k,v) }
+  get(k){ return this.#d.get(k) }
+  on(k,f){ (this.#l.get(k)??this.#l.set(k,[]).get(k)).push(f) }
+}
 const S = new State();
 // bindIf, bindFor, bindAttrs, nav, validateField — absent"
         }
@@ -275,11 +462,11 @@ const S = new State();
                 tbody {
                     tr { td { code { "bindFor()" } } td { "At least one " code { "@for" } " loop" } }
                     tr { td { code { "bindIf()" } } td { "At least one " code { "@if" } " / " code { "@else" } } }
-                    tr { td { code { "bindAttrs()" } } td { "At least one " code { "attr=\{expr\}" } " dynamic attribute" } }
+                    tr { td { code { "bindAttrs()" } } td { "At least one " code { "attr=\{expr}" } " dynamic attribute" } }
                     tr { td { code { "validateField()" } } td { "At least one " code { "validate:*" } " or " code { "@error" } } }
                     tr { td { code { "nav() + popstate" } } td { "Routes declared or " code { "webcore_navigate()" } " used" } }
-                    tr { td { code { "DESTROY_HOOKS" } } td { "At least one " code { "on:destroy \{\}" } " block" } }
-                    tr { td { code { "COMPUTED + rebindComputed()" } } td { "At least one " code { "computed \{\}" } " block" } }
+                    tr { td { code { "DESTROY_HOOKS" } } td { "At least one " code { "on:destroy {}" } " block" } }
+                    tr { td { code { "COMPUTED + rebindComputed()" } } td { "At least one " code { "computed {}" } " block" } }
                     tr { td { "WASM loader" } td { code { "wasm/Cargo.toml" } " present at build time" } }
                 }
             }
@@ -307,19 +494,19 @@ const S = new State();
             " reads on its first execution and re-runs it only when those specific variables change."
         }
         pre class="code-block" {
-"component Search \{
-    state \{ query: String = \"\" results: List = [] \}
+"component Search {
+    state { query: String = \"\" results: List = [] }
 
     // Automatically re-runs whenever query changes
-    $effect(\{
+    $effect({
         results = filterItems(S.get('query'))
-    \})
+    })
 
-    view \{
-        input bind:value=\{query\} placeholder=\"Search…\"
-        @for r in results \{ li \"\{r\}\" \}
-    \}
-\}"
+    view {
+        input bind:value=\{query} placeholder=\"Search…\"
+        @for r in results { li \"\{r}\" }
+    }
+}"
         }
         p {
             "HMR: "
@@ -406,7 +593,7 @@ csp   = true      # emits Content-Security-Policy meta"
                     tr {
                         td { strong { "CSS scope elision" } }
                         td { "v2.2.0" }
-                        td { "Components without a " code { "style \{\}" } " block don't emit " code { "data-v" } " — cleaner HTML." }
+                        td { "Components without a " code { "style {}" } " block don't emit " code { "data-v" } " — cleaner HTML." }
                     }
                     tr {
                         td { strong { "script defer + preload" } }
@@ -453,18 +640,18 @@ csp   = true      # emits Content-Security-Policy meta"
 "// app.webc — import posts.json, generate one page per entry
 import posts from \"data/posts.json\"
 
-app MyBlog \{
-    routes \{
+app MyBlog {
+    routes {
         \"/\":            HomePage
         \"/post/:slug\":  PostPage each posts
-    \}
-\}
+    }
+}
 
 // PostPage.webc — $route.slug is pre-rendered at build time
-page \"post\" \{
-    h1 \"\{$route.slug\}\"
-    p \"\{$route.date\}\"
-\}"
+page \"post\" {
+    h1 \"\{$route.slug}\"
+    p \"\{$route.date}\"
+}"
         }
         div class="callout" {
             "Output paths are validated with "
@@ -493,21 +680,21 @@ page \"post\" \{
             " fires. Eliminates flicker without a separate loading state."
         }
         pre class="code-block" {
-"component Hero \{
-    view \{
+"component Hero {
+    view {
         h1 \"Welcome\"
-        @defer \{
-            HeavyWidget \{\}
-        \}
-    \}
-\}"
+        @defer {
+            HeavyWidget {}
+        }
+    }
+}"
         }
 
         h3 { "Shorthand props" }
         p {
-            code { "<Component {count}>" }
+            code { "<Component \{count}>" }
             " is sugar for "
-            code { "<Component count={count}>" }
+            code { "<Component count=\{count}>" }
             " — pass a variable whose name matches the prop. Round-trip preserved by "
             code { "webc fmt" }
             "."
@@ -562,20 +749,20 @@ page \"post\" \{
             " state variables directly in event handlers — no spread syntax needed."
         }
         pre class="code-block" {
-"component TodoList \{
-    state \{ todos: List = null \}
-    view \{
+"component TodoList {
+    state { todos: List = null }
+    view {
         input ref:draft=true placeholder=\"New task\"
-        button on:click=\{todos.push(refs.draft.value)\} \{ \"Add\" \}
-        @for todo, i in todos \{
-            li \{
-                \"\{todo\}\"
-                button on:click=\{todos.remove(i)\} \{ \"×\" \}
-            \}
-        \}
-        button on:click=\{todos.clear()\} \{ \"Clear all\" \}
-    \}
-\}"
+        button on:click=\{todos.push(refs.draft.value)} { \"Add\" }
+        @for todo, i in todos {
+            li {
+                \"\{todo}\"
+                button on:click=\{todos.remove(i)} { \"×\" }
+            }
+        }
+        button on:click=\{todos.clear()} { \"Clear all\" }
+    }
+}"
         }
         div class="table-wrap" {
             table {
@@ -607,21 +794,21 @@ page \"post\" \{
             " inside HTTP components."
         }
         pre class="code-block" {
-"component Posts \{
-    state \{ posts: List = null \}
-    http \{ get: \"/api/posts\"  into: posts \}
-    view \{
-        @loading \{
+"component Posts {
+    state { posts: List = null }
+    http { get: \"/api/posts\"  into: posts }
+    view {
+        @loading {
             p \"Loading…\"
-        \}
-        @catch \{
-            p class=\"error\" \"Error: \{error\}\"
-        \}
-        @for post in posts \{
-            article \{ h2 \"\{post.title\}\" \}
-        \}
-    \}
-\}"
+        }
+        @catch {
+            p class=\"error\" \"Error: \{error}\"
+        }
+        @for post in posts {
+            article { h2 \"\{post.title}\" }
+        }
+    }
+}"
         }
         div class="callout" {
             code { "@loading" }
@@ -641,12 +828,12 @@ page \"post\" \{
         }
         pre class="code-block" {
 "# VS Code settings.json (example)
-\{
-  \"languageServerExample.serverOptions\": \{
+{
+  \"languageServerExample.serverOptions\": {
     \"command\": \"webc\",
     \"args\": [\"lsp\"]
-  \}
-\}"
+  }
+}"
         }
         div class="table-wrap" {
             table {
@@ -685,14 +872,14 @@ page \"post\" \{
             " in the output."
         }
         pre class="code-block" {
-"component TwoItems \{
-    view \{
+"component TwoItems {
+    view {
         <>
             p \"First\"
             p \"Second\"
         </>
-    \}
-\}
+    }
+}
 // Output: <p>First</p><p>Second</p>"
         }
 
@@ -709,20 +896,20 @@ page \"post\" \{
             " — no boilerplate JS."
         }
         pre class="code-block" {
-"form on:submit|prevent=\{handleSubmit\} \{ ... \}
-button on:click|stop=\{count += 1\} \{ \"+\" \}
-button on:click|once=\{welcomed = true\} \{ \"Welcome\" \}
-div on:click|self=\{toggle\} \{ span \{ \"child\" \} \}"
+"form on:submit|prevent=\{handleSubmit} { ... }
+button on:click|stop=\{count += 1} { \"+\" }
+button on:click|once=\{welcomed = true} { \"Welcome\" }
+div on:click|self=\{toggle} { span { \"child\" } }"
         }
 
         h3 { "Default prop values" }
         pre class="code-block" {
-"component Badge \{
-    props \{ label: String = \"N/A\"  color: String = \"gray\" \}
-    view \{ span class=\{color\} \"\{label\}\" \}
-\}
-Badge \{\}              // uses defaults
-Badge label=\"OK\" \{\}  // color defaults to gray"
+"component Badge {
+    props { label: String = \"N/A\"  color: String = \"gray\" }
+    view { span class=\{color} \"\{label}\" }
+}
+Badge {}              // uses defaults
+Badge label=\"OK\" {}  // color defaults to gray"
         }
 
         h3 { "webc watch" }

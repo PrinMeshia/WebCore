@@ -2,30 +2,30 @@
 name = "webcore-docs"
 
 [theme.colors]
-primary    = "#5B4AF7"
-secondary  = "#10B981"
-background = "#0F172A"
-surface    = "#1E293B"
-border     = "#334155"
-text       = "#F1F5F9"
-muted      = "#94A3B8"
-accent     = "#F59E0B"
-danger     = "#EF4444"
-code-bg    = "#0D1117"
+primary    = "#EA580C"
+secondary  = "#16A34A"
+background = "#F8FAFC"
+surface    = "#FFFFFF"
+border     = "#E2E8F0"
+text       = "#0F172A"
+muted      = "#64748B"
+accent     = "#2563EB"
+danger     = "#DC2626"
+code-bg    = "#0F172A"
 
 [theme.fonts]
 mono = "ui-monospace, SFMono-Regular, 'Fira Code', monospace"
 sans = "Inter, system-ui, sans-serif"
 
 [theme.spacing]
-xs  = "0.25rem"
-sm  = "0.5rem"
+xs  = "0.35rem"
+sm  = "0.6rem"
 md  = "1rem"
-lg  = "1.5rem"
-xl  = "2rem"
-xxl = "4rem"
+lg  = "1.6rem"
+xl  = "2.5rem"
+xxl = "5rem"
 
 [theme.radius]
-sm = "4px"
-md = "8px"
-lg = "12px"
+sm = "6px"
+md = "10px"
+lg = "16px"

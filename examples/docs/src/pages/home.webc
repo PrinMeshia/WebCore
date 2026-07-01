@@ -1,6 +1,6 @@
 page "home" {
     div class="hero" {
-        div class="hero-badge" { "v2.10.1 — Stable" }
+        div class="hero-badge" { "v3.2 — Preview" }
         h1 class="hero-title" {
             "Build web interfaces"
             span class="hero-accent" { " declaratively" }
@@ -17,23 +17,23 @@ page "home" {
         }
         div class="hero-snippet" {
             pre class="hero-code" {
-"component Counter \{
-    state   \{ count: Number = 0 \}
-    computed \{ doubled = count * 2 \}
-    view \{
-        div \{
-            p \"Valeur : \{count\} — x2 : \{doubled\}\"
-            button on:click=\{count += 1\} \{ \"+\" \}
-            button on:click=\{count = max(0, count-1)\} \{ \"−\" \}
-        \}
-    \}
-    style \{
-        .card \{
-            display: flex; gap: 1rem;
-            &:hover \{ box-shadow: 0 4px 16px rgba(91,74,247,0.2); \}
-        \}
-    \}
-\}"
+"// Import components at build time — no runtime cost
+import Counter from \"./Counter.webc\"
+import Badge   from \"./Badge.webc\"
+
+component App {
+    state { status: String = \"idle\" }
+    view {
+        @if status === \"idle\" {
+            Badge label=\"Ready\" {}
+        } @else if status === \"running\" {
+            Badge label=\"Running\" {}
+        } @else {
+            Badge label=\"Done\" {}
+        }
+        Counter {}
+    }
+}"
             }
         }
     }
@@ -44,16 +44,16 @@ page "home" {
             span class="stat-desc" { "PEG compiler" }
         }
         div class="stat-item" {
-            span class="stat-num" { "147" }
-            span class="stat-desc" { "unit tests" }
+            span class="stat-num" { "217" }
+            span class="stat-desc" { "tests" }
         }
         div class="stat-item" {
-            span class="stat-num" { "$effect" }
-            span class="stat-desc" { "Signals fins" }
+            span class="stat-num" { "0" }
+            span class="stat-desc" { "unsafe-eval" }
         }
         div class="stat-item" {
-            span class="stat-num" { "<5 KB" }
-            span class="stat-desc" { "JS runtime" }
+            span class="stat-num" { "~1 KB" }
+            span class="stat-desc" { "JS prod min." }
         }
         div class="stat-item" {
             span class="stat-num" { "zero" }
@@ -66,6 +66,74 @@ page "home" {
     }
 
     section class="section" {
+        h2 class="section-title" { "v3.2 — Core Advances" }
+        p class="section-sub" {
+            "Architectural shifts that make WebCore sites structurally smaller, faster and safer."
+        }
+        div class="v3-cards" {
+            div class="v3-card v3-card-primary" {
+                div class="v3-card-icon" { "📦" }
+                h3 { "Shared, cached runtime" }
+                p {
+                    "Every page references a single "
+                    code { "/assets/webcore.[hash].js" }
+                    ", built from the union of all pages' expressions and handlers."
+                    " The browser downloads and caches the runtime "
+                    strong { "once" }
+                    " for the whole site — no more per-page inlining."
+                }
+                pre class="v3-diff" {
+"// before — full runtime inlined in every page (~8 KB × N)
+home.html     <script>/* runtime */</script>
+about.html    <script>/* runtime */</script>
+
+// after — one cached file for the whole site
+<script defer src=\"/assets/webcore.6e1f.js\"></script>"
+                }
+            }
+            div class="v3-card" {
+                div class="v3-card-icon" { "🔒" }
+                h3 { "CSP-safe by construction" }
+                p {
+                    "Expressions are compiled to JS closures at build time — "
+                    code { "new Function()" }
+                    " / "
+                    code { "eval()" }
+                    " are structurally absent. A strict "
+                    code { "script-src 'self'" }
+                    " CSP works with no "
+                    code { "unsafe-eval" }
+                    " exception."
+                }
+                pre class="v3-diff" {
+"// v2 — expression stored as string, eval'd at runtime
+<div data-webcore-if=\"count > 0\">
+
+// v3 — closure compiled at build time
+<div data-webcore-if=\"e0\">"
+                }
+            }
+            div class="v3-card" {
+                div class="v3-card-icon" { "🧩" }
+                h3 { "Build-time imports" }
+                p {
+                    "Components live in separate files and are resolved at compile time — like a C "
+                    code { "#include" }
+                    ". Each page receives only the components it imports."
+                }
+                pre class="v3-diff" {
+"import Button  from \"./Button.webc\"
+import Counter from \"./Counter.webc\"
+
+page \"home\" {
+    Counter {}
+}"
+                }
+            }
+        }
+    }
+
+    section class="section" {
         h2 class="section-title" { "Why WebCore?" }
         p class="section-sub" {
             "One declarative syntax that replaces HTML templates, CSS modules, and JS reactivity boilerplate."
@@ -74,7 +142,7 @@ page "home" {
             FeatureCard
                 icon="⚡"
                 title="Tree-shaken runtime"
-                desc="The compiler emits only the JS helpers your document actually uses. Simple apps ship under 5 KB of script."
+                desc="The compiler emits only the JS helpers your document actually uses. Simple apps ship under 1.5 KB of inline script."
                 tag="Performance"
             {}
             FeatureCard
@@ -109,27 +177,39 @@ page "home" {
             {}
             FeatureCard
                 icon="✨"
-                title="Signaux réactifs fins"
-                desc="$effect(fn) track les dépendances automatiquement. Un composant ne se re-rend que quand ses données changent réellement."
-                tag="Réactivité"
+                title="Fine-grained signals"
+                desc="$effect(fn) tracks dependencies automatically. A component only re-renders when its data actually changes."
+                tag="Reactivity"
             {}
             FeatureCard
                 icon="🔥"
                 title="HMR — Hot reload"
-                desc="webc serve surveille vos fichiers et recharge le navigateur automatiquement via WebSocket. Aucune configuration."
+                desc="webc serve watches your files and auto-reloads the browser via WebSocket. Zero configuration."
                 tag="DX"
             {}
             FeatureCard
                 icon="🛡️"
                 title="Strict CSP"
-                desc="Event delegation replaces inline onclick/onsubmit. csp=true in webc.toml emits a Content-Security-Policy meta tag. SRI hashes on all assets in prod mode."
-                tag="v2.5.0"
+                desc="v3: no unsafe-eval required. Event delegation replaces inline onclick/onsubmit. csp=true emits a Content-Security-Policy meta tag."
+                tag="v3.0"
             {}
             FeatureCard
                 icon="🎨"
                 title="Critical CSS inline"
-                desc="In prod mode, page CSS is inlined in <style> and theme.css loads deferred — zero render-blocking CSS. HTML minification removes comments and inter-tag whitespace."
+                desc="In prod mode, page CSS is inlined in <style> and theme.css loads deferred — zero render-blocking CSS."
                 tag="v2.4.0"
+            {}
+            FeatureCard
+                icon="🔀"
+                title="@else if chaining"
+                desc="@if a { } @else if b { } @else { } — native multi-branch conditionals, no wrapper element needed."
+                tag="v3.0"
+            {}
+            FeatureCard
+                icon="🧩"
+                title="Build-time imports"
+                desc="import Button from './Button.webc' — components are inlined at compile time, like C #include. Zero runtime cost."
+                tag="v3.0"
             {}
         }
     }

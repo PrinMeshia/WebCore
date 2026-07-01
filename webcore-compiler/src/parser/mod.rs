@@ -158,6 +158,8 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
         components: BTreeMap::new(),
         imports: Vec::new(),
         data_imports: BTreeMap::new(),
+        component_imports: Vec::new(),
+        page_imports: BTreeMap::new(),
         source_files: BTreeMap::new(),
     };
 
@@ -202,9 +204,17 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
                         } else {
                             path_raw
                         };
-                        document
-                            .imports
-                            .push(crate::core::ast::ImportDecl { name, path });
+                        if path.ends_with(".webc") {
+                            // Component import (v3): resolved at build time by the loader.
+                            document
+                                .component_imports
+                                .push(crate::core::ast::ComponentImport { alias: name, path });
+                        } else {
+                            // Data import (JSON/TOML): existing behaviour.
+                            document
+                                .imports
+                                .push(crate::core::ast::ImportDecl { name, path });
+                        }
                     }
                     _ => {}
                 }

@@ -53,7 +53,7 @@ pub(super) fn generate_element(
             content,
             ..
         } => generate_component_element(name, attributes, content, ctx, scope_id),
-        Element::Interpolation(expr, _span) => {
+        Element::Interpolation(expr, span) => {
             // SSG: pre-render the initial value so the first paint shows real
             // content; the runtime overwrites it reactively after load.
             let initial = ctx
@@ -61,11 +61,13 @@ pub(super) fn generate_element(
                 .and_then(|ssg| ssg.eval_expr(expr))
                 .map(|v| html_escape_text(&v))
                 .unwrap_or_default();
+            // v3: register the expression to get a compiled closure ID
+            let id = ctx.register_expr(expr, *span);
             Ok((
                 format!(
                     "<span {}=\"{}\">{}</span>",
                     attr_names::INTERPOLATION,
-                    html_escape(expr),
+                    html_escape(&id),
                     initial
                 ),
                 Vec::new(),
@@ -102,11 +104,12 @@ pub(super) fn generate_element(
             condition,
             then_branch,
             else_branch,
-            ..
+            span,
         } => render_if_element(
             condition,
             then_branch,
             else_branch.as_deref(),
+            *span,
             ctx,
             scope_id,
         ),
@@ -199,22 +202,26 @@ fn render_if_element(
     condition: &str,
     then_branch: &[Element],
     else_branch: Option<&[Element]>,
+    span: crate::core::ast::Span,
     ctx: &mut GenContext,
     scope_id: Option<&str>,
 ) -> Result<(String, Vec<HandlerMapping>), CompileError> {
     let scope_attr = scope_attr_str(scope_id);
     // SSG: show/hide the branch on first paint when the condition is
     // statically known; bindIf() takes over reactively after load.
+    // NOTE: SSG uses the RAW condition string (not the ID) for static eval.
     let initial_cond = ctx.ssg.and_then(|ssg| ssg.eval_cond(condition));
     let if_style = match initial_cond {
         Some(true) => " style=\"display:block\"",
         Some(false) => " style=\"display:none\"",
         None => "",
     };
+    // v3: register the expression, get an ID (or raw expression in v2-compat mode)
+    let id = ctx.register_expr(condition, span);
     let mut result = format!(
         "<div {}=\"{}\"{}{}>\n",
         attr_names::IF,
-        html_escape(condition),
+        html_escape(&id),
         scope_attr,
         if_style
     );
@@ -235,7 +242,7 @@ fn render_if_element(
             result,
             "<div {}=\"{}\"{}{}>",
             attr_names::IF_ELSE,
-            html_escape(condition),
+            html_escape(&id),
             scope_attr,
             else_style
         )

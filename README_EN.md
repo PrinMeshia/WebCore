@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 2.10.1 (released) |
-| **Status** | Stable |
+| **Version** | 3.2.0 |
+| **Status** | Preview |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 182 tests (unit, golden, integration, perf) |
+| **Tests** | 218 tests (unit, golden, integration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -33,16 +33,18 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 - **Declarative blocks**: `app` (routes, layout, theme), `layout`, `page`, `component` (props · state · computed · view · style), shared global `store` (`$store.x`)
 - **Expression interpolation**: `{count}`, `{count + 1}`, `{max(a, b)}` — including inside strings and attributes
-- **Directives**: `@if` / `@else`, `@switch` / `@case` / `@default`, `@for` (with `key=` for DOM diffing, index `item, i`, ranges `0..5`), `@error` for validation messages, `@loading` / `@catch` (shorthand for `@if loading` / `@if error`), `@defer` (deferred render until DOMContentLoaded)
+- **Directives**: `@if` / `@else if` / `@else`, `@switch` / `@case` / `@default`, `@for` (with `key=` for DOM diffing, index `item, i`, ranges `0..5`), `@error` for validation messages, `@loading` / `@catch` (shorthand for `@if loading` / `@if error`), `@defer` (deferred render until DOMContentLoaded)
 - **Prop shorthand**: `<Component {count}>` ≡ `<Component count={count}>`; `<div ...attrs>` for attribute spreading
 - **Fragments** `<>...</>`, mixed text/element content, named multi-zone slots with default content
 - **Props**: static, reactive (`value={expr}`), default values (`label: String = "Default"`), compile-time validation (warning on unknown props)
 - **Build-time data imports**: `import posts from "data/posts.json"` (JSON/TOML)
+- **Build-time component imports** (v3.0.1): `import Button from "./Button.webc"` — resolved at compile time, zero runtime overhead
 
 ### Reactivity & runtime
 
 - **Fine-grained signals**: `$effect` with automatic dependency tracking — a component only re-renders when a dependency it actually read changes
 - **Minimal runtime** (~2-5 KB), **tree-shaken per feature**: anything the document doesn't use isn't emitted
+- **Shared, cached runtime** (v3.2): a single `/assets/webcore.<hash>.js` for the whole site (union of every page's expressions/handlers) — downloaded and cached once, no more per-page inlined/duplicated runtime
 - **Events**: `on:click`, `on:submit`, `on:input`… with `|stop` `|prevent` `|once` `|self` modifiers, debounce (`on:input|debounce`), multi-statement handlers, nested objects
 - **`bind:value` / `bind:checked`** two-way binding, **`ref:name`** for direct DOM access, **`$watch`** for DOM-free observation, cross-component **`emit()`**, `on:mount` / `on:destroy` hooks
 - **Derived state**: `computed { fullName = firstName + " " + lastName }`
@@ -77,16 +79,16 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 ### Security
 
-- **Strict CSP**: zero inline JS — event delegation via `data-webcore-e`, `csp = true` option emitting the Content-Security-Policy meta
+- **Strict CSP**: zero inline JS — event delegation via `data-webcore-e`, `csp = true` option emitting the Content-Security-Policy meta; v3.0 guarantees `script-src 'self'` without `'unsafe-eval'` (compiled expressions — `new Function()` removed)
 - **SRI**: `integrity="sha256-…"` on scripts and stylesheets in prod
 - **Dev server**: path-traversal protection (canonicalization + 403)
 - **Compilation**: systematic HTML/JS escaping, ReDoS warning on `validate:pattern`, nesting limit (anti nesting-bomb)
 
 ### Tooling & DX
 
-- **Full CLI**: `webc new` · `build` · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, **rename**)
+- **Full CLI**: `webc new` · `build` · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, rename, **real-time diagnostics**, **semantic tokens**, **code actions**)
 - **rustc-style errors**: source line + `^` caret + contextual hints, all errors aggregated in one pass
-- **ES2025 runtime**: `RegExp.escape()` in `evalCond`, `Promise.try()` for `http {}` blocks, prod strip of `data-webcore-*` attrs after binding
+- **ES2022+ runtime**: private class fields, optional chaining, nullish coalescing — zero dependencies, zero transpiler; v3.0: expressions compiled to JS closures (`const _e={e0:()=>...}`) — `evalCond` / `new Function()` removed
 - **`webc check`**: validates routes, components, props and detects circular references without generating anything
 - **Build report**: `dist/` tree + bundle analysis (included vs tree-shaken features)
 - **WASM**: `wasm/Cargo.toml` detection, `wasm-pack` build, async `globalThis.wasm` loader
@@ -233,6 +235,15 @@ page "home" {
     p "Zero or negative"
 }
 
+// @else if chaining (v3.0.7)
+@if count > 9 {
+    p "Double digits!"
+} @else if count > 0 {
+    p "Keep going…"
+} @else {
+    p "Press +"
+}
+
 // Without key — full re-render on every change
 @for item in items {
     li "{item}"
@@ -300,6 +311,54 @@ p "Result: {a + b}"
 p { "Hello " strong { "world" } "!" }
 div class={dynamicClass} { "content" }
 ```
+
+### Component imports (v3.0.1)
+
+```webc
+import Button from "./components/Button.webc"
+import Card   from "./components/Card.webc"
+
+page "home" {
+    Card {
+        Button label="Submit" {}
+    }
+}
+```
+
+The import is resolved at compile time — no client-side loader, no runtime overhead.
+
+### Compiled expressions (v3.0.2/v3.0.3)
+
+In v3.0, every reactive expression is compiled to a JS closure at build time:
+
+```js
+// Generated by webc build (inline excerpt)
+const _e = {
+  e0: ()=>S.get('count')>0,
+  e1: ()=>S.get('count')*2,
+};
+```
+
+No more `evalCond()` / `new Function()` — `script-src 'self'` without `unsafe-eval` is guaranteed **structurally**.
+
+### JS source maps — native devtools (v3.2)
+
+In dev mode, each inline script includes a `//# sourceMappingURL=<page>.js.map` comment
+and a `.map` file (source map v3, Base64-VLQ encoding) is written to `dist/<page>/`.
+Browser devtools show the original `.webc` source when debugging.
+Source maps are disabled in prod mode.
+
+### Prod mode — identifier renaming (v3.0.5)
+
+With `webc build --prod`, runtime function names are shortened:
+
+| Before (dev) | After (prod) |
+|---|---|
+| `bindIf` | `_bi` |
+| `bindFor` | `_bf` |
+| `bindAttrs` | `_ba` |
+| `bind(` | `_b(` |
+| `$effect` | `_ef` |
 
 ### `http { }` block — declarative fetch (v1.3.0)
 
@@ -423,6 +482,12 @@ class State { #d = new Map(); #l = new Map();
   on(k, f)  { (this.#l.get(k) ?? this.#l.set(k, []).get(k)).push(f) }
 }
 const S = new State();
+
+// v3.0 — compiled expressions (no more evalCond / new Function)
+const _e = {
+  e0: ()=>S.get('count')>0,
+  e1: ()=>S.get('count')*2,
+};
 ```
 
 ---

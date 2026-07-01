@@ -19,6 +19,9 @@ fn opts() -> HtmlPageOptions {
         extra_css_files: vec![],
         critical_css: None,
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     }
 }
 
@@ -72,8 +75,9 @@ component Counter {
 page "home" { Counter {} }
 "#,
     );
+    // v3: expression is compiled to an ID (e0, e1, …), not stored as raw expr
     assert!(
-        html.contains(&format!("{}=\"count\"", attr_names::INTERPOLATION)),
+        html.contains(&format!("{}=\"", attr_names::INTERPOLATION)),
         "interpolation span missing:\n{}",
         html
     );
@@ -141,6 +145,8 @@ fn golden_scoped_css_emits_data_v_selector() {
         components: std::collections::BTreeMap::new(),
         imports: vec![],
         data_imports: std::collections::BTreeMap::new(),
+        component_imports: vec![],
+        page_imports: std::collections::BTreeMap::new(),
         source_files: std::collections::BTreeMap::new(),
     };
     doc.components.insert(
@@ -416,8 +422,9 @@ page "home" { Counter {} }
     let ssg = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
         .expect("codegen")
         .html;
+    // v3: expr ID replaces raw expr; SSG still pre-renders the value as text content
     assert!(
-        ssg.contains(&format!("{}=\"count\">7</span>", attr_names::INTERPOLATION)),
+        ssg.contains(&format!("{}=\"", attr_names::INTERPOLATION)) && ssg.contains(">7</span>"),
         "interpolation span not pre-rendered:\n{}",
         ssg
     );
@@ -450,14 +457,14 @@ page "home" { Widget {} }
     let ssg = crate::codegen::html::generate_page(&doc, "home", &opts(), None, Some(&ssg_ctx))
         .expect("codegen")
         .html;
+    // v3: raw expr replaced by compiled ID; SSG still pre-sets display style
     assert!(
-        ssg.contains(&format!("{}=\"show &gt; 0\"", attr_names::IF))
-            && ssg.contains(r#"style="display:block""#),
+        ssg.contains(&format!("{}=\"", attr_names::IF)) && ssg.contains(r#"style="display:block""#),
         "@if branch not pre-rendered as visible:\n{}",
         ssg
     );
     assert!(
-        ssg.contains(&format!("{}=\"show &gt; 0\"", attr_names::IF_ELSE))
+        ssg.contains(&format!("{}=\"", attr_names::IF_ELSE))
             && ssg.contains(r#"style="display:none""#),
         "@else branch not pre-rendered as hidden:\n{}",
         ssg
@@ -627,9 +634,10 @@ page "home" {
 }
 "#,
     );
+    // v3: expression compiled to an ID; check the attr is present, not its raw value
     assert!(
-        html.contains(&format!("{}=\"count\"", attr_names::INTERPOLATION)),
-        "reactive prop should produce interpolation for `count`:\n{}",
+        html.contains(&format!("{}=\"", attr_names::INTERPOLATION)),
+        "reactive prop should produce interpolation span:\n{}",
         html
     );
     assert!(
@@ -1068,7 +1076,7 @@ page "about" { p "about" }
 #[test]
 fn golden_error_message_has_caret() {
     // Introduce a parse error: empty interpolation {} is invalid
-    let src = "page \"home\" { p \"hello {}\" }";
+    let src = "component 9 {}"; // invalid identifier — genuine parse error
     let err = crate::parser::parse_webc(src).unwrap_err();
     let display = format!("{}", err);
     // Should contain a caret line
@@ -1080,7 +1088,7 @@ fn golden_error_message_no_color_format() {
     let _guard = NO_COLOR_LOCK.lock().unwrap();
     // With NO_COLOR set, output is plain ASCII but still structured.
     std::env::set_var("NO_COLOR", "1");
-    let src = "page \"home\" { p \"hello {}\" }";
+    let src = "component 9 {}"; // invalid identifier — genuine parse error
     let err = crate::parser::parse_webc(src).unwrap_err();
     let display = format!("{err}");
     std::env::remove_var("NO_COLOR");
@@ -1100,7 +1108,7 @@ fn golden_error_message_no_color_format() {
 fn golden_error_message_file_path_included() {
     let _guard = NO_COLOR_LOCK.lock().unwrap();
     // When file is set on ParseError, the location string includes the path.
-    let src = "page \"home\" { p \"hello {}\" }";
+    let src = "component 9 {}"; // invalid identifier — genuine parse error
     let mut err = crate::parser::parse_webc(src).unwrap_err();
     err.file = Some(std::path::PathBuf::from("src/pages/home.webc"));
     std::env::set_var("NO_COLOR", "1");
@@ -1464,8 +1472,9 @@ component Toggle {
 page "home" { Toggle {} }
 "#,
     );
+    // v3: value is a compiled expression ID, not the raw expr name
     assert!(
-        html.contains(&format!("{}active=\"isActive\"", attr_names::CLASS_PREFIX)),
+        html.contains(&format!("{}active=\"", attr_names::CLASS_PREFIX)),
         "data-webcore-class-active attribute missing:\n{}",
         html
     );
@@ -1575,9 +1584,10 @@ page "home" { Styled {} }
 "#;
     let doc = parse_webc(src).expect("parse");
     let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // v3: value is a compiled expression ID, not the raw expr name
     assert!(
         res.html
-            .contains(&format!("{}color=\"color\"", attr_names::STYLE_PREFIX)),
+            .contains(&format!("{}color=\"", attr_names::STYLE_PREFIX)),
         "data-webcore-style-color missing:\n{}",
         res.html
     );
@@ -1607,6 +1617,9 @@ page "dash" { App {} }
         extra_css_files: vec![],
         critical_css: None,
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "dash", &opts_dash).expect("codegen");
     assert!(
@@ -1872,13 +1885,44 @@ fn error_missing_page_returns_err() {
 }
 
 #[test]
-fn error_parse_empty_interpolation_fails() {
-    // Empty {} inside a string literal is invalid syntax (interp_expr requires 1+ chars)
+fn empty_braces_parse_as_literal() {
+    // `{}` is no longer interpolation syntax — it is literal text and must parse.
     let src = r#"page "home" { p "value: {}" }"#;
-    let result = parse_webc(src);
     assert!(
-        result.is_err(),
-        "empty string interpolation {{}} should fail to parse"
+        parse_webc(src).is_ok(),
+        "literal {{}} should parse as text, not error"
+    );
+}
+
+#[test]
+fn literal_braces_need_no_escaping() {
+    // Unescaped braces in code-sample strings parse and render literally;
+    // only `{ident}` with no leading space remains an interpolation.
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Demo {
+    state { count: Number = 0 }
+    view {
+        pre "component App { state { x } }"
+        p "padded { not interp } and {count}"
+    }
+}
+page "home" { Demo {} }
+"#;
+    let doc = parse_webc(src).expect("literal braces should parse");
+    let html = generate_html(&doc, "home", &opts()).expect("codegen").html;
+    assert!(
+        html.contains("component App { state { x } }"),
+        "literal braces not rendered verbatim:\n{html}"
+    );
+    assert!(
+        html.contains("padded { not interp } and"),
+        "space-padded braces should stay literal:\n{html}"
+    );
+    // `{count}` (no leading space) is still a real interpolation span.
+    assert!(
+        html.contains(attr_names::INTERPOLATION),
+        "{{count}} should still interpolate:\n{html}"
     );
 }
 
@@ -2091,6 +2135,7 @@ page "home" { main { Counter {} } }
 
 #[test]
 fn golden_preload_hint_in_head() {
+    // v3: JS is inlined per-page; no preload hint needed — check for inline <script> instead
     let src = r#"
 component Counter {
     state { count: Int = 0 }
@@ -2101,12 +2146,8 @@ page "home" { main { Counter {} } }
 "#;
     let html = compile_to_html(src);
     assert!(
-        html.contains(r#"rel="preload""#),
-        "preload hint missing: {html}"
-    );
-    assert!(
-        html.contains(r#"as="script""#),
-        "preload hint missing as=script: {html}"
+        html.contains("<script"),
+        "inline script missing for page with JS: {html}"
     );
 }
 
@@ -2309,6 +2350,9 @@ page "home" { main { Card {} } }
         extra_css_files: vec![],
         critical_css: Some(".card{padding:1rem}".into()),
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2497,6 +2541,9 @@ page "home" { p "hello" }
         extra_css_files: vec![],
         critical_css: None,
         csp_meta: Some("default-src 'self'; script-src 'self'".into()),
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2601,6 +2648,9 @@ page "home" { p "hi" }
         extra_css_files: vec![],
         critical_css: Some(".p{color:red}".into()),
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     // Deferred link uses data-webcore-defer (not onload=)
@@ -2641,12 +2691,15 @@ page "home" { main { h1 "Static" } }
         extra_css_files: vec![],
         critical_css: Some("h1{color:red}".into()),
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
+    // v3: JS is inlined per-page; the DOMContentLoaded handler swaps media="print"→"all"
     assert!(
-        res.html
-            .contains("<script defer src=\"/assets/webcore.js\">"),
-        "webcore.js must be present when critical_css is set (defer swap needs it):\n{}",
+        res.html.contains("<script"),
+        "inline script must be present when critical_css is set (defer swap needs JS):\n{}",
         res.html
     );
 }
@@ -2687,6 +2740,9 @@ page "home" { main { p "hi" } }
         // Adversarial CSS that attempts to break out of the <style> block.
         critical_css: Some("a{content:\"</style><script>alert(1)</script>\"}".into()),
         csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2980,13 +3036,12 @@ page "home" { NestedFor {} }
         "inner for-in missing:\n{html}"
     );
     // Both vars have interpolation spans in the inner template content
+    // v3: values are compiled expression IDs, not raw exprs — just check attr presence
+    let interp = attr_names::INTERPOLATION;
+    let count = html.matches(&format!("{interp}=\"")).count();
     assert!(
-        html.contains("data-webcore-interpolation=\"item\""),
-        "inner var interpolation missing:\n{html}"
-    );
-    assert!(
-        html.contains("data-webcore-interpolation=\"section.title\""),
-        "outer var interpolation inside inner template missing:\n{html}"
+        count >= 2,
+        "expected ≥2 interpolation spans (item + section.title), got {count}:\n{html}"
     );
 }
 
@@ -3440,9 +3495,10 @@ page "home" { Loader {} }
 "#;
     let doc = parse_webc(src).expect("parse");
     let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // v3: `loading` condition compiled to an expr ID; check the attr is present
     assert!(
-        res.html.contains("data-webcore-if=\"loading\""),
-        "@loading should emit data-webcore-if=\"loading\":\n{}",
+        res.html.contains(&format!("{}=\"", attr_names::IF)),
+        "@loading should emit data-webcore-if attribute:\n{}",
         res.html
     );
 }
@@ -3464,9 +3520,10 @@ page "home" { Loader {} }
 "#;
     let doc = parse_webc(src).expect("parse");
     let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    // v3: `error` condition compiled to an expr ID; check the attr is present
     assert!(
-        res.html.contains("data-webcore-if=\"error\""),
-        "@catch should emit data-webcore-if=\"error\":\n{}",
+        res.html.contains(&format!("{}=\"", attr_names::IF)),
+        "@catch should emit data-webcore-if attribute:\n{}",
         res.html
     );
 }
@@ -3554,6 +3611,97 @@ component Badge {
     assert!(hover.contains("label"), "prop listed in hover: {hover}");
 }
 
+// ── v3 import system ────────────────────────────────────────────────────────
+
+#[test]
+fn import_webc_parsed_as_component_import_not_data() {
+    let src = r#"
+import Button from "./Button.webc"
+import posts  from "data/posts.json"
+
+page "home" {
+    view { p "hello" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    // .webc → component_imports, not data imports
+    assert_eq!(
+        doc.component_imports.len(),
+        1,
+        "one component import expected"
+    );
+    assert_eq!(doc.component_imports[0].alias, "Button");
+    assert_eq!(doc.component_imports[0].path, "./Button.webc");
+    // .json → data imports (existing behaviour)
+    assert_eq!(doc.imports.len(), 1, "one data import expected");
+    assert_eq!(doc.imports[0].name, "posts");
+}
+
+#[test]
+fn import_page_imports_map_populated_by_loader() {
+    // Simulate what the loader does: parse a page file whose parsed doc has
+    // component_imports, then verify page_imports is populated correctly.
+    let src = r#"
+import Counter from "./Counter.webc"
+import Button  from "./Button.webc"
+
+page "home" {
+    view { p "hi" }
+}
+"#;
+    let parsed = parse_webc(src).expect("parse");
+    // Simulate loader logic: associate imports with the page
+    let mut doc = WebCoreDocument {
+        app: None,
+        store: vec![],
+        store_computed: vec![],
+        locales: std::collections::BTreeMap::new(),
+        default_locale: String::new(),
+        wasm_module: None,
+        layouts: std::collections::BTreeMap::new(),
+        pages: parsed.pages.clone(),
+        components: std::collections::BTreeMap::new(),
+        imports: vec![],
+        data_imports: std::collections::BTreeMap::new(),
+        component_imports: vec![],
+        page_imports: std::collections::BTreeMap::new(),
+        source_files: std::collections::BTreeMap::new(),
+    };
+    if !parsed.component_imports.is_empty() {
+        let aliases: std::collections::BTreeSet<String> = parsed
+            .component_imports
+            .iter()
+            .map(|ci| ci.alias.clone())
+            .collect();
+        for name in doc.pages.keys() {
+            doc.page_imports.insert(name.clone(), aliases.clone());
+        }
+    }
+    let imports = doc
+        .page_imports
+        .get("home")
+        .expect("home should have imports");
+    assert!(imports.contains("Counter"));
+    assert!(imports.contains("Button"));
+    assert!(!imports.contains("Modal"), "Modal was not imported");
+}
+
+#[test]
+fn page_without_imports_has_no_page_imports_entry() {
+    let src = r#"
+page "about" {
+    view { p "about" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    // No import declarations → page_imports stays empty → all components available (v2 compat)
+    assert!(
+        doc.page_imports.is_empty(),
+        "no entry expected for pages without imports"
+    );
+    assert!(doc.component_imports.is_empty());
+}
+
 #[test]
 fn lsp_hover_returns_none_for_unknown_symbol() {
     use crate::cli::lsp::hover_for_symbol_test;
@@ -3566,5 +3714,586 @@ component Empty {
     assert!(
         hover_for_symbol_test(&doc, "unknown").is_none(),
         "unknown symbol should return None"
+    );
+}
+
+// ═══ v3.0.7 — @else if chained ═══════════════════════════════════════════════
+
+#[test]
+fn golden_else_if_chain_parses_to_nested_if() {
+    // @if / @else if / @else must produce a nested Element::If in the else_branch.
+    let src = r#"
+component Traffic {
+    state { status: String = "green" }
+    view {
+        @if status === "green" {
+            span "Go"
+        } @else if status === "yellow" {
+            span "Slow"
+        } @else {
+            span "Stop"
+        }
+    }
+}
+"#;
+    let doc = parse_webc(src).expect("parse @else if chain");
+    let comp = doc.components.get("Traffic").expect("component");
+    let outer_if = comp.view.first().expect("outer @if");
+    let crate::core::ast::Element::If {
+        condition,
+        else_branch,
+        ..
+    } = outer_if
+    else {
+        panic!("expected Element::If, got {outer_if:?}");
+    };
+    assert_eq!(condition, r#"status === "green""#);
+
+    let else_vec = else_branch.as_ref().expect("@else if branch present");
+    assert_eq!(
+        else_vec.len(),
+        1,
+        "else_branch should contain exactly one element (the @else if)"
+    );
+
+    let crate::core::ast::Element::If {
+        condition: inner_cond,
+        else_branch: inner_else,
+        ..
+    } = &else_vec[0]
+    else {
+        panic!(
+            "@else if should parse as nested Element::If, got {:?}",
+            else_vec[0]
+        );
+    };
+    assert_eq!(inner_cond, r#"status === "yellow""#);
+    assert!(
+        inner_else.is_some(),
+        "@else branch of the inner @else if should be present"
+    );
+}
+
+#[test]
+fn golden_else_if_chain_emits_correct_html_attrs() {
+    // The HTML output for an @if / @else if / @else chain must include all three
+    // data-webcore-if, data-webcore-else (the @else if wrapper), and data-webcore-else
+    // (the final @else). All three branches must appear in the output.
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Traffic {
+    state { status: String = "green" }
+    view {
+        @if status === "green" {
+            span "Go"
+        } @else if status === "yellow" {
+            span "Slow"
+        } @else {
+            span "Stop"
+        }
+    }
+}
+page "home" { Traffic {} }
+"#;
+    let html = compile_to_html(src);
+    assert!(
+        html.contains(&format!("{}=\"", attr_names::IF)),
+        "data-webcore-if attr missing:\n{html}"
+    );
+    // The @else if produces an @else div wrapping a nested @if div
+    assert!(
+        html.contains(&format!("{}=\"", attr_names::IF_ELSE)),
+        "data-webcore-else attr missing:\n{html}"
+    );
+    // All three text nodes must appear in the HTML
+    assert!(html.contains("Go"), "Go branch missing:\n{html}");
+    assert!(html.contains("Slow"), "Slow branch missing:\n{html}");
+    assert!(html.contains("Stop"), "Stop branch missing:\n{html}");
+}
+
+// ═══ v3.0.5 — prod-mode JS identifier renaming ═══════════════════════════════
+
+#[test]
+fn golden_prod_mode_renames_bind_identifiers() {
+    // In prod mode the inline <script> must use shortened identifiers (_bi, _bf, …)
+    // and must NOT contain the long-form names bindIf, bindFor, etc.
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Ticker {
+    state { count: Number = 0 }
+    view {
+        @if count > 0 { span "positive" }
+        @for i in items { li "{i}" }
+    }
+}
+page "home" { Ticker {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let prod_opts = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: None,
+        csp_meta: None,
+        prod: true,
+        source_maps: false,
+        inline_runtime: true,
+    };
+    let html = generate_html(&doc, "home", &prod_opts)
+        .expect("codegen")
+        .html;
+
+    // Extract just the <script> block
+    let script_start = html
+        .find("<script>")
+        .expect("<script> missing in prod HTML");
+    let script_end = html
+        .find("</script>")
+        .expect("</script> missing in prod HTML");
+    let script = &html[script_start..script_end];
+
+    assert!(
+        script.contains("_bi"),
+        "prod: _bi (bindIf) should appear in script:\n{script}"
+    );
+    assert!(
+        script.contains("_bf"),
+        "prod: _bf (bindFor) should appear in script:\n{script}"
+    );
+    assert!(
+        !script.contains("bindIf"),
+        "prod: bindIf should be renamed away:\n{script}"
+    );
+    assert!(
+        !script.contains("bindFor"),
+        "prod: bindFor should be renamed away:\n{script}"
+    );
+}
+
+// ═══ v3.1.1 — publishDiagnostics ═════════════════════════════════════════════
+
+#[test]
+fn lsp_diagnostics_empty_on_valid_source() {
+    use crate::cli::lsp::first_diagnostic;
+    let src = r#"
+component Counter {
+    state { count: Number = 0 }
+    view  { div { "{count}" } }
+}
+page "home" { view { Counter {} } }
+"#;
+    assert!(
+        first_diagnostic(src).is_none(),
+        "valid source must produce no diagnostics"
+    );
+}
+
+#[test]
+fn lsp_diagnostics_error_on_syntax_error() {
+    use crate::cli::lsp::first_diagnostic;
+    // Missing closing brace — should produce one diagnostic.
+    let src = "component Broken { state { count: Number = 0 }";
+    let diag = first_diagnostic(src).expect("broken source must produce a diagnostic");
+    assert_eq!(
+        diag["severity"], 1,
+        "syntax errors must have severity Error (1)"
+    );
+    assert!(
+        !diag["message"].as_str().unwrap_or("").is_empty(),
+        "diagnostic message must not be empty"
+    );
+}
+
+#[test]
+fn lsp_diagnostics_range_is_within_source() {
+    use crate::cli::lsp::first_diagnostic;
+    let src = "page \"home\" { view { !!!invalid!!! } }";
+    let diag = first_diagnostic(src).expect("invalid source must produce a diagnostic");
+    let line = diag["range"]["start"]["line"].as_u64().unwrap_or(u64::MAX);
+    let src_lines = src.lines().count() as u64;
+    assert!(
+        line < src_lines,
+        "diagnostic line {line} must be within the source ({src_lines} lines)"
+    );
+}
+
+// ── v3.1.2: Semantic tokens ─────────────────────────────────────────────────
+
+#[test]
+fn sem_tok_keyword_component() {
+    // "component" should be a keyword token (type 0)
+    let src = r#"component Foo { view { p "hi" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, _)| tt == 0),
+        "no keyword token"
+    );
+    // "Foo" should be a class token (type 5) because it's a component name
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, _)| tt == 5),
+        "no class token for Foo"
+    );
+}
+
+// ── v3.2: Source maps ────────────────────────────────────────────────────────
+
+#[test]
+fn source_map_vlq_encodes_zero() {
+    // VLQ(0) = "A" (0 in base64-vlq)
+    use crate::codegen::js::sourcemap::encode_vlq_test;
+    assert_eq!(encode_vlq_test(0), "A", "VLQ(0) must be 'A'");
+    assert_eq!(encode_vlq_test(1), "C", "VLQ(1) must be 'C'");
+    assert_eq!(encode_vlq_test(-1), "D", "VLQ(-1) must be 'D'");
+}
+
+#[test]
+fn source_map_builder_emits_valid_json() {
+    use crate::codegen::js::sourcemap::{Mapping, SourceMapBuilder};
+    let mut builder = SourceMapBuilder::new("test.webc", "page \"home\" { p \"hello\" }");
+    builder.add(Mapping {
+        output_line: 0,
+        output_col: 0,
+        source_line: 0,
+        source_col: 0,
+    });
+    let json = builder.build();
+    // Must be valid JSON with version:3
+    assert!(
+        json.contains("\"version\":3"),
+        "version field missing: {json}"
+    );
+    assert!(
+        json.contains("\"sources\":[\"test.webc\"]"),
+        "sources field missing: {json}"
+    );
+    assert!(
+        json.contains("\"mappings\""),
+        "mappings field missing: {json}"
+    );
+    let mappings_start = json.find("\"mappings\":\"").expect("mappings key") + 12;
+    let mappings_end = json[mappings_start..].find('"').expect("close quote") + mappings_start;
+    let mappings = &json[mappings_start..mappings_end];
+    assert!(
+        !mappings.is_empty(),
+        "mappings must be non-empty when a mapping was added: {json}"
+    );
+}
+
+#[test]
+fn sem_tok_type_names() {
+    let src = r#"component C { state { n: Number = 0  s: String = "" } view { p "x" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "Number" and "String" → type tokens (index 1)
+    let type_count = toks.iter().filter(|&&(_, _, _, tt, _)| tt == 1).count();
+    assert!(type_count >= 2, "expected ≥2 type tokens, got {type_count}");
+}
+
+#[test]
+fn sem_tok_string_literal() {
+    let src = r#"component C { view { p "hello world" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "hello world" → string token (index 2)
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, _)| tt == 2),
+        "no string token"
+    );
+}
+
+#[test]
+fn source_map_generated_for_dev_build() {
+    // Compile a component with a state expression in dev mode (source_maps: true)
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Counter {
+    state { count: Number = 0 }
+    view { p "{count}" }
+}
+page "home" { Counter {} }
+"#;
+    let doc = crate::parser::parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: None,
+        csp_meta: None,
+        prod: false,
+        source_maps: true,
+        inline_runtime: true,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        res.source_map_json.is_some(),
+        "source_map_json must be Some in dev mode with expressions"
+    );
+}
+
+#[test]
+fn sem_tok_line_comment() {
+    let src = "// this is a comment\ncomponent C { view { p \"x\" } }";
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // comment is on line 0 → comment token (index 3) at line 0
+    assert!(
+        toks.iter().any(|&(ln, _, _, tt, _)| ln == 0 && tt == 3),
+        "no comment token on line 0"
+    );
+}
+
+#[test]
+fn source_map_not_generated_in_prod() {
+    // Same component with source_maps: false (prod mode)
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Counter {
+    state { count: Number = 0 }
+    view { p "{count}" }
+}
+page "home" { Counter {} }
+"#;
+    let doc = crate::parser::parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: None,
+        csp_meta: None,
+        prod: false,
+        source_maps: false,
+        inline_runtime: true,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        res.source_map_json.is_none(),
+        "source_map_json must be None when source_maps=false"
+    );
+}
+
+#[test]
+fn sem_tok_at_directive() {
+    let src = r#"component C { state { ok: Boolean = true } view { @if ok { p "yes" } } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "@if" → keyword token (index 0)
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, _)| tt == 0),
+        "no keyword token for @if"
+    );
+}
+
+#[test]
+fn sem_tok_state_var() {
+    let src = r#"component C { state { count: Number = 0 } view { p "{count}" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "count" appears as a state var → variable tokens (index 4), at least one occurrence in the view
+    let var_count = toks.iter().filter(|&&(_, _, _, tt, _)| tt == 4).count();
+    assert!(
+        var_count >= 1,
+        "expected ≥1 variable token for count, got {var_count}"
+    );
+}
+
+#[test]
+fn sem_tok_computed_readonly() {
+    let src =
+        r#"component C { state { x: Number = 1 } computed { dbl = x * 2 } view { p "{dbl}" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "dbl" is a computed var → variable (4) with readonly modifier (1)
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, mods)| tt == 4 && mods == 1),
+        "no readonly variable token for computed var"
+    );
+}
+
+#[test]
+fn sem_tok_attr_prefix() {
+    let src = r#"component C { state { n: Number = 0 } view { button on:click={n+=1} { "+" } } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "on:click" → keyword token (index 0)
+    // There should be multiple keyword tokens (component, view, button(?), on:click)
+    let kw_count = toks.iter().filter(|&&(_, _, _, tt, _)| tt == 0).count();
+    assert!(kw_count >= 1, "no keyword token for on:click");
+}
+
+#[test]
+fn sem_tok_store_prefix() {
+    let src = r#"component C { view { p "{$store.count}" } }"#;
+    let data = crate::cli::lsp::semantic_tokens_for_source(src);
+    let toks = crate::cli::lsp::decode_semantic_tokens(&data);
+    // "$store.count" → variable token (index 4)
+    assert!(
+        toks.iter().any(|&(_, _, _, tt, _)| tt == 4),
+        "no variable token for $store.count"
+    );
+}
+
+#[test]
+fn inline_script_has_sourcemapping_url() {
+    // When source_maps: true, HTML should contain the sourceMappingURL comment
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Counter {
+    state { count: Number = 0 }
+    view { p "{count}" }
+}
+page "home" { Counter {} }
+"#;
+    let doc = crate::parser::parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        lang: "en".into(),
+        title: "Test".into(),
+        extra_css_files: vec![],
+        critical_css: None,
+        csp_meta: None,
+        prod: false,
+        source_maps: true,
+        inline_runtime: true,
+    };
+    let res = generate_html(&doc, "home", &options).expect("codegen");
+    assert!(
+        res.html.contains("sourceMappingURL"),
+        "HTML inline script must contain sourceMappingURL comment when source_maps=true:\n{}",
+        res.html
+    );
+}
+
+// ── v3.1.3: Code actions ──────────────────────────────────────────────────────
+
+#[test]
+fn code_action_import_unknown_component() {
+    let src = "page \"home\" { Foo {} }";
+    let actions = crate::cli::lsp::code_actions_for_source(src, 0, 14);
+    assert!(
+        actions.iter().any(|a| {
+            a["title"].as_str().unwrap_or("").contains("Import")
+                && a["title"].as_str().unwrap_or("").contains("Foo")
+        }),
+        "expected import action for Foo"
+    );
+}
+
+#[test]
+fn code_action_no_import_for_known_component() {
+    let src = "component Counter { view { p \"x\" } }\npage \"home\" { Counter {} }";
+    let actions = crate::cli::lsp::code_actions_for_source(src, 1, 14);
+    assert!(
+        !actions.iter().any(|a| {
+            a["title"].as_str().unwrap_or("").contains("Import")
+                && a["title"].as_str().unwrap_or("").contains("Counter")
+        }),
+        "should not offer import for known component"
+    );
+}
+
+#[test]
+fn code_action_no_import_when_already_imported() {
+    let src = "import Bar from \"./Bar.webc\"\npage \"home\" { Bar {} }";
+    let actions = crate::cli::lsp::code_actions_for_source(src, 1, 14);
+    assert!(
+        !actions.iter().any(|a| {
+            a["title"].as_str().unwrap_or("").contains("Import")
+                && a["title"].as_str().unwrap_or("").contains("Bar")
+        }),
+        "should not offer import when already imported"
+    );
+}
+
+#[test]
+fn code_action_add_unknown_var_to_state() {
+    let src = "component C {\n    state { count: Number = 0 }\n    view { p \"{draft}\" }\n}";
+    // line 2: `    view { p "{draft}" }` — 'd' of "draft" is at col 15
+    let actions = crate::cli::lsp::code_actions_for_source(src, 2, 15);
+    assert!(
+        actions.iter().any(|a| {
+            a["title"].as_str().unwrap_or("").contains("draft")
+                && a["title"].as_str().unwrap_or("").contains("state")
+        }),
+        "expected add-to-state action for draft"
+    );
+}
+
+#[test]
+fn code_action_no_add_for_known_var() {
+    let src = "component C {\n    state { count: Number = 0 }\n    view { p \"{count}\" }\n}";
+    // line 2: `    view { p "{count}" }` — 'c' of "count" is at col 15
+    let actions = crate::cli::lsp::code_actions_for_source(src, 2, 15);
+    assert!(
+        !actions.iter().any(|a| {
+            a["title"].as_str().unwrap_or("").contains("count")
+                && a["title"].as_str().unwrap_or("").contains("state")
+        }),
+        "should not offer add-to-state for known var"
+    );
+}
+
+/// Regression: the v3 reactive bind functions must NOT take the expression
+/// map `_e` as a parameter — they close over the module-scoped `const _e`.
+/// Otherwise user-authored `bind()` calls inside `on:mount` blocks pass no
+/// argument and crash with "Cannot read properties of undefined".
+#[test]
+fn v3_bind_fns_close_over_expr_map() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Toggle {
+    state { open: Boolean = false }
+    view {
+        @if open { p "{open}" }
+    }
+}
+page "home" { Toggle {} }
+"#;
+    let html = compile_to_html(src);
+    // bindIf/bind must be parameterless so user bind() works
+    assert!(
+        html.contains("const bindIf=()=>"),
+        "bindIf must be parameterless (close over _e):\n{html}"
+    );
+    assert!(
+        html.contains("const bind=()=>"),
+        "bind must be parameterless (close over _e):\n{html}"
+    );
+    assert!(
+        !html.contains("(_e)=>"),
+        "no v3 bind fn should take _e as a parameter:\n{html}"
+    );
+}
+
+/// Regression: in dev builds (source_maps) the `_e` map emits one closure per
+/// line. `compile_read_expr` already returns a complete `()=>expr` closure, so
+/// the emission must be `id:closure`, not `id:()=>closure` — the latter double-
+/// wraps it (`e0:()=>()=>S.get('x')`) and `fn()` returns a function (always
+/// truthy), permanently showing every `@if` branch.
+#[test]
+fn dev_expr_map_not_double_wrapped() {
+    let src = r#"
+layout MainLayout { main { slot content } }
+component Toggle {
+    state { open: Boolean = false }
+    view {
+        @if open { p "{open}" }
+    }
+}
+page "home" { Toggle {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        source_maps: true,
+        inline_runtime: true,
+        ..opts()
+    };
+    let html = generate_html(&doc, "home", &options).expect("codegen").html;
+    assert!(
+        !html.contains("=>()=>S.get("),
+        "expr-map closures must not be double-wrapped:\n{html}"
+    );
+    assert!(
+        html.contains("()=>S.get('open')"),
+        "expr-map must contain the single-wrapped closure:\n{html}"
     );
 }

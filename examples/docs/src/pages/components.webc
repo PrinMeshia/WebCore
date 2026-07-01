@@ -10,15 +10,15 @@ page "components" {
         h2 { "Anatomy of a component" }
         p { "Every block is optional except " code { "view" } " — the HTML tree is required." }
         pre class="code-block" {
-"component MyComponent \{
-    props    \{ ... \}      // pass-in values (static or reactive)
-    state    \{ ... \}      // local reactive state
-    computed \{ ... \}      // derived values, re-evaluated before each bind
-    on:mount   \{ ... \}    // runs at DOMContentLoaded
-    on:destroy \{ ... \}    // runs before SPA navigation / window.beforeunload
-    view     \{ ... \}      // required — the HTML tree
-    style    \{ ... \}      // scoped CSS (FNV-1a data-v hash)
-\}"
+"component MyComponent {
+    props    { ... }      // pass-in values (static or reactive)
+    state    { ... }      // local reactive state
+    computed { ... }      // derived values, re-evaluated before each bind
+    on:mount   { ... }    // runs at DOMContentLoaded
+    on:destroy { ... }    // runs before SPA navigation / window.beforeunload
+    view     { ... }      // required — the HTML tree
+    style    { ... }      // scoped CSS (FNV-1a data-v hash)
+}"
         }
     }
 
@@ -29,33 +29,33 @@ page "components" {
             "Static props ("
             code { "name=\"value\"" }
             ") are substituted at compile time. Dynamic props ("
-            code { "name=\{expr\}" }
+            code { "name=\{expr}" }
             ") compile to reactive spans."
         }
         pre class="code-block" {
-"component Badge \{
-    props \{ label: String, color: String \}
-    view  \{ span class=\{color\} \"Status: \{label\}\" \}
-\}
+"component Badge {
+    props { label: String, color: String }
+    view  { span class=\{color} \"Status: \{label}\" }
+}
 
 // Static props — substituted at compile time
-Badge label=\"Active\" color=\"green\" \{\}
+Badge label=\"Active\" color=\"green\" {}
 
 // Dynamic props — reactive at runtime
-Badge label=\{statusMsg\} color=\{statusColor\} \{\}"
+Badge label=\{statusMsg} color=\{statusColor} {}"
         }
         p {
             "Compound expressions using a prop name also work:"
         }
         pre class="code-block" {
-"component StepCounter \{
-    props \{ step: Number \}
-    view \{
-        p \"Next: \{step + 1\}\"        // compound expression
-        span class=\{color\} \"Status\" // prop as dynamic attribute
-    \}
-\}
-StepCounter step=\"2\" color=\"green\" \{\}"
+"component StepCounter {
+    props { step: Number }
+    view {
+        p \"Next: \{step + 1}\"        // compound expression
+        span class=\{color} \"Status\" // prop as dynamic attribute
+    }
+}
+StepCounter step=\"2\" color=\"green\" {}"
         }
     }
 
@@ -63,12 +63,12 @@ StepCounter step=\"2\" color=\"green\" \{\}"
         h2 { "State" }
         p { "Local reactive state. Any assignment triggers a DOM update for bindings that depend on it." }
         pre class="code-block" {
-"state \{
+"state {
     count:  Number  = 0
     name:   String  = \"World\"
     active: Boolean = true
     items:  List    = []
-\}"
+}"
         }
         div class="callout" {
             "Types: "
@@ -91,18 +91,18 @@ StepCounter step=\"2\" color=\"green\" \{\}"
             " block declares variables derived from state. Re-evaluated before every DOM bind."
         }
         pre class="code-block" {
-"component FullName \{
-    state \{
+"component FullName {
+    state {
         firstName: String = \"Jean\"
         lastName:  String = \"Dupont\"
-    \}
-    computed \{
+    }
+    computed {
         fullName = firstName + \" \" + lastName
         initials = firstName[0] + \".\" + lastName[0]
-    \}
-    on:mount \{ firstName = \"Marie\" \}
-    view \{ p \"Hello \{fullName\} (\{initials\})\" \}
-\}"
+    }
+    on:mount { firstName = \"Marie\" }
+    view { p \"Hello \{fullName} (\{initials})\" }
+}"
         }
         div class="callout-tip" {
             strong { "No reactive loops: " }
@@ -115,32 +115,32 @@ StepCounter step=\"2\" color=\"green\" \{\}"
     section class="doc-section" {
         h2 { "Lifecycle — on:mount" }
         p {
-            code { "on:mount \{ \}" }
+            code { "on:mount { }" }
             " runs once at "
             code { "DOMContentLoaded" }
             ", after the reactive runtime is ready. Wrapped in an IIFE for variable isolation."
         }
         pre class="code-block" {
-"component Clock \{
-    state \{ time: String = \"\" \}
-    on:mount \{
-        const tick = () => \{
+"component Clock {
+    state { time: String = \"\" }
+    on:mount {
+        const tick = () => {
             S.set(\"time\", new Date().toLocaleTimeString());
             bind();
-        \};
+        };
         tick();
         window.__clockId = setInterval(tick, 1000);
-    \}
-    on:destroy \{ clearInterval(window.__clockId); \}
-    view \{ p \"Time: \{time\}\" \}
-\}"
+    }
+    on:destroy { clearInterval(window.__clockId); }
+    view { p \"Time: \{time}\" }
+}"
         }
     }
 
     section class="doc-section" {
         h2 { "Lifecycle — on:destroy" }
         p {
-            code { "on:destroy \{ \}" }
+            code { "on:destroy { }" }
             " runs before every SPA navigation and on "
             code { "window.beforeunload" }
             ". Use it to clean up timers, cancel requests, or deregister listeners."
@@ -148,9 +148,9 @@ StepCounter step=\"2\" color=\"green\" \{\}"
         pre class="code-block" {
 "// Compiled output (tree-shaken in only when used)
 const DESTROY_HOOKS = [
-    () => \{ clearInterval(window.__clockId); \}
+    () => { clearInterval(window.__clockId); }
 ];
-function runDestroyHooks() \{ DESTROY_HOOKS.forEach(h => h()); \}
+function runDestroyHooks() { DESTROY_HOOKS.forEach(h => h()); }
 window.addEventListener('beforeunload', runDestroyHooks);"
         }
         div class="callout-tip" {
@@ -170,23 +170,23 @@ window.addEventListener('beforeunload', runDestroyHooks);"
             " dispatches a "
             code { "CustomEvent" }
             " on document. Listen with "
-            code { "on:name=\{handler\}" }
+            code { "on:name=\{handler}" }
             " at the call site."
         }
         pre class="code-block" {
 "// Emitter component
-component Notifier \{
-    view \{
-        button on:click=\{emit(\"ping\", count)\} \{ \"Ping\" \}
-        button on:click=\{emit(\"reset\")\}       \{ \"Reset\" \}
-    \}
-\}
+component Notifier {
+    view {
+        button on:click=\{emit(\"ping\", count)} { \"Ping\" }
+        button on:click=\{emit(\"reset\")}       { \"Reset\" }
+    }
+}
 
 // Call site — subscribe to events
-page \"home\" \{
-    Notifier on:ping=\{total += 1\} on:reset=\{total = 0\} \{\}
-    p \"Received \{total\} pings\"
-\}"
+page \"home\" {
+    Notifier on:ping=\{total += 1} on:reset=\{total = 0} {}
+    p \"Received \{total} pings\"
+}"
         }
         div class="callout" {
             "Events are dispatched on "
@@ -205,21 +205,21 @@ page \"home\" \{
             " attribute computed as a deterministic FNV-1a hash of the component name. "
             code { "@media" }
             " queries inside "
-            code { "style \{ \}" }
+            code { "style { }" }
             " are scoped automatically."
         }
         pre class="code-block" {
-"component Card \{
-    view \{ div class=\"card\" \{ slot content \} \}
-    style \{
-        .card \{ padding: 1rem; background: #1e293b; \}
-        @media (max-width: 768px) \{
-            .card \{ padding: 0.5rem; \}
-        \}
-    \}
-\}
-// Output: .card[data-v=\"a1b2\"] \{ ... \}
-//         @media (...) \{ .card[data-v=\"a1b2\"] \{ ... \} \}"
+"component Card {
+    view { div class=\"card\" { slot content } }
+    style {
+        .card { padding: 1rem; background: #1e293b; }
+        @media (max-width: 768px) {
+            .card { padding: 0.5rem; }
+        }
+    }
+}
+// Output: .card[data-v=\"a1b2\"] { ... }
+//         @media (...) { .card[data-v=\"a1b2\"] { ... } }"
         }
     }
 

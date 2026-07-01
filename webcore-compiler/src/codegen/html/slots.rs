@@ -8,7 +8,7 @@ use std::path::Path;
 
 use super::elements::generate_elements;
 use super::utils::safe_id_prefix;
-use super::{GenContext, HandlerMapping};
+use super::{GenContext, HtmlGenerationResult};
 
 /// Returns `true` if any element in the slice (or its descendants) is a `Slot`
 /// or `SlotContent`. Used to short-circuit `resolve_slots` on subtrees that
@@ -174,13 +174,17 @@ fn separate_slot_content(
     (named, default_content)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn generate_layout_with_page_and_components(
     layout: &Layout,
     page: &Page,
     document: &WebCoreDocument,
     project_root: Option<&Path>,
     ssg: Option<&SsgContext>,
-) -> Result<(String, Vec<HandlerMapping>), CompileError> {
+    compiled_vars: Option<&crate::codegen::js::js_events::CompiledVars>,
+    has_route_params: bool,
+    has_query_params: bool,
+) -> Result<HtmlGenerationResult, CompileError> {
     let prefix = safe_id_prefix(&page.name);
     let (named_slots, default_content) = separate_slot_content(&page.content);
     let resolved = resolve_slots(&layout.content, &named_slots, &default_content);
@@ -190,6 +194,19 @@ pub(super) fn generate_layout_with_page_and_components(
         project_root,
         ssg,
         counter: 0,
+        compiled_vars,
+        expr_map: vec![],
+        expr_spans: vec![],
+        expr_counter: 0,
+        has_route_params,
+        has_query_params,
     };
-    generate_elements(&resolved, &mut ctx, None)
+    let (html, handlers) = generate_elements(&resolved, &mut ctx, None)?;
+    Ok(HtmlGenerationResult {
+        html,
+        handlers,
+        compiled_exprs: ctx.expr_map,
+        expr_spans: ctx.expr_spans,
+        source_map_json: None,
+    })
 }

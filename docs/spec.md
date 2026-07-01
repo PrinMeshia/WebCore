@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 2.10.1 — Référence complète de la syntaxe `.webc`
+> Version : 3.2.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -74,7 +74,10 @@
 59. [Nouveautés v2.8.0](#nouveautés-v280)
 60. [Nouveautés v2.10.0](#nouveautés-v2100)
 61. [Nouveautés v2.10.1](#nouveautés-v2101)
-62. [Limites actuelles (v2.10.1)](#limites-actuelles-v2101)
+62. [Import de composants build-time (v3.0.1)](#import-de-composants-build-time-v301)
+63. [Expressions compilées (v3.0.2/v3.0.3)](#expressions-compilées-v302v303)
+64. [Nouveautés v3.0](#nouveautés-v30)
+65. [Limites actuelles (v3.0)](#limites-actuelles-v30)
 
 ---
 
@@ -480,6 +483,9 @@ component Timer {
 
 - L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
 - `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+  Il s'appelle **sans argument** (`bind()`) : il réévalue les `computed` puis rafraîchit
+  les interpolations `{…}`. Les blocs `@if` et attributs dynamiques se mettent à jour
+  automatiquement de façon réactive dès le `S.set` (pas besoin de `bind()`).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
 - Le corps `on:mount { }` supporte les accolades imbriquées à **profondeur arbitraire** — les callbacks JS complexes (`setTimeout`, `setInterval`, `addEventListener` avec corps multi-ligne, objets littéraux) sont entièrement supportés.
 
@@ -614,6 +620,9 @@ component Timer {
 
 - L'accès au state se fait via `S.get("varName")` / `S.set("varName", value)` en JS brut.
 - `bind()` doit être appelé manuellement pour mettre à jour le DOM après un `S.set`.
+  Il s'appelle **sans argument** (`bind()`) : il réévalue les `computed` puis rafraîchit
+  les interpolations `{…}`. Les blocs `@if` et attributs dynamiques se mettent à jour
+  automatiquement de façon réactive dès le `S.set` (pas besoin de `bind()`).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
 
 ### `on:destroy`
@@ -889,11 +898,27 @@ p "Pair : {count % 2 == 0}"
 p "Catégorie : {count > 10 ? 'grand' : 'petit'}"
 ```
 
+### Accolades littérales
+
+Un `{` n'ouvre une interpolation que s'il est **immédiatement suivi** d'une
+expression (pas d'espace) qui se ferme par `}` sur la **même ligne**. Tout le
+reste est du texte littéral — pratique pour afficher du code :
+
+```webc
+pre "component App { state { x } }"   // littéral (espace après {)
+p   "Vide : {}"                        // littéral
+p   "Compteur : {count}"               // interpolation
+```
+
+L'échappement `\{` / `\}` reste accepté si vous voulez forcer un brace littéral
+là où il serait sinon interprété (ex. afficher la syntaxe `{count}` telle quelle :
+`"\{count\}"`).
+
 ---
 
 ## Directives de contrôle
 
-### `@if` / `@else`
+### `@if` / `@else if` / `@else`
 
 ```webc
 @if condition {
@@ -918,6 +943,23 @@ Exemples :
     link to="/login" { "Se connecter" }
 }
 ```
+
+### `@else if` — chaînage de branches (v3.0.7)
+
+La clause `@else if` permet d'enchaîner plusieurs branches sans imbriquer manuellement des blocs `@if` :
+
+```webc
+@if count > 9 {
+    p class="badge badge-accent" { "Double chiffres !" }
+} @else if count > 0 {
+    p class="badge badge-muted" { "En cours…" }
+} @else {
+    p class="badge badge-neutral" { "Appuyez sur +" }
+}
+```
+
+Le compilateur développe la chaîne en `if` imbriqués dans l'AST — aucun overhead runtime.
+Les deux syntaxes `@else if` et `@else @if` sont acceptées ; `@else if` est recommandée.
 
 La condition est évaluée au runtime et réactive (mise à jour si une variable du state change).
 
@@ -3106,12 +3148,16 @@ Le serveur lit les requêtes JSON-RPC sur `stdin` (framing `Content-Length`) et 
 | Survol | `textDocument/hover` | Documentation du symbole sous le curseur |
 | Complétion | `textDocument/completion` | Mots-clés, blocs et directives `.webc` |
 | Définition | `textDocument/definition` | Saut vers la définition d'un composant ou d'une variable |
+| Renommage | `textDocument/rename` | Renomme un identifiant sur toutes ses occurrences |
+| **Diagnostics** | `textDocument/publishDiagnostics` | Squiggles en temps réel après chaque `didOpen`/`didChange` |
+| **Tokens sémantiques** | `textDocument/semanticTokens/full` | Colorisation sémantique — mots-clés, types, strings, variables, commentaires |
+| **Code actions** | `textDocument/codeAction` | Quick-fixes : « Import component 'X' » et « Add 'x' to state » |
 | Synchronisation | `textDocument/didOpen` / `didChange` / `didClose` | Suivi du contenu des documents |
 | Arrêt propre | `shutdown` / `exit` | Terminaison gracieuse |
 
 ### Architecture
 
-Le serveur est implémenté dans `src/cli/lsp.rs` — environ 300 lignes, zéro dépendance hors `serde_json`. Le protocole Content-Length est géré directement via `BufRead`/`Write` de la stdlib Rust.
+Le serveur est implémenté dans `src/cli/lsp.rs` — environ 650 lignes, zéro dépendance hors `serde_json`. Le protocole Content-Length est géré directement via `BufRead`/`Write` de la stdlib Rust.
 
 ---
 
@@ -3190,7 +3236,142 @@ Le serveur LSP peut désormais renommer un identifiant sur toutes ses occurrence
 
 ---
 
-## Limites actuelles (v2.10.1)
+## Import de composants build-time (v3.0.1)
+
+### Syntaxe
+
+```webc
+import Button from "./components/Button.webc"
+import Card   from "./components/Card.webc"
+
+page "home" {
+    Card {
+        Button label="Valider" {}
+    }
+}
+```
+
+### Comportement
+
+- L'import est résolu à la compilation par `webc build` — le fichier `.webc` cible est parsé, compilé et inliné dans la sortie
+- Aucun chargeur côté client, aucun overhead réseau, aucun bundle step
+- Les props du composant importé sont validées à la compilation (warning sur prop inconnue)
+- Les chemins sont relatifs au fichier source ; les références circulaires sont détectées et rejetées
+- Le CSS scopé de chaque composant importé est inclus une seule fois dans la sortie (`data-v` dédupliqué)
+
+---
+
+## Expressions compilées (v3.0.2/v3.0.3)
+
+### Principe
+
+Jusqu'en v2.x, les expressions réactives (`@if count > 0`, `{count * 2}`, etc.) étaient évaluées au runtime via `evalCond()` — une fonction qui utilisait `new Function()` pour construire des lambdas dynamiquement. Cela interdisait une CSP stricte sans `unsafe-eval`.
+
+En v3.0, chaque expression est compilée par le compilateur Rust en une fermeture JS concrète, émise directement dans le script inline :
+
+```js
+// v3.0 — expression compilée
+const _e = {
+  e0: ()=>S.get('count')>0,
+  e1: ()=>S.get('count')*2,
+  e2: ()=>S.get('firstName')+' '+S.get('lastName'),
+};
+```
+
+`evalCond` et `new Function` sont supprimés du runtime généré.
+
+### Garantie CSP
+
+La suppression de `new Function()` rend `script-src 'self'` sans `'unsafe-eval'` **garanti structurellement** — aucun code n'est évalué dynamiquement à l'exécution.
+
+```html
+<!-- CSP valide depuis v3.0.3 -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+```
+
+(`style-src 'unsafe-inline'` reste requis pour le critical CSS inline.)
+
+### Variables de binding
+
+En v3.0.3, les variables de state sont injectées comme map d'entrées dans `bind()` :
+
+```js
+bind(el, [
+  ['count', _e.e0],
+  ['doubled', _e.e1],
+], S);
+```
+
+Les dépendances sont trackées statiquement à la compilation — plus de découverte dynamique au runtime.
+
+---
+
+## Nouveautés v3.0
+
+### v3.0.1 — Imports de composants build-time
+
+`import Button from "./Button.webc"` résolu à la compilation. Voir [Import de composants build-time (v3.0.1)](#import-de-composants-build-time-v301).
+
+### v3.0.2 — Expressions compilées (phase 1)
+
+Chaque expression réactive compilée en fermeture JS — `evalCond` et `new Function` supprimés. CSP `script-src 'self'` sans `unsafe-eval` garanti structurellement. Voir [Expressions compilées (v3.0.2/v3.0.3)](#expressions-compilées-v302v303).
+
+### v3.0.3 — Expressions compilées (phase 2)
+
+Variables de binding injectées comme map statique — dépendances trackées à la compilation. 175+10 tests.
+
+### v3.0.5 — Renommage des identifiants en mode prod
+
+`webc build --prod` raccourcit les noms de fonctions runtime (`bindIf→_bi`, `bindFor→_bf`, `bindAttrs→_ba`, `bind(→_b(`, `$effect→_ef`, …). Réduction supplémentaire de la taille du JS inline sans minifieur externe.
+
+| Identifiant dev | Identifiant prod |
+|---|---|
+| `bindIf` | `_bi` |
+| `bindFor` | `_bf` |
+| `bindAttrs` | `_ba` |
+| `bindDefer` | `_bd` |
+| `bindClassBindings` | `_bc` |
+| `rebindComputed` | `_rc` |
+| `runDestroyHooks` | `_rd` |
+| `bindValidation` | `_bv` |
+| `validateField` | `_vf` |
+| `matchRoute` | `_mr` |
+| `bind(` | `_b(` |
+| `$effect` | `_ef` |
+
+### v3.0.7 — `@else if` chaîné
+
+`@else if condition { … }` comme alternative directe à `@else { @if … }`. Voir [`@else if`](#else-if--chaînage-de-branches-v307). 188 tests.
+
+### v3.1.3 — LSP code actions
+
+`textDocument/codeAction` retourne des quick-fixes quand le curseur est positionné sur
+un identifiant inconnu :
+
+| Action | Déclencheur | Effet |
+|---|---|---|
+| Import component 'X' | Identifiant **majuscule** absent de `doc.components` et non déjà importé | Prépend `import X from "./X.webc"\n` à la ligne 0 |
+| Add 'x' to state | Identifiant **minuscule** non déclaré dans `state`/`computed`/`props`/`store` | Insère `    x: String = ""\n` dans le bloc `state {}` le plus proche |
+
+Activé avec `"codeActionProvider": true` dans les capabilities `initialize`.
+
+### v3.2 — Source maps JS
+
+En mode dev (`source_maps: true` dans `HtmlPageOptions`), le compilateur génère :
+
+- Un commentaire `//# sourceMappingURL=<page>.js.map` à la fin du script inline.
+- Un fichier `dist/<page>/<page>.js.map` (source map v3, encodage Base64-VLQ).
+
+Chaque fermeture d'expression compilée (`e0`, `e1`, …) dans le bloc `const _e={…}` est
+mappée à sa ligne d'origine dans le fichier `.webc`. Le bloc est émis une closure par
+ligne (au lieu d'une ligne unique) pour permettre les correspondances de ligne précises.
+
+En prod (`prod: true`), les source maps sont désactivées. 191 tests.
+
+---
+
+## Limites actuelles (v3.0)
 
 | Limite | Détail |
 |---|---|
@@ -3201,7 +3382,6 @@ Le serveur LSP peut désormais renommer un identifiant sur toutes ses occurrence
 | Imports de données | Seuls JSON et TOML sont supportés (pas de CSV, XML, ou requêtes réseau) |
 | Collections SSG | Seuls les champs de l'élément accessibles via `$route.<param>` sont pré-rendus ; les autres champs (`title`, etc.) sont résolus côté client |
 | Collections SSG | Un seul paramètre `:param` par route de collection |
-| CSP et `style-src` | `style-src 'unsafe-inline'` est requis pour le critical CSS inline — une CSP stricte sans `'unsafe-inline'` n'est pas possible tant que le critical CSS reste dans un `<style>` inline |
+| CSP et `style-src` | `style-src 'unsafe-inline'` est requis pour le critical CSS inline — `script-src 'self'` sans `unsafe-eval` est garanti depuis v3.0.3 |
 | `@loading` / `@catch` reformatés | Le formateur (`webc fmt`) restitue `@loading`/`@catch` en `@if loading`/`@if error` — équivalents mais moins lisibles |
-| LSP — diagnostics en temps réel | Le serveur LSP ne pousse pas encore de `textDocument/publishDiagnostics` — les erreurs sont visibles uniquement via `webc check` |
 | Spread sur composants | `...attrs` sur un composant passe la validation prop en silence ; la résolution des props du spread est effectuée côté runtime uniquement |

@@ -33,12 +33,20 @@ component DocsShell {
         }
 
         // ── Sidebar navigation ────────────────────────────────────────────────
+        const SVG = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+        const ICONS = {
+            home: SVG('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>'),
+            book: SVG('<path d="M12 7v14"/><path d="M3 5a2 2 0 0 1 2-2h5v16H5a2 2 0 0 1-2-2z"/><path d="M21 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 0 2-2z"/>'),
+            blocks: SVG('<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>'),
+            zap: SVG('<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>'),
+            target: SVG('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>')
+        };
         const NAV_PAGES = [
-            { href: '/', icon: '🏠', label: 'Home' },
-            { href: '/syntax', icon: '📖', label: 'Syntax' },
-            { href: '/components', icon: '🧩', label: 'Components' },
-            { href: '/features', icon: '⚡', label: 'Features' },
-            { href: '/examples', icon: '🎯', label: 'Examples' }
+            { href: '/', icon: 'home', label: 'Home' },
+            { href: '/syntax', icon: 'book', label: 'Syntax' },
+            { href: '/components', icon: 'blocks', label: 'Components' },
+            { href: '/features', icon: 'zap', label: 'Features' },
+            { href: '/examples', icon: 'target', label: 'Examples' }
         ];
 
         const sidebar = document.querySelector('.site-sidebar');
@@ -52,12 +60,16 @@ component DocsShell {
             if (isHome) { sidebar.innerHTML = ''; return; }
             const ul = document.createElement('ul');
             ul.className = 'sidebar-nav';
+            const docsLabel = document.createElement('div');
+            docsLabel.className = 'sidebar-divider';
+            docsLabel.textContent = 'Documentation';
+            ul.appendChild(docsLabel);
             NAV_PAGES.forEach(({ href, icon, label }) => {
                 const li = document.createElement('li');
                 const a = document.createElement('a');
                 a.href = href;
                 a.className = 'sidebar-link' + (path === href || (href !== '/' && path.startsWith(href)) ? ' active' : '');
-                a.innerHTML = `<span class="sidebar-icon">${icon}</span><span>${label}</span>`;
+                a.innerHTML = `<span class="sidebar-icon">${ICONS[icon] || ''}</span><span>${label}</span>`;
                 a.addEventListener('click', e => { e.preventDefault(); webcore_navigate(href); });
                 li.appendChild(a);
                 ul.appendChild(li);
@@ -142,6 +154,28 @@ component DocsShell {
                 wrap.appendChild(block);
             });
 
+            // Syntax highlighting (lightweight .webc tokenizer)
+            const HL_ESC = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const HL_RE = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|(@[a-zA-Z]\w*)|\b(app|layout|page|component|state|computed|view|style|store|props|import|from|each|slot|theme|routes|head|http|true|false|null)\b|\b(?:on|bind|class|validate|ref|webc):[\w-]+|\b([A-Z][A-Za-z0-9]*)\b|\b(\d+(?:\.\d+)?)\b|([{}])/g;
+            const hl = text => {
+                let out = '', last = 0, m;
+                HL_RE.lastIndex = 0;
+                while ((m = HL_RE.exec(text))) {
+                    out += HL_ESC(text.slice(last, m.index));
+                    const cls = m[1] ? 'tok-com' : m[2] ? 'tok-str' : m[3] ? 'tok-dir'
+                        : m[4] ? 'tok-kw' : m[5] ? 'tok-comp' : m[6] ? 'tok-num'
+                        : m[7] ? 'tok-punc' : 'tok-attr';
+                    out += '<span class="' + cls + '">' + HL_ESC(m[0]) + '</span>';
+                    last = HL_RE.lastIndex;
+                }
+                out += HL_ESC(text.slice(last));
+                return out;
+            };
+            document.querySelectorAll('.code-block:not([data-hl-done]), .hero-code:not([data-hl-done]), .v3-diff:not([data-hl-done])').forEach(el => {
+                el.setAttribute('data-hl-done', '1');
+                el.innerHTML = hl(el.textContent);
+            });
+
             // Anchor links on section headings
             document.querySelectorAll('.doc-section h2:not([data-anchor-done])').forEach(h2 => {
                 h2.setAttribute('data-anchor-done', '1');
@@ -195,6 +229,100 @@ component DocsShell {
             topBtn.classList.toggle('visible', window.scrollY > 400);
         }, { passive: true });
         topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+        // ── Command palette (Cmd/Ctrl + K) ────────────────────────────────────
+        const PAGES = [
+            { href: '/', label: 'Home' },
+            { href: '/syntax', label: 'Syntax' },
+            { href: '/components', label: 'Components' },
+            { href: '/features', label: 'Features' },
+            { href: '/examples', label: 'Examples' }
+        ];
+        const slugify = t => t.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-').replace(/-+$/, '');
+        let SEARCH_INDEX = null, indexing = false;
+        const buildIndex = async () => {
+            if (SEARCH_INDEX || indexing) return;
+            indexing = true;
+            const idx = [];
+            for (const p of PAGES) {
+                idx.push({ page: p.label, href: p.href, id: '', label: p.label, kind: 'page' });
+                try {
+                    const file = p.href === '/' ? '/index.html' : p.href + '/index.html';
+                    const html = await (await fetch(file)).text();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    doc.querySelectorAll('.doc-section h2, .doc-section h3').forEach(h => {
+                        const text = h.textContent.replace(/\s*#$/, '').trim();
+                        if (text) idx.push({ page: p.label, href: p.href, id: slugify(text), label: text, kind: h.tagName.toLowerCase() });
+                    });
+                } catch (_) { }
+            }
+            SEARCH_INDEX = idx;
+            indexing = false;
+        };
+
+        const pal = document.createElement('div');
+        pal.className = 'cmdk';
+        pal.innerHTML = '<div class="cmdk-backdrop"></div><div class="cmdk-panel"><div class="cmdk-inputwrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input class="cmdk-input" type="text" placeholder="Search the docs…" autocomplete="off" spellcheck="false"></div><div class="cmdk-results"></div><div class="cmdk-foot"><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span><span><kbd>&crarr;</kbd> open</span><span><kbd>esc</kbd> close</span></div></div>';
+        document.body.appendChild(pal);
+        const cmdkInput = pal.querySelector('.cmdk-input');
+        const resultsEl = pal.querySelector('.cmdk-results');
+        let activeIdx = 0, currentResults = [];
+
+        const renderResults = q => {
+            const ql = q.trim().toLowerCase();
+            let list = SEARCH_INDEX || [];
+            if (ql) list = list.filter(r => r.label.toLowerCase().includes(ql) || r.page.toLowerCase().includes(ql));
+            currentResults = list.slice(0, 40);
+            activeIdx = 0;
+            if (!currentResults.length) { resultsEl.innerHTML = '<div class="cmdk-empty">No results</div>'; return; }
+            resultsEl.innerHTML = currentResults.map((r, i) =>
+                '<a class="cmdk-item' + (i === 0 ? ' active' : '') + '" data-i="' + i + '" href="' + r.href + (r.id ? '#' + r.id : '') + '"><span class="cmdk-kind">' + (r.kind === 'page' ? 'Page' : r.kind.toUpperCase()) + '</span><span class="cmdk-label">' + r.label + '</span><span class="cmdk-pagetag">' + r.page + '</span></a>'
+            ).join('');
+        };
+        const updateActive = () => {
+            resultsEl.querySelectorAll('.cmdk-item').forEach((el, i) => el.classList.toggle('active', i === activeIdx));
+            const el = resultsEl.querySelector('.cmdk-item.active');
+            if (el) el.scrollIntoView({ block: 'nearest' });
+        };
+        const openPalette = async () => {
+            pal.classList.add('open');
+            cmdkInput.value = '';
+            await buildIndex();
+            renderResults('');
+            cmdkInput.focus();
+        };
+        const closePalette = () => pal.classList.remove('open');
+        const goTo = r => {
+            if (!r) return;
+            closePalette();
+            webcore_navigate(r.href);
+            setTimeout(() => { if (r.id) { const el = document.getElementById(r.id); if (el) el.scrollIntoView(); } }, 140);
+        };
+
+        cmdkInput.addEventListener('input', () => renderResults(cmdkInput.value));
+        cmdkInput.addEventListener('keydown', e => {
+            if (e.key === 'ArrowDown') { activeIdx = Math.min(activeIdx + 1, currentResults.length - 1); updateActive(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { activeIdx = Math.max(activeIdx - 1, 0); updateActive(); e.preventDefault(); }
+            else if (e.key === 'Enter') { goTo(currentResults[activeIdx]); e.preventDefault(); }
+            else if (e.key === 'Escape') { closePalette(); }
+        });
+        resultsEl.addEventListener('click', e => { const a = e.target.closest('.cmdk-item'); if (a) { e.preventDefault(); goTo(currentResults[+a.dataset.i]); } });
+        pal.querySelector('.cmdk-backdrop').addEventListener('click', closePalette);
+        document.addEventListener('keydown', e => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                pal.classList.contains('open') ? closePalette() : openPalette();
+            }
+        });
+
+        // Header search trigger
+        const trigger = document.createElement('button');
+        trigger.className = 'cmdk-trigger';
+        trigger.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search</span><kbd>&#8984;K</kbd>';
+        trigger.addEventListener('click', openPalette);
+        const headerInner = document.querySelector('.header-inner');
+        const mobToggle = document.querySelector('.nav-mobile-toggle');
+        if (headerInner && mobToggle) headerInner.insertBefore(trigger, mobToggle);
     }
     view { }
 }

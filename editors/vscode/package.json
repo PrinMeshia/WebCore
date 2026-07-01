@@ -1,68 +1,68 @@
 {
-  "name": "webcore-language",
-  "displayName": "WebCore Language Support",
-  "description": "Syntax highlighting, snippets and webc fmt integration for .webc files (WebCore DSL)",
-  "version": "2.7.0",
-  "publisher": "webcore",
-  "engines": {
-    "vscode": "^1.75.0"
-  },
-  "categories": [
-    "Programming Languages"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/prinmeshia/webcore"
-  },
-  "contributes": {
-    "languages": [
-      {
-        "id": "webc",
-        "aliases": [
-          "WebCore",
-          "webc"
+    "name": "webcore-language",
+    "displayName": "WebCore Language Support",
+    "description": "Syntax highlighting, snippets and webc fmt integration for .webc files (WebCore DSL)",
+    "version": "3.2.0",
+    "publisher": "webcore",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/prinmeshia/webcore"
+    },
+    "contributes": {
+        "languages": [
+            {
+                "id": "webc",
+                "aliases": [
+                    "WebCore",
+                    "webc"
+                ],
+                "extensions": [
+                    ".webc"
+                ],
+                "configuration": "./language-configuration.json"
+            }
         ],
-        "extensions": [
-          ".webc"
+        "grammars": [
+            {
+                "language": "webc",
+                "scopeName": "source.webc",
+                "path": "./syntaxes/webc.tmLanguage.json"
+            }
         ],
-        "configuration": "./language-configuration.json"
-      }
-    ],
-    "grammars": [
-      {
-        "language": "webc",
-        "scopeName": "source.webc",
-        "path": "./syntaxes/webc.tmLanguage.json"
-      }
-    ],
-    "snippets": [
-      {
-        "language": "webc",
-        "path": "./snippets/webc.json"
-      }
-    ],
-    "configuration": {
-      "title": "WebCore",
-      "properties": {
-        "webcore.formatterPath": {
-          "type": "string",
-          "default": "webc",
-          "description": "Chemin du binaire webc utilisé par le formateur (webc fmt)."
-        },
-        "webcore.formatIndent": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "default": null,
-          "description": "Espaces par niveau d'indentation pour webc fmt. Laisser vide pour respecter le webc.toml du projet (défaut : 4)."
+        "snippets": [
+            {
+                "language": "webc",
+                "path": "./snippets/webc.json"
+            }
+        ],
+        "configuration": {
+            "title": "WebCore",
+            "properties": {
+                "webcore.formatterPath": {
+                    "type": "string",
+                    "default": "webc",
+                    "description": "Chemin du binaire webc utilisé par le formateur (webc fmt)."
+                },
+                "webcore.formatIndent": {
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "default": null,
+                    "description": "Espaces par niveau d'indentation pour webc fmt. Laisser vide pour respecter le webc.toml du projet (défaut : 4)."
+                }
+            }
         }
-      }
-    }
-  },
-  "license": "MIT",
-  "main": "./extension.js",
-  "activationEvents": [
-    "onLanguage:webc"
-  ]
+    },
+    "license": "MIT",
+    "main": "./extension.js",
+    "activationEvents": [
+        "onLanguage:webc"
+    ]
 }

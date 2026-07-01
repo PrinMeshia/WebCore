@@ -25,26 +25,30 @@ component LiveCounter {
             }
             @if count > 9 {
                 p class="badge badge-accent" { "Double digits!" }
-            } @else {
+            } @else if count > 0 {
                 p class="badge badge-muted" { "Keep going…" }
+            } @else {
+                p class="badge badge-neutral" { "Press + to start" }
             }
         }
     }
     style {
         .demo-box {
-            background: var(--color-surface);
+            background: #fff;
             border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
+            border-top: 3px solid var(--color-primary);
+            border-radius: var(--radius-md);
             padding: var(--spacing-xl);
             margin: var(--spacing-lg) 0;
         }
         .demo-label {
-            font-size: 0.75rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.12em;
             color: var(--color-primary);
-            font-weight: 600;
+            font-weight: 800;
             margin-bottom: var(--spacing-md);
+            font-family: var(--font-mono);
         }
         .counter-display {
             display: flex;
@@ -52,10 +56,12 @@ component LiveCounter {
             margin: var(--spacing-md) 0;
         }
         .counter-value {
-            font-size: 4rem;
-            font-weight: 800;
-            color: var(--color-primary);
+            font-size: 4.5rem;
+            font-weight: 900;
+            color: var(--color-text);
             font-variant-numeric: tabular-nums;
+            font-family: var(--font-mono);
+            letter-spacing: -0.04em;
         }
         .counter-controls {
             display: flex;
@@ -67,14 +73,15 @@ component LiveCounter {
             padding: 0.5rem 1.25rem;
             border: none;
             border-radius: var(--radius-md);
-            font-size: 0.95rem;
-            font-weight: 600;
+            font-size: 0.9rem;
+            font-weight: 700;
             cursor: pointer;
-            transition: opacity 0.15s;
+            transition: opacity 0.12s, transform 0.12s;
+            font-family: var(--font-mono);
         }
-        .btn:hover { opacity: 0.85; }
-        .btn-primary  { background: var(--color-primary);   color: #fff; }
-        .btn-secondary { background: var(--color-secondary); color: #fff; }
+        .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+        .btn-primary   { background: var(--color-primary);   color: #fff; }
+        .btn-secondary { background: var(--color-text);      color: #fff; }
         .btn-ghost {
             background: transparent;
             color: var(--color-muted);
@@ -86,30 +93,35 @@ component LiveCounter {
             gap: var(--spacing-xs);
             justify-content: center;
             color: var(--color-muted);
-            font-size: 0.9rem;
+            font-size: 0.875rem;
             margin-top: var(--spacing-md);
         }
         .step-input {
             width: 60px;
-            background: var(--color-code-bg);
+            background: var(--color-background);
             border: 1px solid var(--color-border);
             color: var(--color-text);
             padding: 0.2rem 0.4rem;
             border-radius: var(--radius-sm);
             font-size: 0.9rem;
             text-align: center;
+            font-family: var(--font-mono);
         }
         .badge {
             margin-top: var(--spacing-sm);
-            font-size: 0.8rem;
-            font-weight: 600;
-            padding: 0.2rem 0.75rem;
-            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 2px;
             display: inline-block;
             text-align: center;
+            font-family: var(--font-mono);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
         }
-        .badge-accent { background: var(--color-accent); color: #000; }
-        .badge-muted  { background: var(--color-border); color: var(--color-muted); }
+        .badge-accent  { background: var(--color-primary); color: #fff; }
+        .badge-muted   { background: var(--color-background); color: var(--color-muted); border: 1px solid var(--color-border); }
+        .badge-neutral { background: var(--color-background); color: var(--color-muted); border: 1px solid var(--color-border); }
 
         @media (max-width: 480px) {
             .counter-value { font-size: 3rem; }

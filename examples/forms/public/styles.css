@@ -5,20 +5,26 @@ body {
   background: var(--color-background);
   color: var(--color-text);
   font-family: var(--font-sans);
-  line-height: 1.6;
+  line-height: 1.75;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-a { color: var(--color-primary); text-decoration: none; }
-a:hover { opacity: 0.85; }
+a { color: var(--color-primary); text-decoration: none; transition: opacity 0.15s; }
+a:hover { opacity: 0.8; }
 button { font: inherit; cursor: pointer; }
 
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .site-header {
-  background: rgba(15,23,42,0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(15,23,42,0.82);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
@@ -28,7 +34,7 @@ button { font: inherit; cursor: pointer; }
   max-width: 960px;
   margin: 0 auto;
   padding: 0 1.5rem;
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -41,7 +47,9 @@ button { font: inherit; cursor: pointer; }
   font-size: 1rem;
   text-decoration: none;
   color: var(--color-text);
+  transition: opacity 0.15s;
 }
+.logo:hover { opacity: 0.9; }
 .logo-mark {
   background: linear-gradient(135deg, var(--color-primary), #818CF8);
   -webkit-background-clip: text;
@@ -51,13 +59,15 @@ button { font: inherit; cursor: pointer; }
   font-weight: 900;
 }
 .logo-project {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--color-muted);
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.06);
   border: 1px solid var(--color-border);
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
   font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .site-nav { display: flex; gap: 2px; }
 .site-nav a {
@@ -65,26 +75,28 @@ button { font: inherit; cursor: pointer; }
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 500;
-  padding: 5px 10px;
+  padding: 6px 12px;
   border-radius: var(--radius-md);
   transition: color 0.15s, background 0.15s;
 }
-.site-nav a:hover { color: var(--color-text); background: rgba(255,255,255,0.05); }
+.site-nav a:hover  { color: var(--color-text); background: rgba(255,255,255,0.07); }
+.site-nav a.active { color: var(--color-primary); background: rgba(91,74,247,0.12); }
 
 .site-main {
   flex: 1;
   max-width: 960px;
   margin: 0 auto;
   width: 100%;
-  padding: 2.5rem 1.5rem;
+  padding: 3rem 1.5rem;
 }
 
 .site-footer {
   border-top: 1px solid var(--color-border);
-  padding: 1rem 1.5rem;
+  padding: 1.5rem;
   text-align: center;
   color: var(--color-muted);
   font-size: 0.8rem;
+  background: rgba(255,255,255,0.015);
 }
 .site-footer strong { color: var(--color-text); }
 .site-footer code {
