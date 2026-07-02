@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 3.2.0 |
-| **Status** | Preview |
+| **Version** | 3.3.0 |
+| **Status** | Release |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 218 tests (unit, golden, integration, perf) |
+| **Tests** | 233 tests (unit, golden, integration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -86,7 +86,7 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 ### Tooling & DX
 
-- **Full CLI**: `webc new` · `build` · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, rename, **real-time diagnostics**, **semantic tokens**, **code actions**)
+- **Full CLI**: `webc new` · `build` (`--prod` / `--dev`) · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, rename, **real-time diagnostics**, **semantic tokens**, **code actions**)
 - **rustc-style errors**: source line + `^` caret + contextual hints, all errors aggregated in one pass
 - **ES2022+ runtime**: private class fields, optional chaining, nullish coalescing — zero dependencies, zero transpiler; v3.0: expressions compiled to JS closures (`const _e={e0:()=>...}`) — `evalCond` / `new Function()` removed
 - **`webc check`**: validates routes, components, props and detects circular references without generating anything

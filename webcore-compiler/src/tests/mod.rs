@@ -22,6 +22,9 @@ fn opts() -> HtmlPageOptions {
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     }
 }
 
@@ -501,6 +504,41 @@ page "home" { h1 "hi" }
 }
 
 #[test]
+fn prod_keeps_reactive_attrs_when_i18n_used() {
+    // The prod runtime strips reactive `data-webcore-*` attributes for a tidy
+    // DOM. But `setLocale` re-renders by re-querying those attributes, so when
+    // the project uses i18n the stripping must be skipped — otherwise a runtime
+    // language switch finds no elements to update.
+    let src = r##"
+layout MainLayout { main { slot content } }
+page "home" { p "{t("welcome")}" }
+"##;
+    let mut doc = parse_webc(src).expect("parse");
+
+    // No locales → prod strips attributes (contains the removeAttribute cleanup).
+    let js_plain = crate::codegen::js::generate_inline_js(&[], &[], &[], &doc, true).js;
+    assert!(
+        js_plain.contains("removeAttribute"),
+        "prod build without i18n should strip data-webcore-* attributes"
+    );
+
+    // With locales → stripping is skipped so setLocale can re-query the DOM.
+    let mut fr: BTreeMap<String, String> = BTreeMap::new();
+    fr.insert("welcome".to_string(), "Bienvenue".to_string());
+    doc.locales.insert("fr".to_string(), fr);
+    let js_i18n = crate::codegen::js::generate_inline_js(&[], &[], &[], &doc, true).js;
+    assert!(
+        !js_i18n.contains("removeAttribute"),
+        "prod build with i18n must keep reactive attributes for setLocale re-render"
+    );
+    // setLocale is still emitted and re-binds.
+    assert!(
+        js_i18n.contains("setLocale="),
+        "setLocale missing:\n{js_i18n}"
+    );
+}
+
+#[test]
 fn golden_i18n_ssg_prerender() {
     // interp_expr = (!"}" ~ ANY)+ so inner " are fine inside {t("key")}
     let src = r##"
@@ -597,10 +635,10 @@ page "home" { h1 "hi" }
 fn minify_js_strips_comments_and_empty_lines() {
     let input = "// comment\nconst x=1;\n\nconst y=2;\n";
     let out = minify_js(input);
-    assert!(!out.contains("//"), "comment not removed");
-    assert!(!out.contains('\n'), "newline not removed");
-    assert!(out.contains("const x=1;"));
-    assert!(out.contains("const y=2;"));
+    assert!(!out.contains("//"), "whole-line comment not removed");
+    // Statements keep a newline separator (joining without one would let an
+    // inline `//` comment swallow the rest of the file and break ASI).
+    assert_eq!(out, "const x=1;\nconst y=2;");
 }
 
 #[test]
@@ -1333,6 +1371,56 @@ page "article" {
 }
 
 #[test]
+fn golden_site_url_emits_canonical_and_absolute_og() {
+    let src = r##"
+layout MainLayout { main { slot content } }
+page "home" {
+    head {
+        meta og:image="/assets/og.png"
+        meta twitter:image="/assets/og.png"
+        meta description="Desc"
+    }
+    h1 "Hi"
+}
+"##;
+    let doc = parse_webc(src).expect("parse");
+    let options = HtmlPageOptions {
+        site_url: Some("https://example.com".into()),
+        canonical: Some("https://example.com/".into()),
+        ..opts()
+    };
+    let html = generate_html(&doc, "home", &options).expect("codegen").html;
+    // Canonical link emitted from the configured URL.
+    assert!(
+        html.contains(r#"<link rel="canonical" href="https://example.com/">"#),
+        "canonical not emitted:\n{html}"
+    );
+    // Root-relative image tags absolutized; a non-image meta stays untouched.
+    assert!(
+        html.contains(r#"<meta property="og:image" content="https://example.com/assets/og.png">"#),
+        "og:image not absolutized:\n{html}"
+    );
+    assert!(
+        html.contains(r#"<meta name="twitter:image" content="https://example.com/assets/og.png">"#),
+        "twitter:image not absolutized:\n{html}"
+    );
+    assert!(
+        html.contains(r#"<meta name="description" content="Desc">"#),
+        "non-image meta should be untouched:\n{html}"
+    );
+    // Without site_url, nothing is rewritten and no canonical appears.
+    let plain = generate_html(&doc, "home", &opts()).expect("codegen").html;
+    assert!(
+        !plain.contains("rel=\"canonical\""),
+        "no canonical expected:\n{plain}"
+    );
+    assert!(
+        plain.contains(r#"content="/assets/og.png""#),
+        "image should stay relative without site_url:\n{plain}"
+    );
+}
+
+#[test]
 fn golden_head_block_emitted_into_html() {
     let src = r#"
 layout MainLayout { main { slot content } }
@@ -1341,6 +1429,7 @@ page "home" {
         title "Titre Page"
         meta description="Desc"
         meta og:title="OG"
+        meta theme-color="rebeccapurple"
         favicon "/assets/logo.png"
     }
     h1 "Hi"
@@ -1361,6 +1450,11 @@ page "home" {
     assert!(
         html.contains(r#"<meta property="og:title" content="OG">"#),
         "og:title should use property=:\n{html}"
+    );
+    // Hyphenated standard meta names (theme-color, apple-*, …) are allowed.
+    assert!(
+        html.contains(r#"<meta name="theme-color" content="rebeccapurple">"#),
+        "hyphenated meta key not emitted:\n{html}"
     );
     assert!(
         html.contains(r#"<link rel="icon" href="/assets/logo.png">"#),
@@ -1620,6 +1714,9 @@ page "dash" { App {} }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "dash", &opts_dash).expect("codegen");
     assert!(
@@ -2353,6 +2450,9 @@ page "home" { main { Card {} } }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2544,6 +2644,9 @@ page "home" { p "hello" }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -2651,6 +2754,9 @@ page "home" { p "hi" }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     // Deferred link uses data-webcore-defer (not onload=)
@@ -2694,6 +2800,9 @@ page "home" { main { h1 "Static" } }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     // v3: JS is inlined per-page; the DOMContentLoaded handler swaps media="print"→"all"
@@ -2743,6 +2852,9 @@ page "home" { main { p "hi" } }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -3838,6 +3950,9 @@ page "home" { Ticker {} }
         prod: true,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let html = generate_html(&doc, "home", &prod_opts)
         .expect("codegen")
@@ -4023,6 +4138,9 @@ page "home" { Counter {} }
         prod: false,
         source_maps: true,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -4064,6 +4182,9 @@ page "home" { Counter {} }
         prod: false,
         source_maps: false,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(
@@ -4154,6 +4275,9 @@ page "home" { Counter {} }
         prod: false,
         source_maps: true,
         inline_runtime: true,
+        site_url: None,
+        canonical: None,
+        pwa: None,
     };
     let res = generate_html(&doc, "home", &options).expect("codegen");
     assert!(

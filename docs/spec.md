@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 3.2.0 — Référence complète de la syntaxe `.webc`
+> Version : 3.3.0 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -115,7 +115,51 @@ title  = "Mon Application"   # Titre HTML des pages
 lang   = "fr"                # Attribut lang de <html>
 mode   = "dev"               # "dev" ou "prod" (active la minification en prod)
 locale = "fr"                # Locale de rendu par défaut (optionnel, hérite de lang)
+url    = "https://exemple.fr" # URL absolue du site (optionnel)
 ```
+
+Déclarer `url` active, en plus de `sitemap.xml` :
+
+- un `<link rel="canonical">` **et un `meta og:url`** par page (`url` + route ;
+  la page `404` est exclue) ;
+- la réécriture des `meta og:image` / `twitter:image` en chemin racine (`/…`) vers
+  des **URLs absolues** (requis par les robots sociaux : LinkedIn, Slack, Twitter).
+
+### Fichiers SEO générés à la racine de `dist/`
+
+À chaque `webc build`, le compilateur écrit à la **racine** de `dist/` (et non
+sous `/assets/`, où les moteurs ne les cherchent pas) :
+
+| Fichier       | Condition                | Contenu                                                        |
+|---------------|--------------------------|---------------------------------------------------------------|
+| `robots.txt`  | toujours                 | `User-agent: * / Allow: /` + ligne `Sitemap:` si `url` défini |
+| `sitemap.xml` | `url` défini             | routes du site en URLs absolues (la page `404` est exclue)    |
+| `404.html`    | page `404` présente      | copie de la page `404` (servie par GitHub Pages, Netlify…)    |
+
+### PWA (`[pwa]`) — application installable + hors-ligne
+
+Une section `[pwa]` (optionnelle) rend l'app installable :
+
+```toml
+[pwa]
+name = "Mon Application"       # défaut : app.title
+short_name = "Mon App"         # défaut : name
+theme_color = "#7C3AED"        # défaut : #000000
+background_color = "#05030F"   # défaut : #ffffff
+display = "standalone"         # défaut : standalone
+```
+
+Quand elle est présente, `webc build` :
+
+- écrit `manifest.webmanifest` et `sw.js` à la racine de `dist/` ;
+- injecte dans chaque `<head>` le `<link rel="manifest">`, la `theme-color`, les
+  balises Apple web-app et l'`apple-touch-icon` ;
+- ajoute l'enregistrement du service worker (offline, *network-first* + fallback
+  cache) au runtime partagé.
+
+Icônes attendues dans `public/` : `icon-192.png`, `icon-512.png`,
+`icon-maskable.png`, `apple-touch-icon.png` (fingerprintées automatiquement, le
+manifeste référence les noms hashés).
 
 ---
 
@@ -1630,7 +1674,8 @@ page "article" {
 
 - `title "..."` — génère `<title>Mon Article</title>` (override le titre global de `webc.toml`)
 - `meta name="valeur"` — génère `<meta name="name" content="valeur">`
-- `meta og:title="valeur"` — génère `<meta property="og:title" content="valeur">` (les clés `og:*` utilisent `property`, conforme à OpenGraph)
+- `meta og:title="valeur"` — génère `<meta property="og:title" content="valeur">` (les clés `og:*` utilisent `property`, conforme à OpenGraph ; les autres clés, y compris `twitter:*`, utilisent `name`)
+- `meta theme-color="valeur"` — les clés de `meta` acceptent les tirets, ce qui permet les noms standard tels que `theme-color`, `apple-mobile-web-app-capable`, `msapplication-TileColor`
 - `favicon "/assets/logo.png"` — génère `<link rel="icon" href="/assets/logo.png">` ; pointe vers un fichier de `public/` (servi sous `/assets/`) et est fingerprinté en mode `prod`
 
 Les autres éléments de la page (ici `h1 "Hello"`) vont dans le `<body>` normalement.

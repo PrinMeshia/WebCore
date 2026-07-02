@@ -42,9 +42,13 @@ pub(super) fn hash_asset(data: &[u8], compute_sri: bool) -> (String, Option<Stri
 /// Image file extensions that are subject to content-hash fingerprinting.
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "avif"];
 
-/// For every image file directly inside `public_dir`, compute a content hash,
-/// copy the file to `assets_dir/<stem>.<hash>.<ext>`, and return a mapping
-/// `"original.png"` → `"original.<hash>.png"`.
+/// For every image file under `public_dir` (recursively), compute a content
+/// hash, copy the file to `assets_dir/<relative-dir>/<stem>.<hash>.<ext>`, and
+/// return a mapping keyed by the path **relative to `public_dir`**
+/// (`"projects/webcore.png"` → `"projects/webcore.<hash>.png"`). Preserving the
+/// sub-directory in both the key and the copy is what lets `rewrite_asset_refs`
+/// match `/assets/projects/webcore.png` references — a flat name would only
+/// match top-level images.
 pub(crate) fn fingerprint_images(
     public_dir: &Path,
     assets_dir: &Path,
@@ -53,6 +57,7 @@ pub(crate) fn fingerprint_images(
 
     fn walk(
         dir: &Path,
+        root: &Path,
         assets_dir: &Path,
         map: &mut BTreeMap<String, String>,
     ) -> Result<(), String> {
@@ -61,7 +66,7 @@ pub(crate) fn fingerprint_images(
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                walk(&path, assets_dir, map)?;
+                walk(&path, root, assets_dir, map)?;
                 continue;
             }
             let ext = path
@@ -72,28 +77,39 @@ pub(crate) fn fingerprint_images(
             if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
                 continue;
             }
-            let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
+            let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s.to_string(),
                 None => continue,
             };
             let bytes =
                 fs::read(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
             let hash = fnv1a_hash(&bytes);
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&file_name);
-            let hashed_name = format!("{stem}.{hash}.{ext}");
-            let dst = assets_dir.join(&hashed_name);
+            // Path relative to public/, forward-slash form (e.g. "projects/webcore.png").
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            let rel_key = rel.to_string_lossy().replace('\\', "/");
+            let hashed_rel = match rel.parent() {
+                Some(p) if !p.as_os_str().is_empty() => {
+                    format!(
+                        "{}/{stem}.{hash}.{ext}",
+                        p.to_string_lossy().replace('\\', "/")
+                    )
+                }
+                _ => format!("{stem}.{hash}.{ext}"),
+            };
+            let dst = assets_dir.join(&hashed_rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+            }
             fs::copy(&path, &dst).map_err(|e| {
                 format!("Failed to copy {} → {}: {e}", path.display(), dst.display())
             })?;
-            map.insert(file_name, hashed_name);
+            map.insert(rel_key, hashed_rel);
         }
         Ok(())
     }
 
-    walk(public_dir, assets_dir, &mut map)?;
+    walk(public_dir, public_dir, assets_dir, &mut map)?;
     Ok(map)
 }
 
@@ -261,5 +277,43 @@ pub(super) fn patch_asset_hashes(
                 r#"as="script" href="/assets/{js_filename}" integrity="{js_sri}" crossorigin="anonymous""#
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn fingerprints_images_preserving_subdirectories() {
+        let base = std::env::temp_dir().join("wc_fp_subdir_test");
+        let _ = fs::remove_dir_all(&base);
+        let public = base.join("public");
+        let assets = base.join("assets");
+        fs::create_dir_all(public.join("projects")).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(public.join("og.png"), b"root").unwrap();
+        fs::write(public.join("projects").join("thumb.png"), b"sub").unwrap();
+
+        let map = fingerprint_images(&public, &assets).unwrap();
+
+        // Sub-directory image: keyed by its relative path and copied into the
+        // same sub-directory (so `/assets/projects/thumb.png` refs get rewritten).
+        let sub = map
+            .get("projects/thumb.png")
+            .expect("subdir image not mapped");
+        assert!(
+            sub.starts_with("projects/thumb.") && sub.ends_with(".png"),
+            "hashed name should keep the subdir: {sub}"
+        );
+        assert!(assets.join(sub).exists(), "hashed file missing in subdir");
+
+        // Top-level image stays flat.
+        let root = map.get("og.png").expect("root image not mapped");
+        assert!(!root.contains('/'), "root image should stay flat: {root}");
+        assert!(assets.join(root).exists());
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

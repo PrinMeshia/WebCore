@@ -9,6 +9,93 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.0]
+
+- **PWA installable + hors-ligne** — une section `[pwa]` dans `webc.toml`
+  (opt-in) fait générer par `webc build`, à la racine de `dist/`, un
+  `manifest.webmanifest` (nom, couleurs, `display`, icônes fingerprintées) et un
+  `sw.js` (service worker offline, network-first + fallback cache). Le manifeste,
+  la `theme-color` et les balises Apple web-app (+ `apple-touch-icon`) sont
+  injectés dans chaque `<head>`, et l'enregistrement du service worker est ajouté
+  au runtime partagé. Le site devient installable (mobile/desktop) et consultable
+  hors-ligne. Icônes attendues dans `public/` (`icon-192.png`, `icon-512.png`,
+  `icon-maskable.png`, `apple-touch-icon.png`).
+
+- **`webc build --prod` / `--dev`** — override du mode de build en ligne de
+  commande, indépendamment du `mode` déclaré dans `webc.toml`. On garde
+  `mode = "dev"` (serveur de dev lisible, source maps) et on produit un build
+  déployable minifié avec `webc build --prod` (minification HTML/CSS/JS,
+  critical CSS inliné, renommage d'identifiants, SRI) — sans éditer la config.
+
+### Nettoyage interne
+
+- **Noms de `meta` avec tiret** — la clé d'une balise `meta key="…"` dans un bloc
+  `head { }` accepte désormais les tirets, en plus des lettres, chiffres, `_` et `:`.
+  Cela autorise les noms de meta standard tels que `theme-color`,
+  `apple-mobile-web-app-capable` ou `msapplication-TileColor`. Les namespaces à deux
+  points (`og:title`, `twitter:card`) restent inchangés.
+
+- **URL canoniques & images sociales absolues** — quand `[app] url` est défini,
+  chaque page reçoit un `<link rel="canonical">` **et un `meta og:url`** (URL +
+  route ; la page `404` en est exclue), et les `meta og:image` / `twitter:image`
+  en chemin racine (`/…`) sont réécrites en **URLs absolues** — indispensable
+  pour que LinkedIn / Slack / Twitter affichent l'aperçu. Le fingerprint d'asset
+  reste appliqué.
+
+- **Fichiers SEO à la racine du build** — `webc build` génère désormais
+  automatiquement, à la racine de `dist/` (et non sous `/assets/`) :
+  - **`robots.txt`** (toujours) — autorise l'indexation et pointe vers le
+    sitemap quand une URL de site est configurée ;
+  - **`sitemap.xml`** — la liste des routes en URLs absolues, généré quand
+    `[app] url = "https://…"` est présent dans `webc.toml` (la page `404` en est
+    exclue) ;
+  - **`404.html`** — copie de la page `404` du projet à la racine, là où les
+    hébergeurs statiques (GitHub Pages, Netlify, Cloudflare Pages…) la servent
+    sur une route inconnue.
+
+### Corrections
+
+- **Fingerprint des images de sous-dossiers ignoré** — les images sous
+  `public/<sous-dossier>/` (ex. `public/projects/webcore.png`) recevaient bien un
+  hash, mais celui-ci était écrit **à plat** dans `assets/` et mappé par nom de
+  fichier seul, si bien que la réécriture ne trouvait pas la référence
+  `/assets/projects/webcore.png` → le **nom non hashé** restait utilisé (pas de
+  cache-busting). `fingerprint_images` préserve désormais l'arborescence (hash
+  dans le sous-dossier, clé = chemin relatif) → les références sous-dossier sont
+  réécrites avec le hash. +1 test.
+
+- **Espaces significatifs supprimés en build `--prod`** — la minification HTML
+  supprimait *toute* suite d'espaces entre `>` et `<`, y compris un espace
+  significatif entre deux éléments inline (`<span>Mes</span> <span>projets</span>`
+  → « Mesprojets »). Elle **collapse désormais en un seul espace** (comme le
+  navigateur le fait des sauts de ligne du source), donc le prod rend à
+  l'identique du dev. +3 tests.
+
+- **Changement de langue inopérant en build `--prod`** — le nettoyage prod
+  retirait du DOM les attributs `data-webcore-*` (dont `data-webcore-interpolation`)
+  après le rendu initial. Or `setLocale` re-rend en **re-interrogeant** ces
+  attributs (`querySelectorAll`), qui n'existaient plus → le texte ne changeait pas
+  (la réactivité pilotée par l'état continuait de marcher car ses effets capturent
+  les références). Le nettoyage est désormais **ignoré quand le projet utilise
+  l'i18n**, pour que le sélecteur de langue fonctionne aussi en prod. +1 test.
+
+- **Minification JS cassée par un commentaire en fin de ligne** — `minify_js`
+  collait toutes les lignes **sans séparateur** ; un commentaire `//` en fin de
+  ligne dans du code `on:mount` transformait alors tout le reste du fichier en
+  commentaire (`Uncaught SyntaxError: Unexpected end of input`), et l'absence de
+  saut de ligne cassait aussi l'insertion automatique de points-virgules (ASI).
+  Les lignes sont désormais jointes avec `\n`. Le build `--prod` produit un JS
+  valide même quand le code utilisateur contient des commentaires en ligne. +2 tests.
+
+- **Nom de page commençant par un chiffre → JS invalide** — les ids d'éléments
+  sont préfixés par un dérivé du nom de page et émis comme **clés d'objet JS non
+  quotées** (`H = { … }`, `_e = { … }`). Une page `404` produisait `404btn1:` /
+  `404e0:`, une erreur de syntaxe qui cassait tout le runtime partagé.
+  `safe_id_prefix` garantit désormais un préfixe qui est un identifiant JS valide
+  (préfixe `p` si le nom commence par un chiffre : `404` → `p404`). +3 tests.
+
+---
+
 ## [3.2.0]
 
 ### Ajouts

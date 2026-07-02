@@ -3,7 +3,7 @@ layout DocsLayout {
         DocsShell {}
         div class="announcement-bar" {
             span class="announcement-text" {
-                strong { "WebCore v3.2 Preview" }
+                strong { "WebCore v3.3 " }
                 " — shared cached runtime (one webcore.js for the whole site), LSP code actions, semantic tokens, real-time diagnostics"
             }
             a href="https://github.com/PrinMeshia/Webcore/blob/main/CHANGELOG.md" class="announcement-link" { "Changelog →" }
@@ -15,7 +15,7 @@ layout DocsLayout {
                 link to="/" class="logo" {
                     span class="logo-mark" { "▸" }
                     span class="logo-text" { "WebCore" }
-                    span class="logo-version" { "v3.2" }
+                    span class="logo-version" { "v3.3" }
                 }
                 nav class="site-nav" {
                     link to="/" { "Home" }
@@ -37,7 +37,7 @@ layout DocsLayout {
             p {
                 "Built with "
                 strong { "WebCore" }
-                " v3.2 · "
+                " v3.3 · "
                 a href="https://github.com/PrinMeshia/Webcore" { "GitHub" }
                 " · "
                 a href="https://github.com/PrinMeshia/Webcore/releases" { "Releases" }

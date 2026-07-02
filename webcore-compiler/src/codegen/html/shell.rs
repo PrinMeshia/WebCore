@@ -39,6 +39,9 @@ pub(super) fn emit_html_shell(
     critical_css: Option<&str>,
     csp_meta: Option<&str>,
     head: Option<&HeadBlock>,
+    site_url: Option<&str>,
+    canonical: Option<&str>,
+    pwa: Option<&super::PwaHead>,
 ) -> String {
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n");
@@ -58,6 +61,14 @@ pub(super) fn emit_html_shell(
     let effective_title = head.and_then(|h| h.title.as_deref()).unwrap_or(title);
     writeln!(html, "  <title>{}</title>", html_escape(effective_title))
         .expect("write! to String is infallible");
+    // Canonical URL (site_url + route) → <link rel="canonical"> + og:url.
+    if let Some(url) = canonical {
+        let esc = html_escape(url);
+        writeln!(html, "  <link rel=\"canonical\" href=\"{esc}\">")
+            .expect("write! to String is infallible");
+        writeln!(html, "  <meta property=\"og:url\" content=\"{esc}\">")
+            .expect("write! to String is infallible");
+    }
     if let Some(h) = head {
         for (key, value) in &h.metas {
             // OpenGraph/Facebook tags use `property`; everything else uses `name`.
@@ -66,12 +77,20 @@ pub(super) fn emit_html_shell(
             } else {
                 "name"
             };
+            // Social image tags must be absolute URLs for crawlers to fetch them:
+            // rewrite root-relative `og:image` / `twitter:image` using site_url.
+            let content = match site_url {
+                Some(base) if key.contains("image") && value.starts_with('/') => {
+                    format!("{base}{value}")
+                }
+                _ => value.clone(),
+            };
             writeln!(
                 html,
                 "  <meta {}=\"{}\" content=\"{}\">",
                 attr,
                 html_escape(key),
-                html_escape(value)
+                html_escape(&content)
             )
             .expect("write! to String is infallible");
         }
@@ -79,6 +98,23 @@ pub(super) fn emit_html_shell(
             writeln!(html, "  <link rel=\"icon\" href=\"{}\">", html_escape(icon))
                 .expect("write! to String is infallible");
         }
+    }
+    // PWA: manifest link, theme color and Apple web-app meta/icon tags.
+    if let Some(p) = pwa {
+        writeln!(
+            html,
+            "  <link rel=\"manifest\" href=\"/manifest.webmanifest\">\n  \
+             <meta name=\"theme-color\" content=\"{tc}\">\n  \
+             <meta name=\"mobile-web-app-capable\" content=\"yes\">\n  \
+             <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n  \
+             <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\">\n  \
+             <meta name=\"apple-mobile-web-app-title\" content=\"{sn}\">\n  \
+             <link rel=\"apple-touch-icon\" href=\"{icon}\">",
+            tc = html_escape(&p.theme_color),
+            sn = html_escape(&p.short_name),
+            icon = html_escape(&p.apple_icon),
+        )
+        .expect("write! to String is infallible");
     }
     if let Some(css) = critical_css {
         // Critical CSS: inline the page's own styles, defer the full stylesheet.

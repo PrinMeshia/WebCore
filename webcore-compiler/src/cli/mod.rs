@@ -35,7 +35,15 @@ pub(crate) fn run() {
             }
         }
         "build" => {
-            if let Err(e) = build::build_project() {
+            // `--prod` / `--dev` override the `mode` declared in webc.toml.
+            let mode_override = if args.iter().any(|a| a == "--prod") {
+                Some("prod")
+            } else if args.iter().any(|a| a == "--dev") {
+                Some("dev")
+            } else {
+                None
+            };
+            if let Err(e) = build::build_project(mode_override) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }
@@ -148,7 +156,7 @@ fn print_help() {
     println!();
     println!("COMMANDES:");
     println!("  new <nom>    Créer un nouveau projet WebCore");
-    println!("  build        Compiler le projet (dist/)");
+    println!("  build        Compiler le projet (dist/) — --prod / --dev force le mode");
     println!("  check        Valider le projet sans générer de fichiers");
     println!("               --json : diagnostics structurés sur stdout (éditeurs/outils)");
     println!("  watch        Rebuilder à chaque modification (sans serveur)");

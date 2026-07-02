@@ -52,6 +52,25 @@ pub struct HtmlPageOptions {
     /// from the union of all pages' expressions + handlers) so the browser
     /// caches it once across the whole site. Default: true (legacy / tests).
     pub inline_runtime: bool,
+    /// Absolute site URL (`[app] url` in webc.toml). When set, root-relative
+    /// `og:image` / `twitter:image` values are rewritten to absolute URLs
+    /// (social crawlers require them). Default: None.
+    pub site_url: Option<String>,
+    /// Absolute canonical URL for this page (`site_url` + route). When set,
+    /// emitted as `<link rel="canonical">`. Default: None.
+    pub canonical: Option<String>,
+    /// PWA head data. When set, the manifest link, theme-color and Apple
+    /// web-app meta/icon tags are emitted into `<head>`. Default: None.
+    pub pwa: Option<PwaHead>,
+}
+
+/// Head-level PWA data emitted when a `[pwa]` section is configured.
+#[derive(Debug, Clone)]
+pub struct PwaHead {
+    pub theme_color: String,
+    pub short_name: String,
+    /// Root-relative Apple touch icon path (fingerprinted by the asset pass).
+    pub apple_icon: String,
 }
 
 impl Default for HtmlPageOptions {
@@ -65,6 +84,9 @@ impl Default for HtmlPageOptions {
             prod: false,
             source_maps: false,
             inline_runtime: true,
+            site_url: None,
+            canonical: None,
+            pwa: None,
         }
     }
 }
@@ -171,6 +193,9 @@ pub(crate) fn generate_spa_html(
         options.critical_css.as_deref(),
         options.csp_meta.as_deref(),
         None,
+        options.site_url.as_deref(),
+        options.canonical.as_deref(),
+        options.pwa.as_ref(),
     );
 
     // Generate layout shell (without page content, just the structure)
@@ -348,6 +373,9 @@ pub(crate) fn generate_page(
         options.critical_css.as_deref(),
         options.csp_meta.as_deref(),
         merged_head.as_ref(),
+        options.site_url.as_deref(),
+        options.canonical.as_deref(),
+        options.pwa.as_ref(),
     );
 
     // Build CompiledVars for v3 expression compilation
@@ -519,6 +547,9 @@ mod tests {
             prod: false,
             source_maps: false,
             inline_runtime: true,
+            site_url: None,
+            canonical: None,
+            pwa: None,
         };
         let res = generate_spa_html(&doc, &opts).expect("spa ok");
 
@@ -592,6 +623,9 @@ mod tests {
             prod: false,
             source_maps: false,
             inline_runtime: true,
+            site_url: None,
+            canonical: None,
+            pwa: None,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
         assert!(
@@ -664,6 +698,9 @@ mod tests {
             prod: false,
             source_maps: false,
             inline_runtime: true,
+            site_url: None,
+            canonical: None,
+            pwa: None,
         };
         let res = generate_html(&doc, "test", &opts).expect("html ok");
         assert!(res.html.contains("data-webcore-e=\"foo\""));

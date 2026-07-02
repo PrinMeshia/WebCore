@@ -1,7 +1,7 @@
 //! Build pipeline: compile `.webc` sources into `dist/`.
 
 use super::assets::{self, copy_dir_recursive, fingerprint_images, rewrite_asset_refs};
-use super::config::{read_config, read_wasm_module_name};
+use super::config::{read_config, read_wasm_module_name, Pwa};
 use super::loader::{
     build_temp_doc_for_component, expand_collection, load_webc_document, resolve_component_imports,
     resolve_data_imports,
@@ -17,11 +17,17 @@ use std::path::Path;
 // ── Main build pipeline ──────────────────────────────────────────────────────
 
 /// Compile the current project (reads from `src/`, writes to `dist/`).
-pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
+///
+/// `mode_override` forces the build mode regardless of `webc.toml`'s `mode`
+/// (`webc build --prod` / `--dev`); pass `None` to honour the config.
+pub(crate) fn build_project(mode_override: Option<&str>) -> Result<(), error::CompileErrors> {
     println!("🔨 Building WebCore project...");
 
     // Read project config
-    let config = read_config()?;
+    let mut config = read_config()?;
+    if let Some(m) = mode_override {
+        config.mode = m.to_string();
+    }
     println!("📁 Project: {}", config.app_title);
 
     // Create dist/ and dist/assets/
@@ -140,6 +146,15 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
         // Pages reference a single shared /assets/webcore.js (cached once across
         // the whole site) instead of inlining the runtime in every page.
         inline_runtime: false,
+        // Absolute-URL SEO (canonical set per page below) — only when configured.
+        site_url: config.url.clone(),
+        canonical: None,
+        // PWA head tags — only when a [pwa] section is present.
+        pwa: config.pwa.as_ref().map(|p| codegen::html::PwaHead {
+            theme_color: p.theme_color.clone(),
+            short_name: p.short_name.clone(),
+            apple_icon: "/assets/apple-touch-icon.png".to_string(),
+        }),
     };
 
     // Generate CSS up front (theme + scoped component styles) so prod mode can
@@ -235,8 +250,23 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
         // Build a document view restricted to the components this page imports.
         // Falls back to the full component pool for pages without import declarations.
         let page_doc = page_scoped_doc(page_name);
+        // Per-page canonical URL: site_url + clean route ("index.html" → "/").
+        // The error page (404) is noindex and excluded from the sitemap, so it
+        // gets no canonical.
+        let canonical = config
+            .url
+            .as_ref()
+            .filter(|_| !filename.starts_with("404"))
+            .map(|base| {
+                if filename == "index.html" {
+                    format!("{base}/")
+                } else {
+                    format!("{base}/{}", filename.trim_end_matches("index.html"))
+                }
+            });
         let page_options = codegen::html::HtmlPageOptions {
             critical_css: critical_css_for(&page_doc, page_name),
+            canonical,
             ..options.clone()
         };
         match codegen::html::generate_page(
@@ -471,8 +501,15 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
     // but fed the UNION of every page's compiled expressions and handlers so
     // one cached webcore.js serves the whole site. Page-prefixed expression ids
     // keep the `_e` map keys unique across pages.
-    let runtime_js =
+    let mut runtime_js =
         codegen::js::generate_inline_js(&all_handlers, &all_exprs, &[], &document, prod).js;
+    // PWA: register the service worker from the shared runtime (external script,
+    // CSP-safe). Appended before hashing so it ships in webcore.<hash>.js.
+    if config.pwa.is_some() {
+        runtime_js.push_str(
+            "\nif('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}\n",
+        );
+    }
     let final_js = if prod {
         codegen::js::minify_js(&runtime_js)
     } else {
@@ -500,17 +537,208 @@ pub(crate) fn build_project() -> Result<(), error::CompileErrors> {
 
     // Copy public assets, fingerprinting images along the way
     let public_dir = Path::new("public");
+    let mut fingerprint_map: BTreeMap<String, String> = BTreeMap::new();
     if public_dir.exists() {
         copy_dir_recursive(public_dir, &assets_dir, config.mode == "prod")?;
-        let fingerprint_map = fingerprint_images(public_dir, &assets_dir)?;
+        fingerprint_map = fingerprint_images(public_dir, &assets_dir)?;
         if !fingerprint_map.is_empty() {
             rewrite_asset_refs(dist_dir, &fingerprint_map);
         }
     }
 
+    // ── SEO root files: robots.txt, sitemap.xml, 404.html ────────────────────
+    // Clean-URL path for every page ("index.html" → "/", "x/index.html" → "/x/").
+    let mut routes: Vec<String> = document
+        .pages
+        .keys()
+        .map(|name| {
+            let f = page_to_filename(name);
+            if f == "index.html" {
+                "/".to_string()
+            } else {
+                format!("/{}", f.trim_end_matches("index.html"))
+            }
+        })
+        .collect();
+    routes.sort();
+
+    // robots.txt — always emitted; advertises the sitemap when a site URL is set.
+    let robots_path = dist_dir.join("robots.txt");
+    fs::write(&robots_path, render_robots(config.url.as_deref())).map_err(|e| {
+        error::CompileError::Io {
+            path: robots_path.clone(),
+            source: e,
+        }
+    })?;
+
+    // sitemap.xml — only when an absolute site URL is configured (locs must be absolute).
+    if let Some(ref base) = config.url {
+        let sitemap_path = dist_dir.join("sitemap.xml");
+        fs::write(&sitemap_path, render_sitemap(base, &routes)).map_err(|e| {
+            error::CompileError::Io {
+                path: sitemap_path.clone(),
+                source: e,
+            }
+        })?;
+    }
+
+    // 404.html — static hosts (GitHub Pages, Netlify, …) serve dist/404.html on a
+    // missing route. Mirror the built `404` page there when the project defines one.
+    let not_found = dist_dir.join("404").join("index.html");
+    if not_found.exists() {
+        let _ = fs::copy(&not_found, dist_dir.join("404.html"));
+    }
+
+    // ── PWA: manifest.webmanifest + sw.js at the site root ───────────────────
+    if let Some(ref pwa) = config.pwa {
+        // Manifest icon paths honour asset fingerprinting (prod).
+        let icon = |name: &str| -> String {
+            let hashed = fingerprint_map
+                .get(name)
+                .map(String::as_str)
+                .unwrap_or(name);
+            format!("/assets/{hashed}")
+        };
+        let manifest = render_manifest(
+            pwa,
+            &icon("icon-192.png"),
+            &icon("icon-512.png"),
+            &icon("icon-maskable.png"),
+        );
+        let manifest_path = dist_dir.join("manifest.webmanifest");
+        fs::write(&manifest_path, manifest).map_err(|e| error::CompileError::Io {
+            path: manifest_path.clone(),
+            source: e,
+        })?;
+
+        let sw_path = dist_dir.join("sw.js");
+        fs::write(&sw_path, SERVICE_WORKER_JS).map_err(|e| error::CompileError::Io {
+            path: sw_path.clone(),
+            source: e,
+        })?;
+    }
+
     print_dist_tree(dist_dir, config.mode == "prod");
     print_bundle_analysis(&final_js);
     Ok(())
+}
+
+// ── PWA assets ───────────────────────────────────────────────────────────────
+
+/// A minimal offline-capable service worker: network-first for same-origin GETs,
+/// caching each success and falling back to the cache (then `/`) when offline.
+const SERVICE_WORKER_JS: &str = "const C='webcore-pwa-v1';\
+self.addEventListener('install',function(e){self.skipWaiting();});\
+self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==C;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});\
+self.addEventListener('fetch',function(e){var r=e.request;if(r.method!=='GET'||new URL(r.url).origin!==location.origin)return;\
+e.respondWith(fetch(r).then(function(res){var cp=res.clone();caches.open(C).then(function(c){c.put(r,cp);});return res;}).catch(function(){return caches.match(r).then(function(m){return m||caches.match('/');});}));});\n";
+
+/// JSON-escape a manifest string value (quotes and backslashes).
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Render `manifest.webmanifest` from the resolved `[pwa]` config + icon paths.
+fn render_manifest(pwa: &Pwa, icon_192: &str, icon_512: &str, icon_maskable: &str) -> String {
+    format!(
+        "{{\n  \"name\": \"{name}\",\n  \"short_name\": \"{short}\",\n  \
+         \"start_url\": \"/\",\n  \"scope\": \"/\",\n  \"display\": \"{display}\",\n  \
+         \"background_color\": \"{bg}\",\n  \"theme_color\": \"{theme}\",\n  \"icons\": [\n    \
+         {{ \"src\": \"{i192}\", \"sizes\": \"192x192\", \"type\": \"image/png\" }},\n    \
+         {{ \"src\": \"{i512}\", \"sizes\": \"512x512\", \"type\": \"image/png\" }},\n    \
+         {{ \"src\": \"{imask}\", \"sizes\": \"512x512\", \"type\": \"image/png\", \"purpose\": \"maskable\" }}\n  ]\n}}\n",
+        name = json_escape(&pwa.name),
+        short = json_escape(&pwa.short_name),
+        display = json_escape(&pwa.display),
+        bg = json_escape(&pwa.background_color),
+        theme = json_escape(&pwa.theme_color),
+        i192 = json_escape(icon_192),
+        i512 = json_escape(icon_512),
+        imask = json_escape(icon_maskable),
+    )
+}
+
+// ── SEO root files (pure renderers, unit-tested) ─────────────────────────────
+
+/// Render `robots.txt`: allow-all, plus a `Sitemap:` line when a site URL is set.
+fn render_robots(url: Option<&str>) -> String {
+    let mut s = String::from("User-agent: *\nAllow: /\n");
+    if let Some(base) = url {
+        s.push_str(&format!("\nSitemap: {base}/sitemap.xml\n"));
+    }
+    s
+}
+
+/// Render `sitemap.xml` from an absolute base URL and clean-URL routes
+/// (`"/"`, `"/skills/"`, …). Routes under `/404` are excluded.
+fn render_sitemap(base: &str, routes: &[String]) -> String {
+    let mut s = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+    );
+    for route in routes.iter().filter(|r| !r.starts_with("/404")) {
+        s.push_str(&format!("  <url><loc>{base}{route}</loc></url>\n"));
+    }
+    s.push_str("</urlset>\n");
+    s
+}
+
+#[cfg(test)]
+mod seo_tests {
+    use super::{render_manifest, render_robots, render_sitemap, Pwa};
+
+    #[test]
+    fn manifest_has_required_fields_and_icons() {
+        let pwa = Pwa {
+            name: "My \"App\"".to_string(),
+            short_name: "App".to_string(),
+            theme_color: "#7C3AED".to_string(),
+            background_color: "#05030F".to_string(),
+            display: "standalone".to_string(),
+        };
+        let m = render_manifest(
+            &pwa,
+            "/assets/icon-192.png",
+            "/assets/icon-512.png",
+            "/assets/icon-maskable.png",
+        );
+        assert!(m.contains(r#""short_name": "App""#));
+        assert!(m.contains(r#""start_url": "/""#));
+        assert!(m.contains(r#""display": "standalone""#));
+        assert!(m.contains(r##""theme_color": "#7C3AED""##));
+        assert!(m.contains(r#""sizes": "192x192""#));
+        assert!(m.contains(r#""purpose": "maskable""#));
+        // Quotes in the name are JSON-escaped.
+        assert!(
+            m.contains(r#""name": "My \"App\"""#),
+            "name not escaped:\n{m}"
+        );
+    }
+
+    #[test]
+    fn robots_without_url_has_no_sitemap_line() {
+        let out = render_robots(None);
+        assert!(out.contains("User-agent: *"));
+        assert!(out.contains("Allow: /"));
+        assert!(!out.contains("Sitemap:"));
+    }
+
+    #[test]
+    fn robots_with_url_links_sitemap() {
+        let out = render_robots(Some("https://example.com"));
+        assert!(out.contains("Sitemap: https://example.com/sitemap.xml"));
+    }
+
+    #[test]
+    fn sitemap_lists_routes_and_skips_404() {
+        let routes = vec!["/".to_string(), "/skills/".to_string(), "/404/".to_string()];
+        let out = render_sitemap("https://example.com", &routes);
+        assert!(out.contains("<loc>https://example.com/</loc>"));
+        assert!(out.contains("<loc>https://example.com/skills/</loc>"));
+        assert!(!out.contains("/404"), "404 must not be advertised:\n{out}");
+        assert!(out.trim_start().starts_with("<?xml"));
+        assert!(out.contains("</urlset>"));
+    }
 }
 
 /// Watch mode: rebuild whenever source files change (no HTTP server).
@@ -522,7 +750,7 @@ pub(crate) fn watch_project() -> Result<(), String> {
     println!("👁  Watch mode — rebuilding on file changes (Ctrl-C to stop)");
 
     // Initial build
-    if let Err(e) = build_project() {
+    if let Err(e) = build_project(None) {
         eprintln!("Build error: {e}");
     }
 
@@ -571,7 +799,7 @@ pub(crate) fn watch_project() -> Result<(), String> {
         if is_dirty && last_build.elapsed() > Duration::from_millis(300) {
             last_build = Instant::now();
             println!("\n🔄 File changed — rebuilding...");
-            if let Err(e) = build_project() {
+            if let Err(e) = build_project(None) {
                 eprintln!("Build error: {e}");
             } else {
                 println!("✅ Rebuild complete");

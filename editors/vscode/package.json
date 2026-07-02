@@ -2,7 +2,7 @@
     "name": "webcore-language",
     "displayName": "WebCore Language Support",
     "description": "Syntax highlighting, snippets and webc fmt integration for .webc files (WebCore DSL)",
-    "version": "3.2.0",
+    "version": "3.3.0",
     "publisher": "webcore",
     "engines": {
         "vscode": "^1.75.0"

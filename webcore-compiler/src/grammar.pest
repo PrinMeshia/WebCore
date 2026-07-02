@@ -34,8 +34,9 @@ head_item  = _{ head_title | head_meta | head_favicon }
 head_title = { "title" ~ string_literal }
 head_meta  = { "meta" ~ meta_key ~ "=" ~ string_literal }
 head_favicon = { "favicon" ~ string_literal }
-// meta_key allows og:title, twitter:card etc. (colon-separated namespace)
-meta_key   = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ":")* }
+// meta_key allows og:title, twitter:card (colon namespace) and hyphenated
+// standard meta names (theme-color, apple-mobile-web-app-capable, …).
+meta_key   = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ":" | "-")* }
 
 // ============ COMPONENT DECLARATION ============
 component_decl = { "component" ~ identifier ~ "{" ~ component_body ~ "}" }

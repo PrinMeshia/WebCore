@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 3.2.0 |
+| **Version** | 3.3.0 |
 | **Statut** | Release |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 218 tests (unitaires, golden, intégration, perf) |
+| **Tests** | 233 tests (unitaires, golden, intégration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -86,7 +86,7 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 ### Outillage & DX
 
-- **CLI complète** : `webc new` · `build` · `dev` (HMR via WebSocket) · `watch` · `check` · `fmt` (formateur idempotent) · `lsp` (serveur LSP 3.17 sur stdin/stdout — hover, complétion, go-to-definition, rename, **diagnostics temps réel**, **semantic tokens**, **code actions**)
+- **CLI complète** : `webc new` · `build` (`--prod` / `--dev`) · `dev` (HMR via WebSocket) · `watch` · `check` · `fmt` (formateur idempotent) · `lsp` (serveur LSP 3.17 sur stdin/stdout — hover, complétion, go-to-definition, rename, **diagnostics temps réel**, **semantic tokens**, **code actions**)
 - **Erreurs façon rustc** : ligne source + caret `^` + hints contextuels, toutes les erreurs agrégées en une passe
 - **Runtime ES2022+** : private class fields, optional chaining, nullish coalescing — zéro dépendance, zéro transpileur ; v3.0 : expressions compilées en fermetures JS (`const _e={e0:()=>...}`) — `evalCond` / `new Function()` supprimés
 - **`webc check`** : valide routes, composants, props et détecte les références circulaires sans rien générer

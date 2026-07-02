@@ -613,7 +613,11 @@ fn generate_runtime_js_with_vars_and_exprs(
     if has_destroy {
         js.push_str(";window.addEventListener('beforeunload',runDestroyHooks)");
     }
-    if prod {
+    // Prod cleanup: strip the reactive `data-webcore-*` attributes for a tidy DOM.
+    // Skipped when the project uses i18n: `setLocale` re-renders by RE-QUERYING
+    // these attributes (`_b`/`bindIf`/`bindAttrs`/…), so stripping them would make
+    // a runtime language switch find no elements to update.
+    if prod && document.locales.is_empty() {
         js.push_str(
             ";(['data-webcore-if','data-webcore-else','data-webcore-interpolation',\
 'data-webcore-ref','data-webcore-defer','data-webcore-spread']).forEach(a=>{\
@@ -646,6 +650,12 @@ await m.default();Object.assign(WASM,m);\
 }
 
 /// Strip line comments and collapse whitespace — safe for generated JS (no multiline strings).
+/// Lightweight JS minification: drop blank and whole-line `//` comments and
+/// strip each line's indentation. Lines are re-joined with `\n` (NOT glued
+/// together): joining without a separator would let a trailing inline `//`
+/// comment swallow the rest of the file, and would break automatic semicolon
+/// insertion between statements. User `on:mount` code can contain inline
+/// comments and newline-terminated statements, so newlines must be preserved.
 pub(crate) fn minify_js(js: &str) -> String {
     js.lines()
         .filter(|l| {
@@ -653,5 +663,34 @@ pub(crate) fn minify_js(js: &str) -> String {
             !t.is_empty() && !t.starts_with("//")
         })
         .map(str::trim)
-        .collect()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod minify_tests {
+    use super::minify_js;
+
+    #[test]
+    fn inline_comment_does_not_swallow_following_code() {
+        let src = "const a = 1;   // trailing comment\nconst b = 2;\nfoo(a, b);";
+        let out = minify_js(src);
+        // The statements after the inline comment must survive.
+        assert!(
+            out.contains("const b = 2;"),
+            "code after inline // was lost:\n{out}"
+        );
+        assert!(out.contains("foo(a, b);"));
+        // A newline still separates the commented line from the next statement.
+        assert!(
+            out.contains("comment\nconst b"),
+            "newline separator lost:\n{out}"
+        );
+    }
+
+    #[test]
+    fn drops_blank_and_whole_line_comments_and_indent() {
+        let src = "  // header\n\n    const x = 1;\n";
+        assert_eq!(minify_js(src), "const x = 1;");
+    }
 }

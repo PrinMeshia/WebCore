@@ -163,7 +163,7 @@ pub(crate) fn serve_project(
     auto_open: bool,
 ) -> Result<(), String> {
     // initial build
-    build_project().map_err(|e| e.to_string())?;
+    build_project(None).map_err(|e| e.to_string())?;
 
     // Shared list of connected WebSocket clients
     let ws_clients: WsClients = Arc::new(Mutex::new(Vec::new()));
@@ -280,7 +280,7 @@ pub(crate) fn serve_project(
         }
         if do_rebuild {
             println!("♻️  Rebuilding...");
-            match build_project() {
+            match build_project(None) {
                 Ok(()) => {
                     println!("🔄 HMR: broadcasting reload to connected clients");
                     if let Ok(mut clients) = ws_clients_for_rebuild.lock() {
