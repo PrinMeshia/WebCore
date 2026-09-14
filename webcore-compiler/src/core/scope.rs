@@ -137,61 +137,28 @@ fn rewrite_store_calls(body: &str, renames: &[(String, String)]) -> String {
 
 /// Recursively rewrite state references inside a list of view elements.
 fn rewrite_elements(elements: &mut [Element], renames: &[(String, String)]) {
-    for el in elements.iter_mut() {
-        match el {
-            Element::Interpolation(expr, _) => {
-                *expr = rewrite_expr(expr, renames);
-            }
-            Element::Tag {
-                attributes,
-                content,
-                ..
-            }
-            | Element::Component {
-                attributes,
-                content,
-                ..
-            } => {
-                for attr in attributes.iter_mut() {
-                    match &mut attr.value {
-                        AttributeValue::Expression(e) => *e = rewrite_expr(e, renames),
-                        AttributeValue::Spread(v) => *v = rename_exact(v, renames),
-                        AttributeValue::String(_) | AttributeValue::Boolean(_) => {}
-                    }
-                }
-                rewrite_elements(content, renames);
-            }
-            Element::For {
-                iterable,
-                key,
-                content,
-                ..
-            } => {
-                *iterable = rewrite_expr(iterable, renames);
-                if let Some(k) = key.as_mut() {
-                    *k = rewrite_expr(k, renames);
-                }
-                rewrite_elements(content, renames);
-            }
-            Element::If {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                *condition = rewrite_expr(condition, renames);
-                rewrite_elements(then_branch, renames);
-                if let Some(eb) = else_branch.as_mut() {
-                    rewrite_elements(eb, renames);
-                }
-            }
-            Element::SlotContent { content, .. }
-            | Element::ErrorBlock { content, .. }
-            | Element::Fragment { content, .. }
-            | Element::Defer { content, .. } => {
-                rewrite_elements(content, renames);
-            }
-            Element::Text(_, _) | Element::Slot(_, _) => {}
+    crate::core::ast::walk_elements_mut(elements, &mut |el| match el {
+        Element::Interpolation(expr, _) => {
+            *expr = rewrite_expr(expr, renames);
         }
-    }
+        Element::Tag { attributes, .. } | Element::Component { attributes, .. } => {
+            for attr in attributes.iter_mut() {
+                match &mut attr.value {
+                    AttributeValue::Expression(e) => *e = rewrite_expr(e, renames),
+                    AttributeValue::Spread(v) => *v = rename_exact(v, renames),
+                    AttributeValue::String(_) | AttributeValue::Boolean(_) => {}
+                }
+            }
+        }
+        Element::For { iterable, key, .. } => {
+            *iterable = rewrite_expr(iterable, renames);
+            if let Some(k) = key.as_mut() {
+                *k = rewrite_expr(k, renames);
+            }
+        }
+        Element::If { condition, .. } => {
+            *condition = rewrite_expr(condition, renames);
+        }
+        _ => {}
+    });
 }

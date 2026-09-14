@@ -1,0 +1,125 @@
+page "docs/data" {
+    h1 { "Data & content" }
+    p class="lead" {
+        "WebCore reads data and Markdown at "
+        strong { "build time" }
+        " and bakes the result into static HTML. No data fetching ships to the browser unless you ask for it."
+    }
+
+    h2 { "Importing data" }
+    p {
+        "Import a "
+        code { ".json" }
+        " or "
+        code { ".toml" }
+        " file the same way you import a component. The path is relative to the project; the convention is to keep files under "
+        code { "data/" }
+        "."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"import projects from \"data/projects.toml\"
+import posts    from \"data/posts.json\""
+        } }
+    }
+
+    h2 { "Rendering a collection" }
+    p {
+        "Loop over imported data with "
+        code { "@for" }
+        ". Because the data is known at build time, the loop is "
+        strong { "expanded into static markup" }
+        " — there is no runtime list rendering, and conditions that become constant are folded away."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"import projects from \"data/projects.toml\"
+
+page \"work\" {
+    h1 { \"Selected work\" }
+    div class=\"grid\" {
+        @for p in projects {
+            a href=\{p.url} class=\"card\" {
+                h3 { \"\{p.title}\" }
+                p  { \"\{p.summary}\" }
+                @if p.featured { span class=\"star\" { \"★\" } }
+            }
+        }
+    }
+}"
+        } }
+    }
+    p {
+        "Add an index with "
+        code { "@for p, i in projects" }
+        ", a stable key with "
+        code { "key=p.id" }
+        ", and nest loops over sub-arrays with "
+        code { "@for tag in p.tags" }
+        "."
+    }
+
+    h2 { "Markdown" }
+    p {
+        "Drop a Markdown file straight into a view with the "
+        code { "markdown" }
+        " element. It is parsed and rendered to a static HTML fragment at build time — zero runtime cost."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"article class=\"prose\" {
+    markdown \"content/changelog.md\"
+}"
+        } }
+    }
+    p {
+        "CommonMark plus tables, strikethrough, footnotes and task lists are supported, and a leading "
+        code { "---" }
+        " or "
+        code { "+++" }
+        " front-matter block is stripped."
+    }
+
+    h2 { "One page per record" }
+    p {
+        "To turn a collection into individual pages — a blog, a docs set, a product catalogue — pair it with a "
+        code { "each" }
+        " route. Each record becomes its own static file, with "
+        code { "$route.*" }
+        " values baked in."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"import posts from \"data/posts.json\"
+
+app Blog {
+    routes { \"/post/:slug\": PostPage each posts }
+}"
+        } }
+    }
+    p {
+        "See "
+        link to="/docs/routing" { "Routing & pages" }
+        " for the routing side, and "
+        link to="/docs/seo" { "SEO & metadata" }
+        " for turning a collection into an RSS feed."
+    }
+
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "Collection pages are currently generated in the "
+            strong { "default locale only" }
+            ", even with per-locale static output enabled."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/routing" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Routing & pages" } }
+        link to="/docs/reactivity" class="next" { span class="dir" { "Next" } span class="ttl" { "Reactivity →" } }
+    }
+}

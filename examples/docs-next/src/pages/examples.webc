@@ -1,0 +1,62 @@
+page "docs/examples" {
+    h1 { "Examples" }
+    p class="lead" {
+        "Complete WebCore projects you can read, run and copy from. Each lives under "
+        code { "examples/" }
+        " in the repository — clone it, then "
+        code { "webc dev" }
+        " to explore."
+    }
+
+    h2 { "Starter projects" }
+    div class="cards" {
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/counter" class="card" {
+            h3 { "Counter" }
+            p { "The smallest interactive component: state, an event handler, a computed value." }
+        }
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/todo" class="card" {
+            h3 { "Todo list" }
+            p { "Lists, conditional rendering and two-way binding on a small stateful app." }
+        }
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/forms" class="card" {
+            h3 { "Forms & validation" }
+            p { "Declarative " code { "validate:*" } " rules and inline " code { "@error" } " messages." }
+        }
+    }
+
+    h2 { "Full sites" }
+    div class="cards" {
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/blog" class="card" {
+            h3 { "Blog" }
+            p { "Build-time content collections and Markdown rendered to static pages." }
+        }
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/i18n" class="card" {
+            h3 { "i18n demo" }
+            p { "Per-locale static generation with translation catalogs and hreflang." }
+        }
+        a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/portfolio" class="card" {
+            h3 { "Portfolio" }
+            p { "A complete multi-page site with a PWA manifest, SEO metadata and a custom theme." }
+        }
+    }
+
+    div class="callout tip" {
+        span class="ico" { "💡" }
+        div { p {
+            "This documentation site is itself a WebCore project — see "
+            a href="https://github.com/PrinMeshia/Webcore/tree/main/examples/docs-next" { "examples/docs-next" }
+            " for a real-world layout, shell component and design system."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/functions" class="prev" {
+            span class="dir" { "Previous" }
+            span class="ttl" { "← Native functions" }
+        }
+        link to="/docs/playground" class="next" {
+            span class="dir" { "Next" }
+            span class="ttl" { "Playground →" }
+        }
+    }
+}

@@ -810,12 +810,13 @@ page \"about\" {
             " — preventing layout shift (CLS). Zero JS emitted."
         }
         pre class="code-block" {
-"// webc:img is stripped from the HTML output
-img webc:img src=\"/hero.png\" alt=\"Hero\"
-img webc:img src=\"/logo.svg\" alt=\"Logo\" class=\"logo\"
+"// public/ is served at /assets/ — write the URL, not the disk path
+img webc:img src=\"/assets/hero.png\" alt=\"Hero\"
+img webc:img src=\"/assets/logo.svg\" alt=\"Logo\" class=\"logo\"
 
-// Compiled output:
-// <img src=\"/assets/hero.png\" loading=\"lazy\" decoding=\"async\"
+// Compiled output (webc:img itself is stripped; the name carries
+// the content hash so the file can be cached forever):
+// <img src=\"/assets/hero.7f3c1a90.png\" loading=\"lazy\" decoding=\"async\"
 //      width=\"1200\" height=\"630\" alt=\"Hero\">"
         }
         div class="callout" {

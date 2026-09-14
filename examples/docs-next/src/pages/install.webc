@@ -1,0 +1,104 @@
+page "docs/installation" {
+    h1 { "Installation" }
+    p class="lead" {
+        "WebCore ships as a single Rust binary. Build it once, then use "
+        code { "webc" }
+        " to scaffold, develop and compile projects."
+    }
+
+    h2 { "Requirements" }
+    ul {
+        li { "A recent " code { "stable" } " Rust toolchain, installed via " code { "rustup" } "." }
+        li { "Node.js is " strong { "not" } " required — the runtime is generated, not bundled." }
+        li { "Optional: " code { "wasm-pack" } ", only if a project ships a Rust/WASM module." }
+    }
+
+    h2 { "Build the compiler" }
+    p { "Clone the repository and build the release binary." }
+    div class="code" data-lang="bash" {
+        div class="code-head" {
+            span class="lang" { "bash" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"git clone https://github.com/PrinMeshia/Webcore.git
+cd Webcore/webcore-compiler
+cargo build --release
+# → ./target/release/webcore-compiler"
+        } }
+    }
+
+    div class="callout tip" {
+        span class="ico" { "💡" }
+        div {
+            p {
+                "Add the binary to your "
+                code { "PATH" }
+                " as "
+                code { "webc" }
+                " so the commands below just work:"
+            }
+            div class="code" data-lang="bash" {
+                div class="code-head" {
+                    span class="lang" { "bash" }
+                    button class="copy-btn" { "Copy" }
+                }
+                pre { code { "alias webc=\"$(pwd)/target/release/webcore-compiler\"" } }
+            }
+        }
+    }
+
+    h2 { "Scaffold a project" }
+    p {
+        code { "webc new" }
+        " creates a ready-to-run project: an "
+        code { "app" }
+        " block, a layout, a home page and a "
+        code { "Counter" }
+        " component, plus a "
+        code { "theme.toml" }
+        "."
+    }
+    div class="code" data-lang="bash" {
+        div class="code-head" {
+            span class="lang" { "bash" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"webc new my-app
+cd my-app
+webc dev        # dev server with hot reload → http://localhost:3000"
+        } }
+    }
+
+    h2 { "Project layout" }
+    div class="code" data-lang="text" {
+        div class="code-head" {
+            span class="lang" { "text" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"my-app/
+├─ webc.toml            # app config (title, lang, mode, url, [i18n], [pwa])
+├─ theme.toml           # design tokens → CSS variables
+├─ locales/*.toml       # translation catalogs (optional)
+├─ public/              # static assets, extra .css
+└─ src/
+   ├─ app.webc          # routes + <head>
+   ├─ layouts/          # page shells (slots)
+   ├─ pages/            # one file per route
+   └─ components/       # reusable components"
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs" class="prev" {
+            span class="dir" { "Previous" }
+            span class="ttl" { "← Introduction" }
+        }
+        link to="/docs/first-app" class="next" {
+            span class="dir" { "Next" }
+            span class="ttl" { "Your first app →" }
+        }
+    }
+}

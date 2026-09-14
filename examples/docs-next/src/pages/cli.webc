@@ -1,0 +1,82 @@
+page "docs/cli" {
+    h1 { "CLI reference" }
+    p class="lead" {
+        "One binary, "
+        code { "webc" }
+        ", does everything: scaffold a project, run a dev server, build the static site, validate it, and format your source."
+    }
+
+    h2 { "webc new" }
+    p { "Scaffold a ready-to-run project — config, a layout, a home page, a " code { "Counter" } " component and a theme." }
+    div class="code" data-lang="bash" {
+        div class="code-head" { span class="lang" { "bash" } button class="copy-btn" { "Copy" } }
+        pre { code { "webc new my-app" } }
+    }
+
+    h2 { "webc dev" }
+    p { "Start a dev server with live reload. It rebuilds on every change to " code { "src/" } ", " code { "theme.toml" } " or " code { "webc.toml" } " and reloads the page over a WebSocket." }
+    div class="code" data-lang="bash" {
+        div class="code-head" { span class="lang" { "bash" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"webc dev              # → http://localhost:3000
+webc dev 8080         # a different port
+webc dev --host 0.0.0.0 --open"
+        } }
+    }
+    ul {
+        li { code { "[port]" } " — positional, defaults to " code { "3000" } "." }
+        li { code { "--host <ip>" } " — bind address (defaults to " code { "localhost" } ")." }
+        li { code { "--open" } " — open the browser automatically." }
+    }
+
+    h2 { "webc build" }
+    p { "Compile " code { "src/" } " into a static site in " code { "dist/" } " (wiped and recreated each run)." }
+    div class="code" data-lang="bash" {
+        div class="code-head" { span class="lang" { "bash" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"webc build            # uses [app] mode from webc.toml
+webc build --prod     # force production (minify, critical CSS, CSP)
+webc build --dev      # force development (source maps)"
+        } }
+    }
+
+    h2 { "webc check" }
+    p { "Validate the project without emitting files — ideal for CI." }
+    div class="code" data-lang="bash" {
+        div class="code-head" { span class="lang" { "bash" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"webc check            # errors only
+webc check --strict   # treat warnings as failures
+webc check --a11y     # add accessibility (RGAA) lints
+webc check --json     # machine-readable output for editors"
+        } }
+    }
+    p { "It always checks route targets, unknown components, static prop types, circular references, i18n key parity and orphaned " code { "public/" } " assets; " code { "--a11y" } " adds image-alt, label and control-name lints." }
+
+    h2 { "webc fmt" }
+    p { "Format " code { ".webc" } " files (defaults to " code { "src/" } ")." }
+    div class="code" data-lang="bash" {
+        div class="code-head" { span class="lang" { "bash" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"webc fmt              # rewrite in place
+webc fmt --check      # exit non-zero if anything would change
+webc fmt --indent 2   # override indent width (default 4)"
+        } }
+    }
+
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Two more commands exist: "
+            code { "webc watch" }
+            " (rebuild on change, no server) and "
+            code { "webc lsp" }
+            " (a language server over stdin/stdout for editor integration)."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/syntax" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Syntax" } }
+        link to="/docs/config" class="next" { span class="dir" { "Next" } span class="ttl" { "Configuration →" } }
+    }
+}

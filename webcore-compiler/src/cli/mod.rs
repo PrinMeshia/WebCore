@@ -1,15 +1,18 @@
 //! CLI argument parsing and command dispatch.
 
 pub(crate) mod a11y;
+pub(crate) mod asset_check;
 pub(crate) mod assets;
 pub(crate) mod build;
 pub(crate) mod check;
 pub(crate) mod config;
 pub(crate) mod fmt;
+pub(crate) mod i18n_check;
 pub(crate) mod loader;
 pub(crate) mod lsp;
 pub(crate) mod output;
 pub(crate) mod serve;
+pub(crate) mod site_outputs;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -171,7 +174,8 @@ fn print_help() {
     println!("  lsp          Démarrer le serveur LSP (stdin/stdout, JSON-RPC)");
     println!();
     println!("OPTIONS (dev) :");
-    println!("  --host <ip>  Écouter sur une IP spécifique (ex: 0.0.0.0)");
+    println!("  --host <ip>  Écouter sur une IP spécifique (défaut : 0.0.0.0, tout le réseau)");
+    println!("               127.0.0.1 restreint l'accès à cette machine");
     println!("  --open       Ouvrir le navigateur automatiquement");
     println!();
     println!("OPTIONS (fmt) :");

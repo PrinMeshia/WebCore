@@ -1,12 +1,15 @@
 //! Build pipeline: compile `.webc` sources into `dist/`.
 
 use super::assets::{self, copy_dir_recursive, fingerprint_images, rewrite_asset_refs};
-use super::config::{read_config, read_wasm_module_name, Pwa};
+use super::config::{read_config, read_wasm_module_name};
 use super::loader::{
     build_temp_doc_for_component, expand_collection, load_webc_document, resolve_component_imports,
     resolve_data_imports,
 };
 use super::output::{print_bundle_analysis, print_dist_tree};
+use super::site_outputs::{
+    render_feed, render_manifest, render_robots, render_sitemap, xml_escape, SERVICE_WORKER_JS,
+};
 
 use crate::codegen;
 use crate::core::{ast, css_processor, error, ssg, theme};
@@ -58,12 +61,17 @@ pub(crate) fn build_project(mode_override: Option<&str>) -> Result<(), error::Co
 
     // Load and parse all WebCore files
     let mut document = load_webc_document(&config.locale)?;
+    document.view_transitions = config.view_transitions;
 
     // Resolve build-time data imports (JSON/TOML → document.data_imports)
     resolve_data_imports(&mut document)?;
 
     // Resolve component imports (.webc → document.components + document.page_imports)
     resolve_component_imports(&mut document)?;
+
+    // Expand `@for item in <data_import>` loops into static markup (#72). Runs
+    // after component imports so imported components' data loops expand too.
+    crate::core::data_collections::expand(&mut document);
 
     // Scope each component's reactive state to a unique key namespace so
     // identically-named state in different components no longer collides.
@@ -682,9 +690,32 @@ pub(crate) fn build_project(mode_override: Option<&str>) -> Result<(), error::Co
     if public_dir.exists() {
         copy_dir_recursive(public_dir, &assets_dir, config.mode == "prod")?;
         fingerprint_map = fingerprint_images(public_dir, &assets_dir)?;
-        if !fingerprint_map.is_empty() {
-            rewrite_asset_refs(dist_dir, &fingerprint_map);
+        // Responsive images (#74): generate resized width variants for raster
+        // sources when `[images] widths` is configured.
+        if !config.images.widths.is_empty() {
+            let n = assets::generate_image_variants(public_dir, &assets_dir, &config.images.widths);
+            if n > 0 {
+                println!("🖼  Responsive images: {n} variant(s) generated");
+            }
         }
+        // Responsive images (#74): generate resized width variants for raster
+        // sources when `[images] widths` is configured.
+        if !config.images.widths.is_empty() {
+            let n = assets::generate_image_variants(public_dir, &assets_dir, &config.images.widths);
+            if n > 0 {
+                println!("🖼  Responsive images: {n} variant(s) generated");
+            }
+        }
+    }
+    // Turn every `webc:img` responsive marker into a `srcset` (or strip it when
+    // the feature is off). Runs after all HTML is emitted, and **before** the
+    // fingerprint rewrite below: the `srcset` it writes names the source image,
+    // which exists in `dist/` only under its hashed name. Rewriting afterwards
+    // is what makes those URLs resolve; generated variants carry no hash and
+    // are left alone, since no key of the map matches them.
+    assets::apply_responsive_srcset(dist_dir, &config.images.widths, &config.images.sizes);
+    if !fingerprint_map.is_empty() {
+        rewrite_asset_refs(dist_dir, &fingerprint_map);
     }
 
     // ── SEO root files: robots.txt, sitemap.xml, 404.html ────────────────────
@@ -727,6 +758,41 @@ pub(crate) fn build_project(mode_override: Option<&str>) -> Result<(), error::Co
         })?;
     }
 
+    // feed.xml (RSS 2.0) — from a data collection, when `[feed]` is configured
+    // and an absolute site URL is set (feed links must be absolute).
+    if let (Some(feed), Some(base)) = (config.feed.as_ref(), config.url.as_ref()) {
+        match document.data_imports.get(&feed.collection) {
+            Some(json) => {
+                if let Some(items) = crate::core::data_collections::item_array(json) {
+                    let count = feed.limit.map_or(items.len(), |n| n.min(items.len()));
+                    let feed_path = dist_dir.join("feed.xml");
+                    fs::write(&feed_path, render_feed(feed, base, &items)).map_err(|e| {
+                        error::CompileError::Io {
+                            path: feed_path.clone(),
+                            source: e,
+                        }
+                    })?;
+                    // Auto-discovery link in every page's <head>.
+                    let link = format!(
+                        "  <link rel=\"alternate\" type=\"application/rss+xml\" title=\"{}\" href=\"/feed.xml\">\n",
+                        xml_escape(&feed.title)
+                    );
+                    assets::inject_head_snippet(dist_dir, &link);
+                    println!("📡 Feed: {count} item(s) → /feed.xml");
+                } else {
+                    eprintln!(
+                        "warning[feed]: collection '{}' is not a JSON array — skipping feed.xml",
+                        feed.collection
+                    );
+                }
+            }
+            None => eprintln!(
+                "warning[feed]: no `import {} from \"...\"` found for [feed] collection — skipping feed.xml",
+                feed.collection
+            ),
+        }
+    }
+
     // 404.html — static hosts (GitHub Pages, Netlify, …) serve dist/404.html on a
     // missing route. Mirror the built `404` page there when the project defines one.
     let not_found = dist_dir.join("404").join("index.html");
@@ -763,49 +829,74 @@ pub(crate) fn build_project(mode_override: Option<&str>) -> Result<(), error::Co
         })?;
     }
 
+    // Resolve `{$build.*}` placeholders now that output sizes are known.
+    substitute_build_vars(dist_dir, &document, &processed_css, &final_js);
+
     print_dist_tree(dist_dir, config.mode == "prod");
     print_bundle_analysis(&final_js);
     Ok(())
 }
 
-// ── PWA assets ───────────────────────────────────────────────────────────────
-
-/// A minimal offline-capable service worker: network-first for same-origin GETs,
-/// caching each success and falling back to the cache (then `/`) when offline.
-const SERVICE_WORKER_JS: &str = "const C='webcore-pwa-v1';\
-self.addEventListener('install',function(e){self.skipWaiting();});\
-self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==C;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});\
-self.addEventListener('fetch',function(e){var r=e.request;if(r.method!=='GET'||new URL(r.url).origin!==location.origin)return;\
-e.respondWith(fetch(r).then(function(res){var cp=res.clone();caches.open(C).then(function(c){c.put(r,cp);});return res;}).catch(function(){return caches.match(r).then(function(m){return m||caches.match('/');});}));});\n";
-
-/// JSON-escape a manifest string value (quotes and backslashes).
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+/// Length of `data` after gzip compression at the default level (~what a server
+/// serves) — models the real over-the-wire size. Falls back to the raw length
+/// if compression fails.
+fn gzip_len(data: &[u8]) -> usize {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    if enc.write_all(data).is_err() {
+        return data.len();
+    }
+    enc.finish().map(|v| v.len()).unwrap_or(data.len())
 }
 
-/// Render `manifest.webmanifest` from the resolved `[pwa]` config + icon paths.
-fn render_manifest(pwa: &Pwa, icon_192: &str, icon_512: &str, icon_maskable: &str) -> String {
-    format!(
-        "{{\n  \"name\": \"{name}\",\n  \"short_name\": \"{short}\",\n  \
-         \"start_url\": \"/\",\n  \"scope\": \"/\",\n  \"display\": \"{display}\",\n  \
-         \"background_color\": \"{bg}\",\n  \"theme_color\": \"{theme}\",\n  \"icons\": [\n    \
-         {{ \"src\": \"{i192}\", \"sizes\": \"192x192\", \"type\": \"image/png\" }},\n    \
-         {{ \"src\": \"{i512}\", \"sizes\": \"512x512\", \"type\": \"image/png\" }},\n    \
-         {{ \"src\": \"{imask}\", \"sizes\": \"512x512\", \"type\": \"image/png\", \"purpose\": \"maskable\" }}\n  ]\n}}\n",
-        name = json_escape(&pwa.name),
-        short = json_escape(&pwa.short_name),
-        display = json_escape(&pwa.display),
-        bg = json_escape(&pwa.background_color),
-        theme = json_escape(&pwa.theme_color),
-        i192 = json_escape(icon_192),
-        i512 = json_escape(icon_512),
-        imask = json_escape(icon_maskable),
-    )
+/// Replace `{$build.<field>}` placeholders in every `dist/` HTML file with the
+/// real build statistics — page/component/locale counts and output sizes, which
+/// are only final once the JS/CSS have been generated. Unknown fields are left
+/// as-is (so a typo is visible rather than silently blanked).
+fn substitute_build_vars(dist_dir: &Path, document: &ast::WebCoreDocument, css: &str, js: &str) {
+    let kb = |bytes: usize| format!("{:.1}", bytes as f64 / 1024.0);
+    // Gzipped sizes model the real over-the-wire weight (the marketing figure),
+    // not the minified byte count.
+    let js_gz = gzip_len(js.as_bytes());
+    let css_gz = gzip_len(css.as_bytes());
+    let total_gz = gzip_len(&[js.as_bytes(), css.as_bytes()].concat());
+    let vars: [(&str, String); 14] = [
+        ("pages", document.pages.len().to_string()),
+        ("components", document.components.len().to_string()),
+        ("locales", document.locales.len().to_string()),
+        ("jsBytes", js.len().to_string()),
+        ("jsKb", kb(js.len())),
+        ("cssBytes", css.len().to_string()),
+        ("cssKb", kb(css.len())),
+        // Total shipped weight (runtime JS + stylesheet).
+        ("totalKb", kb(js.len() + css.len())),
+        // Gzipped variants — the actual transferred size.
+        ("jsGzipBytes", js_gz.to_string()),
+        ("jsGzipKb", kb(js_gz)),
+        ("cssGzipBytes", css_gz.to_string()),
+        ("cssGzipKb", kb(css_gz)),
+        ("totalGzipBytes", total_gz.to_string()),
+        ("totalGzipKb", kb(total_gz)),
+    ];
+    let _ = crate::cli::loader::walk_files(dist_dir, |p| {
+        if p.extension().and_then(|e| e.to_str()) != Some("html") {
+            return Ok(());
+        }
+        let Ok(mut html) = fs::read_to_string(p) else {
+            return Ok(());
+        };
+        if !html.contains('\u{2063}') {
+            return Ok(());
+        }
+        for (field, value) in &vars {
+            html = html.replace(&codegen::html::build_var_placeholder(field), value);
+        }
+        let _ = fs::write(p, html);
+        Ok(())
+    });
 }
 
-// ── SEO root files (pure renderers, unit-tested) ─────────────────────────────
-
-/// Render `robots.txt`: allow-all, plus a `Sitemap:` line when a site URL is set.
 /// Build the dev CSS source map (#54): each generated-stylesheet line that
 /// carries a component rule is mapped back to its `.webc` file + line. Sources
 /// are labelled with a project-relative path and their content is embedded
@@ -840,28 +931,6 @@ fn build_css_source_map(
     } else {
         Some(sm.build())
     }
-}
-
-fn render_robots(url: Option<&str>) -> String {
-    let mut s = String::from("User-agent: *\nAllow: /\n");
-    if let Some(base) = url {
-        s.push_str(&format!("\nSitemap: {base}/sitemap.xml\n"));
-    }
-    s
-}
-
-/// Render `sitemap.xml` from an absolute base URL and clean-URL routes
-/// (`"/"`, `"/skills/"`, …). Routes under `/404` are excluded.
-fn render_sitemap(base: &str, routes: &[String]) -> String {
-    let mut s = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
-    );
-    for route in routes.iter().filter(|r| !r.starts_with("/404")) {
-        s.push_str(&format!("  <url><loc>{base}{route}</loc></url>\n"));
-    }
-    s.push_str("</urlset>\n");
-    s
 }
 
 /// Watch mode: rebuild whenever source files change (no HTTP server).
@@ -933,7 +1002,8 @@ pub(crate) fn watch_project() -> Result<(), String> {
 
 #[cfg(test)]
 mod seo_tests {
-    use super::{render_manifest, render_robots, render_sitemap, Pwa};
+    use super::{render_manifest, render_robots, render_sitemap};
+    use crate::cli::config::Pwa;
 
     #[test]
     fn manifest_has_required_fields_and_icons() {

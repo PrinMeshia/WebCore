@@ -1,0 +1,102 @@
+page "docs/forms" {
+    h1 { "Forms & validation" }
+    p class="lead" {
+        "Forms use the same binding you already know, plus declarative "
+        code { "validate:*" }
+        " rules and "
+        code { "@error" }
+        " blocks that show messages inline — no validation library, no manual wiring."
+    }
+
+    h2 { "Binding inputs" }
+    p {
+        code { "bind:value" }
+        " keeps an input and a state variable in sync; "
+        code { "bind:checked" }
+        " does the same for checkboxes. Handle submission with "
+        code { "on:submit" }
+        ", usually with the "
+        code { "prevent" }
+        " modifier."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"component Search {
+    state { query: String = \"\" }
+    view {
+        form on:submit|prevent=\{run(query)} {
+            input bind:value=\{query} placeholder=\"Search…\" {}
+            button type=\"submit\" { \"Go\" }
+        }
+    }
+}"
+        } }
+    }
+
+    h2 { "Declarative validation" }
+    p {
+        "Add "
+        code { "validate:*" }
+        " attributes to an input. The runtime validates on blur, on input once a field has been touched, and on submit — blocking submission while anything is invalid."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"input type=\"text\" name=\"username\"
+      validate:required=\"Username is required\"
+      validate:minlength=\"3,At least 3 characters\" {}"
+        } }
+    }
+    p { "The available rules:" }
+    ul {
+        li { code { "validate:required=\"msg\"" } }
+        li { code { "validate:minlength=\"n,msg\"" } " · " code { "validate:maxlength=\"n,msg\"" } }
+        li { code { "validate:email=\"msg\"" } }
+        li { code { "validate:pattern=\"regex,msg\"" } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Messages accept interpolation, so "
+            code { "validate:required=\"\{t(\"required\")}\"" }
+            " is resolved per locale at build time. Omit a message and a sensible default is used."
+        } }
+    }
+
+    h2 { "Showing errors" }
+    p {
+        "An "
+        code { "@error \"field\"" }
+        " block (matched to the input's "
+        code { "name" }
+        ") is hidden until that field fails, then filled with the validation message."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"form on:submit|prevent=\{submit()} {
+    label { \"Email\" }
+    input type=\"email\" name=\"email\"
+          validate:required=\"Email is required\"
+          validate:email=\"Must be a valid email\" {}
+    @error \"email\" { span class=\"error\" {} }
+
+    button type=\"submit\" { \"Sign up\" }
+}"
+        } }
+    }
+    div class="callout tip" {
+        span class="ico" { "💡" }
+        div { p {
+            "The text inside "
+            code { "@error" }
+            " is a placeholder — the runtime replaces it with the actual message from the failing rule, so you can leave it empty."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/islands" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Islands" } }
+        link to="/docs/syntax" class="next" { span class="dir" { "Next" } span class="ttl" { "Syntax →" } }
+    }
+}

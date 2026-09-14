@@ -9,35 +9,15 @@ fn collect_components_in(
     document: &WebCoreDocument,
     out: &mut std::collections::HashSet<String>,
 ) {
-    for elem in elements {
-        match elem {
-            Element::Component { name, content, .. } => {
-                if out.insert(name.clone()) {
-                    if let Some(comp) = document.components.get(name) {
-                        collect_components_in(&comp.view, document, out);
-                    }
-                }
-                collect_components_in(content, document, out);
-            }
-            Element::Tag { content, .. }
-            | Element::SlotContent { content, .. }
-            | Element::For { content, .. }
-            | Element::ErrorBlock { content, .. } => {
-                collect_components_in(content, document, out);
-            }
-            Element::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                collect_components_in(then_branch, document, out);
-                if let Some(else_b) = else_branch {
-                    collect_components_in(else_b, document, out);
+    crate::core::ast::walk_elements(elements, &mut |el| {
+        if let Element::Component { name, .. } = el {
+            if out.insert(name.clone()) {
+                if let Some(comp) = document.components.get(name) {
+                    collect_components_in(&comp.view, document, out);
                 }
             }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Return the set of component names used by `page_name` (page content +
@@ -64,64 +44,32 @@ pub(crate) fn collect_page_components(
 
 pub(super) fn elements_need_js(elements: &[crate::core::ast::Element]) -> bool {
     use crate::core::ast::Element;
-    for elem in elements {
-        match elem {
-            Element::Interpolation(..) => return true,
-            Element::If { .. } => return true,
-            Element::For { .. } => return true,
-            Element::Tag {
-                attributes,
-                content,
-                ..
-            } => {
-                for attr in attributes {
-                    if matches!(attr.value, AttributeValue::Expression(_)) {
-                        return true;
-                    }
-                    if attr.name.starts_with("on:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("class:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("style:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("validate:") {
-                        return true;
-                    }
-                    if attr.name.starts_with("ref:") {
-                        return true;
-                    }
-                    if attr.name == "bind:value" || attr.name == "bind:checked" {
-                        return true;
-                    }
-                }
-                if elements_need_js(content) {
-                    return true;
+    let mut need = false;
+    crate::core::ast::walk_elements(elements, &mut |elem| match elem {
+        Element::Interpolation(..) | Element::If { .. } | Element::For { .. } => need = true,
+        Element::Tag { attributes, .. } => {
+            for attr in attributes {
+                if matches!(attr.value, AttributeValue::Expression(_))
+                    || attr.name.starts_with("on:")
+                    || attr.name.starts_with("class:")
+                    || attr.name.starts_with("style:")
+                    || attr.name.starts_with("validate:")
+                    || attr.name.starts_with("ref:")
+                    || attr.name == "bind:value"
+                    || attr.name == "bind:checked"
+                {
+                    need = true;
                 }
             }
-            Element::Component {
-                attributes,
-                content,
-                ..
-            } => {
-                if elements_need_js(content) {
-                    return true;
-                }
-                for attr in attributes {
-                    if matches!(attr.value, AttributeValue::Expression(_)) {
-                        return true;
-                    }
-                }
-            }
-            Element::SlotContent { content, .. } if elements_need_js(content) => {
-                return true;
-            }
-            _ => {}
         }
-    }
-    false
+        Element::Component { attributes, .. } => {
+            need |= attributes
+                .iter()
+                .any(|a| matches!(a.value, AttributeValue::Expression(_)));
+        }
+        _ => {}
+    });
+    need
 }
 
 pub(super) fn document_needs_js(document: &WebCoreDocument, page_name: &str) -> bool {

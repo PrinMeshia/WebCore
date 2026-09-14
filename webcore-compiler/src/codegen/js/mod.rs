@@ -201,7 +201,7 @@ fn generate_runtime_js_with_vars_and_exprs(
         unique_handlers.insert(&handler.id, handler);
     }
 
-    let features = detect_features(document);
+    let mut features = detect_features(document);
 
     // Computed derived vars
     let mut computed_entries: Vec<String> = Vec::new();
@@ -215,6 +215,10 @@ fn generate_runtime_js_with_vars_and_exprs(
         }
     }
     let has_computed = !computed_entries.is_empty();
+    // The reactive binders recompute derived vars inside their effects, so a
+    // `@if`/`class:`/attribute bound to a computed var tracks the state it
+    // derives from (computed values are written with the silent `setQ`).
+    features.has_computed = has_computed;
 
     let destroy_bodies = collect_on_destroy_bodies(document);
     let has_destroy = !destroy_bodies.is_empty();
@@ -268,7 +272,10 @@ fn generate_runtime_js_with_vars_and_exprs(
         }
     }
 
-    js.push_str("const{max,min,abs}=Math,U={max,min,abs};\n\n");
+    js.push_str("const{max,min,abs}=Math,U={max,min,abs};\n");
+    // Placeholder for tree-shaken built-in helpers (#57); filled at the end once
+    // the whole runtime is generated and its used builtins are known.
+    js.push_str("/*__WCBUILTINS__*/\n");
 
     // ── Compiled expression map (_e) ─────────────────────────────────────────
     let mut expr_mappings: Vec<(u32, Span)> = Vec::new();
@@ -382,12 +389,15 @@ fn generate_runtime_js_with_vars_and_exprs(
                 .expect("write! to String is infallible");
         }
 
+        // Keys are `<element id>@<event type>` and author ids may contain any
+        // character valid in an HTML id, so they are always quoted.
         js.push_str("const H={\n");
         for (handler, compiled) in non_debounce.iter().zip(handler_compiled_exprs.iter()) {
+            let key = escape_js_str(&handler.id);
             if let Some(helper) = expr_to_helper.get(compiled) {
-                writeln!(js, "{}:{},", handler.id, helper).expect("write! to String is infallible");
+                writeln!(js, "\"{key}\":{helper},").expect("write! to String is infallible");
             } else {
-                writeln!(js, "{}(event){{{}}},", handler.id, compiled)
+                writeln!(js, "\"{key}\"(event){{{compiled}}},")
                     .expect("write! to String is infallible");
             }
         }
@@ -414,7 +424,7 @@ fn generate_runtime_js_with_vars_and_exprs(
                 ""
             };
             write!(js,
-                "{bind_root}.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{{{bind_guard}const id=el.dataset.webcoreInterpolation,fn=_e[id],u=()=>{{{recompute_in_u}el.textContent=String(fn?.()??'')}};$effect(u)}})}};\n\n"
+                "{bind_root}.querySelectorAll('[data-webcore-interpolation]').forEach(el=>{{{bind_guard}const id=el.dataset.webcoreInterpolation,fn=_e[id];if(!fn)return;const u=()=>{{{recompute_in_u}el.textContent=String(fn?.()??'')}};$effect(u)}})}};\n\n"
             ).expect("write! to String is infallible");
         } else {
             js.push_str("const bind=()=>rebindComputed();\n\n");
@@ -478,8 +488,22 @@ fn generate_runtime_js_with_vars_and_exprs(
         js.push_str("try{const html=await(await fetch('/'+file)).text();\n");
         js.push_str("const doc=new DOMParser().parseFromString(html,'text/html');\n");
         js.push_str("const main=doc.querySelector('main');\n");
-        js.push_str("if(main)document.querySelector('main').replaceWith(main);\n");
-        write!(js, "if(init)history.replaceState({{}},'',p);else history.pushState({{}},'',p);{all_rebinds}{island_boot};window.__wcAfterNav?.();}}catch(e){{location.href='/'+file}}}};\n\n").expect("write! to String is infallible");
+        js.push_str("if(init)history.replaceState({},'',p);else history.pushState({},'',p);\n");
+        // `apply` = the visual DOM swap + reactive rebind + post-nav hooks. When
+        // view transitions are on (and supported), it runs inside
+        // document.startViewTransition() so the browser cross-fades old→new;
+        // otherwise it runs directly. Same statement order either way.
+        js.push_str("const apply=()=>{if(main)document.querySelector('main').replaceWith(main);");
+        write!(js, "{all_rebinds}{island_boot};window.__wcAfterNav?.();}};")
+            .expect("write! to String is infallible");
+        if document.view_transitions {
+            js.push_str(
+                "if(document.startViewTransition)document.startViewTransition(apply);else apply();",
+            );
+        } else {
+            js.push_str("apply();");
+        }
+        js.push_str("}catch(e){location.href='/'+file}};\n\n");
         js.push_str("addEventListener('popstate',()=>nav(location.pathname));\n\n");
     }
 
@@ -494,7 +518,7 @@ fn generate_runtime_js_with_vars_and_exprs(
         seen.into_iter().collect()
     };
     if !non_debounce_event_types.is_empty() {
-        js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest('[data-webcore-e]');if(!el||!H[el.id])return;const dwe=el.dataset.webcoreE;if(dwe!==t&&!dwe.startsWith(t+'|'))return;const mods=dwe.includes('|')?dwe.split('|').slice(1):[];if(mods.includes('self')&&e.target!==el)return;if(mods.includes('stop'))e.stopPropagation();if(p||mods.includes('prevent'))e.preventDefault();if(mods.includes('once')){if(el.dataset.webcoreOnced)return;el.dataset.webcoreOnced='1';}H[el.id](e);});\n");
+        js.push_str("const D=(t,p)=>document.addEventListener(t,e=>{const el=e.target.closest('[data-webcore-e]');if(!el)return;const fn=H[el.id+'@'+t];if(!fn)return;const spec=el.dataset.webcoreE.split(',').find(s=>s===t||s.startsWith(t+'|'));if(!spec)return;const mods=spec.split('|').slice(1);if(mods.includes('self')&&e.target!==el)return;if(mods.includes('stop'))e.stopPropagation();if(p||mods.includes('prevent'))e.preventDefault();if(mods.includes('once')){const o=(el.dataset.webcoreOnced||'').split(',').filter(Boolean);if(o.includes(t))return;o.push(t);el.dataset.webcoreOnced=o.join(',');}fn(e);});\n");
         for et in &non_debounce_event_types {
             let prevent = matches!(et.as_str(), "click" | "submit");
             writeln!(js, "D('{}',{});", et, if prevent { 1 } else { 0 })
@@ -722,6 +746,11 @@ await m.default();Object.assign(WASM,m);\
     }
 
     js.push_str("}\n");
+    // Fill the built-in helpers placeholder with only the helpers actually used
+    // in the generated runtime (tree-shaking, #57).
+    let builtins = crate::core::builtins::emit_used(&js);
+    let js = js.replace("/*__WCBUILTINS__*/\n", &builtins);
+
     (js, expr_mappings)
 }
 

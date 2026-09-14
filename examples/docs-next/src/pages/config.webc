@@ -1,0 +1,90 @@
+page "docs/config" {
+    h1 { "Configuration" }
+    p class="lead" {
+        "Two files configure a project: "
+        code { "webc.toml" }
+        " for the app, and "
+        code { "theme.toml" }
+        " for design tokens. Every section is optional."
+    }
+
+    h2 { "webc.toml" }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "webc.toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"[app]
+title            = \"My Site\"      # default \"WebCore App\"
+lang             = \"en\"           # <html lang>, default \"fr\"
+locale           = \"en\"           # i18n locale, defaults to lang
+mode             = \"prod\"         # \"dev\" | \"prod\", default \"dev\"
+url              = \"https://example.com\"   # enables sitemap + robots
+csp              = true           # strict CSP meta (prod only)
+view_transitions = true           # animate SPA navigation
+
+[i18n]
+static = true                     # one static build per locale
+
+[pwa]
+name             = \"My Site\"
+short_name       = \"Site\"
+theme_color      = \"#f97316\"      # default \"#000000\"
+background_color  = \"#ffffff\"
+display          = \"standalone\"
+
+[feed]
+collection   = \"posts\"           # required — a JSON array import
+title        = \"My Blog\"
+date_field   = \"date\"            # defaults: title / url / date / summary
+limit        = 20
+
+[images]
+widths = [400, 800, 1200]         # responsive srcset widths
+sizes  = \"100vw\"
+
+[fmt]
+indent = 4"
+        } }
+    }
+    ul {
+        li { code { "[app] mode = \"prod\"" } " turns on minification, critical-CSS inlining and (with " code { "csp" } ") a strict Content-Security-Policy." }
+        li { code { "url" } " is what unlocks " code { "sitemap.xml" } ", the " code { "robots.txt" } " sitemap line, absolute " code { "og:image" } " and " code { "hreflang" } "." }
+        li { code { "[feed]" } " needs both a " code { "collection" } " and " code { "[app] url" } " to emit " code { "feed.xml" } "." }
+    }
+
+    h2 { "theme.toml" }
+    p { "Design tokens compiled into CSS variables on " code { ":root" } "." }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "theme.toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"name = \"my-theme\"
+
+[theme.colors]      # → --color-*
+primary = \"#f97316\"
+
+[theme.fonts]       # → --font-*
+sans = \"Inter, sans-serif\"
+
+[theme.spacing]     # → --space-*
+lg = \"1.75rem\"
+
+[theme.radius]      # → --radius-*
+md = \"10px\"
+
+[theme.breakpoints] # → --breakpoint-*
+sm = \"640px\""
+        } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Variables are emitted in alphabetical order. See "
+            link to="/docs/styling" { "Styling" }
+            " for how to use and override them."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/cli" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← CLI" } }
+        link to="/docs/functions" class="next" { span class="dir" { "Next" } span class="ttl" { "Native functions →" } }
+    }
+}

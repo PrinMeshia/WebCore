@@ -42,14 +42,22 @@ where
     if !dir.exists() {
         return Ok(());
     }
+    // Collect and sort so files are processed in a deterministic (alphabetical)
+    // order — matters when several files feed one target (e.g. locale merge,
+    // where a later file overrides an earlier key).
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
     for entry in fs::read_dir(dir).map_err(|e| format!("Failed to read {label}: {e}"))? {
         let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some(ext) {
-            let source = fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-            loader(&path, &source)?;
+            paths.push(path);
         }
+    }
+    paths.sort();
+    for path in paths {
+        let source = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        loader(&path, &source)?;
     }
     Ok(())
 }
@@ -91,6 +99,7 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         locales: BTreeMap::new(),
         default_locale: default_locale.to_string(),
         wasm_module: None,
+        view_transitions: false,
         layouts: BTreeMap::new(),
         pages: BTreeMap::new(),
         components: BTreeMap::new(),
@@ -195,18 +204,66 @@ pub(crate) fn load_webc_document(default_locale: &str) -> Result<ast::WebCoreDoc
         Ok(())
     })?;
 
-    // Load locale files from locales/ directory (flat TOML: key = "value")
-    load_webc_dir(Path::new("locales"), "locales/", "toml", |path, source| {
-        if let Some(code) = path.file_stem().and_then(|s| s.to_str()) {
-            let entries: BTreeMap<String, String> = toml::from_str(source)
-                .map_err(|e| format!("Failed to parse locale {}: {e}", path.display()))?;
-            document.locales.insert(code.to_string(), entries);
-            println!("🌍 Loaded locale: {code}");
-        }
-        Ok(())
-    })?;
+    // Load & merge locale files from the locales/ directory.
+    load_locales(Path::new("locales"), &mut document.locales)?;
 
     Ok(document)
+}
+
+/// The locale code a file feeds: the filename up to the first `.`, so both
+/// `fr.toml` and `fr.projects.toml` map to `fr`. This lets one locale be
+/// composed from several files (e.g. hand-written plus tool-generated).
+pub(crate) fn locale_code_of(file_name: &str) -> &str {
+    file_name
+        .split('.')
+        .next()
+        .filter(|c| !c.is_empty())
+        .unwrap_or(file_name)
+}
+
+/// Load every `*.toml` in `dir`, merging files that share a locale code into the
+/// same catalog. Files load alphabetically (see `load_webc_dir`); on a key
+/// collision the last-loaded file wins and a warning names both files, so a
+/// generated key shadowing a hand-written one is always visible. A per-locale
+/// summary is printed to stderr.
+pub(crate) fn load_locales(
+    dir: &Path,
+    locales: &mut BTreeMap<String, BTreeMap<String, String>>,
+) -> Result<(), LoadError> {
+    let mut file_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut key_source: std::collections::HashMap<(String, String), std::path::PathBuf> =
+        std::collections::HashMap::new();
+    load_webc_dir(dir, "locales/", "toml", |path, source| {
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let code = locale_code_of(file_name).to_string();
+        let entries: BTreeMap<String, String> = toml::from_str(source)
+            .map_err(|e| format!("Failed to parse locale {}: {e}", path.display()))?;
+        let target = locales.entry(code.clone()).or_default();
+        for (key, value) in entries {
+            if let Some(prev) = key_source.insert((code.clone(), key.clone()), path.to_path_buf()) {
+                // stderr keeps `webc check --json`'s single stdout line intact.
+                eprintln!(
+                    "⚠️  locale '{code}': key \"{key}\" in {} overrides {}",
+                    path.display(),
+                    prev.display()
+                );
+            }
+            target.insert(key, value);
+        }
+        *file_counts.entry(code).or_insert(0) += 1;
+        Ok(())
+    })?;
+    for (code, count) in &file_counts {
+        if *count > 1 {
+            eprintln!("🌍 Loaded locale: {code} ({count} files)");
+        } else {
+            eprintln!("🌍 Loaded locale: {code}");
+        }
+    }
+    Ok(())
 }
 
 /// Build a temporary `WebCoreDocument` that is a clone of `base` with one extra
@@ -438,4 +495,58 @@ pub(crate) fn expand_collection(
         out.push((format!("{rel}/index.html"), param.to_string(), value));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locale_code_strips_after_first_dot() {
+        assert_eq!(locale_code_of("fr.toml"), "fr");
+        assert_eq!(locale_code_of("fr.projects.toml"), "fr");
+        assert_eq!(locale_code_of("en.toml"), "en");
+        assert_eq!(locale_code_of("pt-BR.admin.toml"), "pt-BR");
+    }
+
+    #[test]
+    fn locale_files_merge_by_code() {
+        // A locales/ dir where `fr` is fed by two files, one of them generated.
+        let dir = std::env::temp_dir().join("wc_locale_merge_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("fr.toml"),
+            "welcome = \"Bienvenue\"\nshared = \"base\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("fr.projects.toml"),
+            "projects = \"Projets\"\nshared = \"generated\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("en.toml"), "welcome = \"Welcome\"\n").unwrap();
+
+        let mut locales: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        load_locales(&dir, &mut locales).unwrap_or_else(|e| panic!("load locales: {e}"));
+
+        // Exactly two locales — no synthetic `fr.projects` language (which would
+        // otherwise generate a bogus /fr.projects/ site under [i18n] static).
+        let codes: Vec<&str> = locales.keys().map(String::as_str).collect();
+        assert_eq!(
+            codes,
+            vec!["en", "fr"],
+            "expected only en+fr, got {codes:?}"
+        );
+
+        // `fr` is the union of both files' keys.
+        let fr = &locales["fr"];
+        assert_eq!(fr.get("welcome").map(String::as_str), Some("Bienvenue"));
+        assert_eq!(fr.get("projects").map(String::as_str), Some("Projets"));
+
+        // Conflict: fr.toml sorts after fr.projects.toml, so it loads last and wins.
+        assert_eq!(fr.get("shared").map(String::as_str), Some("base"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -1,8 +1,8 @@
 //! Top-level declaration parsing: component, page, layout, app, store.
 
 use crate::core::ast::{
-    App, Component, ComputedVar, HeadBlock, HttpBlock, KeyframeStep, Layout, Page, Prop, Span,
-    StateVar, StyleItem, StyleProperty, StyleRule,
+    App, Component, ComputedVar, HeadBlock, HeadMeta, HttpBlock, JsonLdValue, KeyframeStep, Layout,
+    Page, Prop, Span, StateVar, StyleItem, StyleProperty, StyleRule,
 };
 use crate::parser::elements::{extract_string_literal, parse_element};
 use crate::parser::{ParseError, Rule};
@@ -129,7 +129,9 @@ pub(super) fn parse_page(pair: Pair<Rule>) -> Result<Page, ParseError> {
 
 pub(super) fn parse_head_block(pair: Pair<Rule>) -> Result<HeadBlock, ParseError> {
     let mut title: Option<String> = None;
-    let mut metas: Vec<(String, String)> = Vec::new();
+    let mut metas: Vec<HeadMeta> = Vec::new();
+    let mut links: Vec<Vec<(String, String)>> = Vec::new();
+    let mut jsonld: Vec<(String, JsonLdValue)> = Vec::new();
     let mut favicon: Option<String> = None;
 
     for item in pair.into_inner() {
@@ -145,11 +147,53 @@ pub(super) fn parse_head_block(pair: Pair<Rule>) -> Result<HeadBlock, ParseError
                     .next()
                     .map(|p| p.as_str().to_string())
                     .unwrap_or_default();
-                let val = parts
+                let value = parts
                     .next()
                     .map(|p| extract_string_literal(p.as_str()))
                     .unwrap_or_default();
-                metas.push((key, val));
+                // Any trailing `attr="…"` pairs (e.g. `media`).
+                let extra = parts
+                    .filter(|p| p.as_rule() == Rule::head_attr)
+                    .map(|attr| {
+                        let mut ap = attr.into_inner();
+                        let k = ap
+                            .next()
+                            .map(|p| p.as_str().to_string())
+                            .unwrap_or_default();
+                        let v = ap
+                            .next()
+                            .map(|p| extract_string_literal(p.as_str()))
+                            .unwrap_or_default();
+                        (k, v)
+                    })
+                    .collect();
+                metas.push(HeadMeta { key, value, extra });
+            }
+            Rule::head_link => {
+                let mut attrs: Vec<(String, String)> = Vec::new();
+                for attr in item.into_inner() {
+                    if attr.as_rule() == Rule::head_attr {
+                        let mut parts = attr.into_inner();
+                        let key = parts
+                            .next()
+                            .map(|p| p.as_str().to_string())
+                            .unwrap_or_default();
+                        let val = parts
+                            .next()
+                            .map(|p| extract_string_literal(p.as_str()))
+                            .unwrap_or_default();
+                        attrs.push((key, val));
+                    }
+                }
+                if !attrs.is_empty() {
+                    links.push(attrs);
+                }
+            }
+            Rule::head_jsonld => {
+                // head_jsonld wraps a single jsonld_object.
+                if let Some(obj) = item.into_inner().next() {
+                    jsonld = parse_jsonld_object(obj);
+                }
             }
             Rule::head_favicon => {
                 if let Some(s) = item.into_inner().next() {
@@ -163,8 +207,46 @@ pub(super) fn parse_head_block(pair: Pair<Rule>) -> Result<HeadBlock, ParseError
     Ok(HeadBlock {
         title,
         metas,
+        links,
+        jsonld,
         favicon,
     })
+}
+
+/// Parse a `jsonld_object` rule into its ordered `(key, value)` fields.
+fn parse_jsonld_object(obj: Pair<Rule>) -> Vec<(String, JsonLdValue)> {
+    obj.into_inner()
+        .filter(|f| f.as_rule() == Rule::jsonld_field)
+        .filter_map(|field| {
+            let mut parts = field.into_inner();
+            let key = extract_string_literal(parts.next()?.as_str());
+            let value = parse_jsonld_value(parts.next()?);
+            Some((key, value))
+        })
+        .collect()
+}
+
+/// Parse a `jsonld_value` (object, array, or scalar string).
+fn parse_jsonld_value(pair: Pair<Rule>) -> JsonLdValue {
+    // `jsonld_value` wraps exactly one of object / array / string.
+    let inner = match pair.as_rule() {
+        Rule::jsonld_value => pair.into_inner().next(),
+        _ => Some(pair),
+    };
+    let Some(inner) = inner else {
+        return JsonLdValue::Str(String::new());
+    };
+    match inner.as_rule() {
+        Rule::jsonld_object => JsonLdValue::Object(parse_jsonld_object(inner)),
+        Rule::jsonld_array => JsonLdValue::Array(
+            inner
+                .into_inner()
+                .filter(|v| v.as_rule() == Rule::jsonld_value)
+                .map(parse_jsonld_value)
+                .collect(),
+        ),
+        _ => JsonLdValue::Str(extract_string_literal(inner.as_str())),
+    }
 }
 
 pub(super) fn parse_http_block(pair: Pair<Rule>) -> Result<HttpBlock, ParseError> {

@@ -34,36 +34,17 @@ pub(crate) fn lint(document: &WebCoreDocument) -> Vec<Diagnostic> {
 }
 
 fn walk(elements: &[Element], file: Option<&Path>, issues: &mut Vec<Diagnostic>) {
-    for el in elements {
-        match el {
-            Element::Tag {
-                name,
-                attributes,
-                content,
-                span,
-            } => {
-                check_tag(name, attributes, content, *span, file, issues);
-                walk(content, file, issues);
-            }
-            Element::Component { content, .. }
-            | Element::For { content, .. }
-            | Element::SlotContent { content, .. }
-            | Element::ErrorBlock { content, .. }
-            | Element::Fragment { content, .. }
-            | Element::Defer { content, .. } => walk(content, file, issues),
-            Element::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                walk(then_branch, file, issues);
-                if let Some(eb) = else_branch {
-                    walk(eb, file, issues);
-                }
-            }
-            _ => {}
+    crate::core::ast::walk_elements(elements, &mut |el| {
+        if let Element::Tag {
+            name,
+            attributes,
+            content,
+            span,
+        } = el
+        {
+            check_tag(name, attributes, content, *span, file, issues);
         }
-    }
+    });
 }
 
 fn check_tag(

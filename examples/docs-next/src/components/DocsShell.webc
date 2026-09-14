@@ -1,0 +1,163 @@
+component DocsShell {
+    on:mount {
+        const root = document.documentElement;
+
+        // ── Theme toggle (persisted; falls back to the system preference) ─────
+        const stored = localStorage.getItem('theme');
+        if (stored === 'dark' || stored === 'light') root.setAttribute('data-theme', stored);
+        const themeBtn = document.querySelector('.theme-toggle');
+        if (themeBtn) {
+            themeBtn.addEventListener('click', () => {
+                const dark = root.getAttribute('data-theme')
+                    ? root.getAttribute('data-theme') === 'dark'
+                    : matchMedia('(prefers-color-scheme: dark)').matches;
+                const next = dark ? 'light' : 'dark';
+                root.setAttribute('data-theme', next);
+                localStorage.setItem('theme', next);
+            });
+        }
+
+        // ── Mobile navigation ─────────────────────────────────────────────────
+        const mobileBtn = document.querySelector('.mobile-toggle');
+        const backdrop = document.createElement('div');
+        backdrop.className = 'nav-backdrop';
+        document.body.appendChild(backdrop);
+        const closeNav = () => document.body.classList.remove('nav-open');
+        if (mobileBtn) mobileBtn.addEventListener('click', () => document.body.classList.toggle('nav-open'));
+        backdrop.addEventListener('click', closeNav);
+        // Close the drawer when a sidebar link is tapped or Escape is pressed.
+        document.querySelector('.sidebar')?.addEventListener('click', e => { if (e.target.closest('a')) closeNav(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNav(); });
+
+        // ── Lightweight .webc syntax highlighter ──────────────────────────────
+        const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const RE = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|(@[a-zA-Z]\w*)|\b(app|layout|page|component|state|computed|view|style|store|props|import|from|slot|theme|routes|head|true|false|null)\b|\b(?:on|bind|class|validate|ref|webc):[\w-]+|([{}])/g;
+        const highlight = text => {
+            let out = '', last = 0, m;
+            RE.lastIndex = 0;
+            while ((m = RE.exec(text))) {
+                out += esc(text.slice(last, m.index));
+                const cls = m[1] ? 't-com' : m[2] ? 't-str' : m[3] ? 't-dir'
+                    : m[4] ? 't-kw' : m[6] ? 't-punc' : 't-attr';
+                out += '<span class="' + cls + '">' + esc(m[0]) + '</span>';
+                last = RE.lastIndex;
+            }
+            return out + esc(text.slice(last));
+        };
+
+        // ── Per-page enhancement (re-runs after each SPA navigation) ──────────
+        let tocObserver = null;
+        const enhance = () => {
+            const path = location.pathname.replace(/\/$/, '') || '/';
+
+            // Active links (sidebar + header)
+            document.querySelectorAll('.sidebar a, .header-nav a').forEach(a => {
+                const href = (a.getAttribute('href') || '').replace(/\/$/, '') || '/';
+                if (href === path) a.setAttribute('aria-current', 'page');
+                else a.removeAttribute('aria-current');
+            });
+            document.body.classList.remove('nav-open');
+
+            // Syntax-highlight + copy buttons on code blocks
+            document.querySelectorAll('.code:not([data-enhanced])').forEach(block => {
+                block.setAttribute('data-enhanced', '1');
+                const pre = block.querySelector('pre');
+                const code = pre && pre.querySelector('code');
+                if (code && block.getAttribute('data-lang') === 'webc') {
+                    code.innerHTML = highlight(code.textContent);
+                }
+                const head = block.querySelector('.code-head');
+                const btn = head && head.querySelector('.copy-btn');
+                if (btn && pre) {
+                    btn.addEventListener('click', () => {
+                        navigator.clipboard.writeText(pre.textContent).then(() => {
+                            const old = btn.textContent;
+                            btn.textContent = 'Copied ✓';
+                            setTimeout(() => { btn.textContent = old; }, 1600);
+                        });
+                    });
+                }
+            });
+
+            // Build the "On this page" table of contents from headings
+            const tocList = document.querySelector('.toc-list');
+            const toc = document.querySelector('.toc');
+            if (tocList) {
+                const heads = [...document.querySelectorAll('.prose h2, .prose h3')];
+                tocList.innerHTML = '';
+                if (tocObserver) tocObserver.disconnect();
+                if (!heads.length) { if (toc) toc.style.visibility = 'hidden'; return; }
+                if (toc) toc.style.visibility = 'visible';
+                heads.forEach(h => {
+                    if (!h.id) h.id = h.textContent.trim().toLowerCase()
+                        .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+                    const a = document.createElement('a');
+                    a.href = '#' + h.id;
+                    a.textContent = h.textContent.replace(/#$/, '').trim();
+                    if (h.tagName === 'H3') a.className = 'lvl-3';
+                    tocList.appendChild(a);
+                });
+                tocObserver = new IntersectionObserver(entries => {
+                    entries.forEach(e => {
+                        if (!e.isIntersecting) return;
+                        tocList.querySelectorAll('a').forEach(a => a.classList.remove('active'));
+                        const link = tocList.querySelector('a[href="#' + e.target.id + '"]');
+                        if (link) link.classList.add('active');
+                    });
+                }, { rootMargin: '-10% 0px -75% 0px' });
+                heads.forEach(h => tocObserver.observe(h));
+            }
+        };
+        enhance();
+        window.__wcAfterNav = () => enhance();
+
+        // ── Command palette (⌘K / Ctrl-K) ─────────────────────────────────────
+        const cmdk = document.querySelector('.cmdk');
+        const input = cmdk && cmdk.querySelector('.cmdk-input');
+        const results = cmdk && cmdk.querySelector('.cmdk-results');
+        const index = [...document.querySelectorAll('.sidebar a[href^="/"]')].map(a => ({
+            href: a.getAttribute('href'),
+            label: a.textContent.trim(),
+            group: (a.closest('.sidebar-group')?.querySelector('.group-title')?.textContent || '').trim()
+        }));
+        let matches = [], sel = 0;
+        const render = q => {
+            const ql = q.trim().toLowerCase();
+            matches = ql ? index.filter(r => r.label.toLowerCase().includes(ql)) : index;
+            sel = 0;
+            if (!matches.length) { results.innerHTML = '<div class="cmdk-empty">No results</div>'; return; }
+            results.innerHTML = matches.map((r, i) =>
+                '<a href="' + r.href + '" class="' + (i === 0 ? 'sel' : '') + '" data-i="' + i + '">'
+                + r.label + '<small>' + r.group + '</small></a>').join('');
+        };
+        const open = () => { if (!cmdk) return; cmdk.classList.add('open'); input.value = ''; render(''); input.focus(); };
+        const close = () => cmdk && cmdk.classList.remove('open');
+        const move = d => {
+            matches.length && (sel = (sel + d + matches.length) % matches.length);
+            results.querySelectorAll('a').forEach((a, i) => a.classList.toggle('sel', i === sel));
+            results.querySelector('a.sel')?.scrollIntoView({ block: 'nearest' });
+        };
+        const go = r => { if (!r) return; close(); if (typeof webcore_navigate === 'function') webcore_navigate(r.href); else location.href = r.href; };
+
+        document.querySelector('.search-btn')?.addEventListener('click', open);
+        cmdk?.addEventListener('click', e => { if (e.target === cmdk) close(); });
+        input?.addEventListener('input', () => render(input.value));
+        input?.addEventListener('keydown', e => {
+            if (e.key === 'ArrowDown') { move(1); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { move(-1); e.preventDefault(); }
+            else if (e.key === 'Enter') { go(matches[sel]); e.preventDefault(); }
+            else if (e.key === 'Escape') close();
+        });
+        results?.addEventListener('click', e => {
+            const a = e.target.closest('a');
+            if (a) { e.preventDefault(); go(matches[+a.dataset.i]); }
+        });
+        document.addEventListener('keydown', e => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                cmdk?.classList.contains('open') ? close() : open();
+            }
+        });
+    }
+    view { }
+}

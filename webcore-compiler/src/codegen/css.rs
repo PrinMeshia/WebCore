@@ -119,12 +119,157 @@ const KNOWN_CSS_PROPS: &[&str] = &[
     "object-position",
     "aspect-ratio",
     "resize",
+    // Box model / logical properties
+    "box-sizing",
+    "inset",
+    "inset-block",
+    "inset-block-start",
+    "inset-block-end",
+    "inset-inline",
+    "inset-inline-start",
+    "inset-inline-end",
+    "margin-block",
+    "margin-block-start",
+    "margin-block-end",
+    "margin-inline",
+    "margin-inline-start",
+    "margin-inline-end",
+    "padding-block",
+    "padding-block-start",
+    "padding-block-end",
+    "padding-inline",
+    "padding-inline-start",
+    "padding-inline-end",
+    "inline-size",
+    "block-size",
+    "min-inline-size",
+    "max-inline-size",
+    "min-block-size",
+    "max-block-size",
+    // Flexbox / grid extras
+    "flex-basis",
+    "flex-flow",
+    "order",
+    "place-items",
+    "place-content",
+    "place-self",
+    "justify-items",
+    "justify-self",
+    "grid-template",
+    "grid-auto-flow",
+    "grid-auto-rows",
+    "grid-auto-columns",
+    "grid-column-start",
+    "grid-column-end",
+    "grid-row-start",
+    "grid-row-end",
+    // Multi-column
+    "columns",
+    "column-count",
+    "column-width",
+    "column-rule",
+    "column-span",
+    // Filters / compositing
+    "filter",
+    "backdrop-filter",
+    "mix-blend-mode",
+    "background-blend-mode",
+    "background-clip",
+    "background-origin",
+    "mask",
+    "mask-image",
+    "clip-path",
+    "isolation",
+    // Text / font extras
+    "tab-size",
+    "text-indent",
+    "text-wrap",
+    "text-decoration-color",
+    "text-decoration-line",
+    "text-decoration-style",
+    "text-decoration-thickness",
+    "text-underline-offset",
+    "word-spacing",
+    "overflow-wrap",
+    "hyphens",
+    "writing-mode",
+    "direction",
+    "font",
+    "font-stretch",
+    "font-feature-settings",
+    "font-kerning",
+    "src",
+    "unicode-range",
+    // Transforms / transitions / animation longhands
+    "transform-origin",
+    "transform-style",
+    "perspective",
+    "perspective-origin",
+    "backface-visibility",
+    "transition-property",
+    "transition-duration",
+    "transition-timing-function",
+    "transition-delay",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
+    // Tables
+    "border-collapse",
+    "border-spacing",
+    "table-layout",
+    "caption-side",
+    "empty-cells",
+    // Lists / counters
+    "list-style-type",
+    "list-style-position",
+    "list-style-image",
+    "counter-reset",
+    "counter-increment",
+    "quotes",
+    // Interaction / misc modern
+    "user-select",
+    "touch-action",
+    "appearance",
+    "accent-color",
+    "caret-color",
+    "color-scheme",
+    "scroll-behavior",
+    "scroll-margin",
+    "scroll-padding",
+    "scroll-snap-type",
+    "scroll-snap-align",
+    "overscroll-behavior",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "will-change",
+    "contain",
+    "content-visibility",
+    "image-rendering",
+    "outline-offset",
+    "outline-color",
+    "outline-width",
+    "outline-style",
 ];
 
+/// Whether `prop_name` is a recognised CSS property (and so should not warn).
+///
+/// Two kinds of property are always accepted:
+/// - custom properties (`--var`), and
+/// - vendor-prefixed properties (`-webkit-…`, `-moz-…`, `-ms-…`, `-o-…`),
+///
+/// both of which start with `-` — a leading dash is enough to distinguish them
+/// from a standard property, so we skip the allowlist check for anything that
+/// begins with one. Everything else must appear in [`KNOWN_CSS_PROPS`].
+fn is_known_css_prop(prop_name: &str) -> bool {
+    prop_name.starts_with('-') || KNOWN_CSS_PROPS.contains(&prop_name)
+}
+
 /// Emit a warning to stderr if `prop_name` is not a known CSS property.
-/// Custom properties (starting with `--`) are always allowed without warning.
 fn warn_unknown_css_prop(prop_name: &str, context: &str) {
-    if !prop_name.starts_with("--") && !KNOWN_CSS_PROPS.contains(&prop_name) {
+    if !is_known_css_prop(prop_name) {
         eprintln!("warning[css]: unknown property '{prop_name}' in {context}");
     }
 }
@@ -486,6 +631,28 @@ pub(crate) fn generate_theme_css(theme: &Theme) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn known_css_props_cover_modern_and_prefixed() {
+        // Regression (#63): standard properties that used to false-positive.
+        for p in [
+            "inset",
+            "backdrop-filter",
+            "filter",
+            "user-select",
+            "tab-size",
+            "background-clip",
+        ] {
+            assert!(is_known_css_prop(p), "'{p}' should be recognised");
+        }
+        // Custom properties and vendor prefixes are always accepted.
+        assert!(is_known_css_prop("--brand"));
+        assert!(is_known_css_prop("-webkit-backdrop-filter"));
+        assert!(is_known_css_prop("-moz-user-select"));
+        // A genuine typo still warns.
+        assert!(!is_known_css_prop("colr"));
+        assert!(!is_known_css_prop("bckground"));
+    }
 
     #[test]
     fn test_scope_id_generation() {

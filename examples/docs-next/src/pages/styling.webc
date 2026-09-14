@@ -1,0 +1,141 @@
+page "docs/styling" {
+    h1 { "Styling" }
+    p class="lead" {
+        "Styles are written next to the markup they belong to. Each component's "
+        code { "style" }
+        " block is automatically scoped, and design tokens from "
+        code { "theme.toml" }
+        " become CSS variables you use everywhere."
+    }
+
+    h2 { "Scoped component styles" }
+    p {
+        "A "
+        code { "style" }
+        " block inside a component applies only to that component. WebCore scopes it by tagging the component's elements with a "
+        code { "data-v" }
+        " attribute and rewriting your selectors to match — so class names never collide between components."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"component FeatureCard {
+    view { div class=\"card\" { slot content } }
+    style {
+        .card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            padding: var(--space-lg);
+        }
+        .card:hover { transform: translateY(-2px); }
+    }
+}"
+        } }
+    }
+    p { "The " code { ".card" } " rule above compiles to " code { ".card[data-v=\"wc-084d57\"]" } " — matched to this component alone." }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            code { ":root" } ", " code { "html" } " and " code { "body" } " are left global. Use "
+            code { ":global(selector)" }
+            " as an escape hatch for a deliberately unscoped rule, and "
+            code { ":host" }
+            " to target the component root itself. " code { "@keyframes" } " are always global."
+        } }
+    }
+
+    h2 { "Design tokens" }
+    p {
+        "Define your palette, fonts, spacing and radii once in "
+        code { "theme.toml" }
+        ". Each section maps to a family of CSS custom properties on "
+        code { ":root" }
+        "."
+    }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"[theme.colors]
+primary    = \"#f97316\"
+surface    = \"#14161c\"
+border     = \"#252a34\"
+
+[theme.fonts]
+sans = \"Inter, system-ui, sans-serif\"
+
+[theme.spacing]
+lg = \"1.75rem\"
+
+[theme.radius]
+md = \"10px\""
+        } }
+    }
+    p { "Which generates:" }
+    div class="code" data-lang="css" {
+        div class="code-head" { span class="lang" { "css" } button class="copy-btn" { "Copy" } }
+        pre { code {
+":root {
+  --color-primary: #f97316;
+  --color-surface: #14161c;
+  --color-border:  #252a34;
+  --font-sans:     Inter, system-ui, sans-serif;
+  --space-lg:      1.75rem;
+  --radius-md:     10px;
+}"
+        } }
+    }
+    p {
+        "The prefixes are "
+        code { "--color-" }
+        ", "
+        code { "--font-" }
+        ", "
+        code { "--space-" }
+        ", "
+        code { "--radius-" }
+        " and "
+        code { "--breakpoint-" }
+        "."
+    }
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "Spacing tokens generate "
+            code { "--space-*" }
+            ", not "
+            code { "--spacing-*" }
+            ". A "
+            code { "var(--spacing-lg)" }
+            " reference resolves to nothing — use "
+            code { "--space-lg" }
+            "."
+        } }
+    }
+
+    h2 { "Global & third-party CSS" }
+    p {
+        "Any "
+        code { ".css" }
+        " file dropped in "
+        code { "public/" }
+        " is copied to "
+        code { "/assets/" }
+        " and linked into every page "
+        strong { "after" }
+        " the generated theme stylesheet — so a "
+        code { "public/app.css" }
+        " can freely override theme variables (this is how a light/dark toggle is built)."
+    }
+
+    h2 { "Production output" }
+    ul {
+        li { "In " code { "prod" } " mode, each page inlines the " strong { "critical CSS" } " for the components it actually uses and defers the rest, minified with LightningCSS." }
+        li { "In " code { "dev" } " mode, CSS " strong { "source maps" } " map every scoped rule back to its line in the " code { ".webc" } " source." }
+    }
+
+    nav class="pager" {
+        link to="/docs/templating" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Templating & directives" } }
+        link to="/docs/routing" class="next" { span class="dir" { "Next" } span class="ttl" { "Routing & pages →" } }
+    }
+}

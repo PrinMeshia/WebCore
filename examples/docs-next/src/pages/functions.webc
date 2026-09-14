@@ -1,0 +1,94 @@
+page "docs/functions" {
+    h1 { "Native functions" }
+    p class="lead" {
+        "A small standard library is available inside interpolations and expressions. Pure, deterministic calls are folded at build time; locale-aware ones run in the tiny runtime."
+    }
+
+    h2 { "Translation" }
+    p { code { "t(key)" } " — look up a translation; see " link to="/docs/i18n" { "Internationalization" } "." }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"\{t(\"welcome\")}
+\{t(\"items\", count)}       // pluralizes
+\{t(\"greeting\", name)}     // substitutes {{0}}"
+        } }
+    }
+
+    h2 { "Math" }
+    p { "Namespaced " code { "math.*" } " helpers. With constant arguments they are computed at build time." }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"math.round(x)   math.floor(x)   math.ceil(x)
+math.clamp(x, lo, hi)   math.pow(x, y)   math.sqrt(x)
+math.sign(x)   math.hypot(a, b)"
+        } }
+    }
+    p { "The bare " code { "max(…)" } ", " code { "min(…)" } " and " code { "abs(…)" } " are also available without a namespace." }
+
+    h2 { "Strings" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"str.upper(s)   str.lower(s)   str.capitalize(s)
+str.trim(s)    str.slugify(s)  str.repeat(s, n)
+str.truncate(s, n)   // adds an ellipsis"
+        } }
+    }
+
+    h2 { "Formatting (locale-aware)" }
+    p { code { "fmt.*" } " uses the active locale via " code { "Intl" } " and always runs at runtime." }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"fmt.number(n)
+fmt.currency(n, \"EUR\")
+fmt.percent(n)
+fmt.date(d)"
+        } }
+    }
+
+    h2 { "Arrays" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"arr.sum(a)   arr.first(a)   arr.last(a)
+arr.unique(a)   arr.sort(a)   arr.reverse(a)
+arr.join(a, \", \")"
+        } }
+    }
+
+    h2 { "Contextual values" }
+    ul {
+        li { code { "$store.name" } " — read or write global " link to="/docs/reactivity" { "store" } " state." }
+        li { code { "$route.param" } " — a dynamic route parameter, pre-rendered into the page." }
+        li { code { "$build.field" } " — a build statistic, substituted after the build." }
+        li { code { "wasm.fn(…)" } " — call into a compiled Rust/WASM module." }
+    }
+
+    h2 { "Build variables" }
+    p {
+        code { "\{$build.field}" }
+        " is replaced once output sizes are known — handy for a footer that reports the site's real weight."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"footer {
+    small { \"\{$build.pages} pages · \{$build.jsGzipKb} KB JS (gzip)\" }
+}"
+        } }
+    }
+    p { "Available fields:" }
+    ul {
+        li { code { "pages" } " · " code { "components" } " · " code { "locales" } }
+        li { code { "jsBytes" } " · " code { "jsKb" } " · " code { "cssBytes" } " · " code { "cssKb" } " · " code { "totalKb" } }
+        li { "gzipped: " code { "jsGzipKb" } " · " code { "cssGzipKb" } " · " code { "totalGzipKb" } " (and " code { "*Bytes" } " variants)" }
+    }
+
+    nav class="pager" {
+        link to="/docs/config" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Configuration" } }
+        link to="/docs/examples" class="next" { span class="dir" { "Next" } span class="ttl" { "Examples →" } }
+    }
+}

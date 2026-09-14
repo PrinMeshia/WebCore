@@ -1,6 +1,6 @@
 [package]
 name = "webcore-compiler"
-version = "4.0.0"
+version = "4.2.1"
 edition = "2021"
 license = "MIT"
 
@@ -12,7 +12,7 @@ notify = "8.2.0"
 tiny_http = "0.12"
 open = "5"
 qrcode = "0.14"
-image = { version = "0.24", default-features = false, features = ["png", "ico"] }
+image = { version = "0.24", default-features = false, features = ["png", "ico", "jpeg"] }
 pest = "2.7"
 pest_derive = "2.7"
 regex = "1.10"
@@ -21,6 +21,11 @@ imagesize = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 serde_json = "1.0"
+flate2 = "1.0"
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+[dev-dependencies]
+image = { version = "0.24", default-features = false, features = ["png"] }
 
 # Optimized release profile for distributed binaries:
 # - lto + codegen-units=1: whole-program optimization (smaller, faster)

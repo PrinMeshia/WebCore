@@ -1,0 +1,85 @@
+page "docs/playground" {
+    h1 { "Playground" }
+    p class="lead" {
+        "The fastest way to feel how WebCore works is to run it. There is no build step to wait on and no dependencies to install beyond the compiler itself."
+    }
+
+    h2 { "Try it in 30 seconds" }
+    p {
+        "Scaffold a project, start the dev server, and edit "
+        code { ".webc" }
+        " files with live reload:"
+    }
+    div class="code" data-lang="bash" {
+        div class="code-head" {
+            span class="lang" { "bash" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"webc new playground
+cd playground
+webc dev        # → http://localhost:3000"
+        } }
+    }
+
+    h2 { "A snippet to paste" }
+    p {
+        "Drop this into "
+        code { "src/components/Playground.webc" }
+        " and import it from a page to see reactivity, computed values and binding at once:"
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component Playground {
+    state { count: Number = 0 }
+    computed { parity = count % 2 == 0 ? \"even\" : \"odd\" }
+    view {
+        div class=\"pad\" {
+            h2 { \"Count: \{count} (\{parity})\" }
+            button on:click={ count += 1 } { \"Increment\" }
+            button on:click={ count = 0 } { \"Reset\" }
+        }
+    }
+    style {
+        .pad { padding: 1rem; }
+        button { margin-right: .5rem; }
+    }
+}"
+        } }
+    }
+
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Every save recompiles instantly and hot-reloads the page. When you are happy, "
+            code { "webc build" }
+            " produces the static site in "
+            code { "dist/" }
+            "."
+        } }
+    }
+
+    h2 { "Next steps" }
+    div class="cards" {
+        link to="/docs/components" class="card" {
+            h3 { "Components & state →" }
+            p { "Understand the building blocks you just used." }
+        }
+        link to="/docs/examples" class="card" {
+            h3 { "Examples →" }
+            p { "Full projects to read and copy from." }
+        }
+    }
+
+    nav class="pager" {
+        link to="/docs/examples" class="prev" {
+            span class="dir" { "Previous" }
+            span class="ttl" { "← Examples" }
+        }
+        span {}
+    }
+}

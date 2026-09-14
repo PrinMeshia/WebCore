@@ -1,0 +1,162 @@
+page "docs/routing" {
+    h1 { "Routing & pages" }
+    p class="lead" {
+        "Routing in WebCore is file-and-declaration based. You list routes in "
+        code { "app.webc" }
+        ", write one "
+        code { "page" }
+        " per route, and the compiler emits a clean-URL static site with a small client router layered on top."
+    }
+
+    h2 { "Declaring routes" }
+    p {
+        "The "
+        code { "app" }
+        " block ties everything together: the layout, the document "
+        code { "head" }
+        ", and the route table."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"app MySite {
+    layout: MainLayout
+    head {
+        favicon \"/favicon.svg\"
+        meta description=\"My WebCore site\"
+    }
+    routes {
+        \"/\":       HomePage
+        \"/about\":  AboutPage
+        \"/blog\":   BlogPage
+    }
+}"
+        } }
+    }
+
+    h2 { "Pages" }
+    p {
+        "A page is declared with a quoted name and holds the body that fills the layout's content slot. An optional page-level "
+        code { "head" }
+        " overrides the global one for that route."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"page \"about\" {
+    head { title \"About — My Site\" }
+    h1 { \"About us\" }
+    p  { \"…\" }
+}"
+        } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "The output URL comes from the "
+            strong { "page name" }
+            ", lowercased: "
+            code { "page \"about\"" }
+            " → "
+            code { "/about/index.html" }
+            ", "
+            code { "page \"home\"" }
+            " → the site root. Nesting works too — "
+            code { "page \"docs/installation\"" }
+            " → "
+            code { "/docs/installation/" }
+            "."
+        } }
+    }
+
+    h2 { "Layouts & slots" }
+    p {
+        "A layout is the shared shell. It renders the page body wherever it places "
+        code { "slot content" }
+        ", and can expose additional named slots that pages fill in."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"layout MainLayout {
+    header { nav { link to=\"/\" { \"Home\" } } }
+    main { slot content }
+    footer { slot footer }
+}"
+        } }
+    }
+    p {
+        "A page fills a named slot by providing it explicitly; anything not inside a "
+        code { "slot" }
+        " block becomes the default "
+        code { "content" }
+        "."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"page \"home\" {
+    h1 { \"Welcome\" }               // → slot content
+    slot footer { small { \"© 2026\" } }
+}"
+        } }
+    }
+
+    h2 { "Client-side navigation" }
+    p {
+        "Use "
+        code { "link to=\"/path\"" }
+        " for internal links. It compiles to a normal "
+        code { "<a>" }
+        " tagged with "
+        code { "data-webcore-nav" }
+        ": the runtime intercepts the click, fetches the target page, swaps the "
+        code { "<main>" }
+        ", and updates history — no full reload. External links are left untouched."
+    }
+    div class="callout tip" {
+        span class="ico" { "💡" }
+        div { p {
+            "After each navigation the runtime calls "
+            code { "window.__wcAfterNav" }
+            " if you define it — the hook to re-run page enhancements. With "
+            code { "view_transitions = true" }
+            " the swap is wrapped in the View Transitions API."
+        } }
+    }
+
+    h2 { "Dynamic routes" }
+    p {
+        "Generate one static page per item in a build-time collection with "
+        code { "each" }
+        ". The "
+        code { ":param" }
+        " segment is filled from each record and exposed as "
+        code { "$route.param" }
+        ", pre-rendered into the HTML."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"import posts from \"data/posts.json\"
+
+app Blog {
+    routes { \"/post/:slug\": PostPage each posts }
+}
+
+page \"post\" {
+    h1 { \"\{$route.slug}\" }
+}"
+        } }
+    }
+    p {
+        "See "
+        link to="/docs/data" { "Data & content" }
+        " for how collections are loaded."
+    }
+
+    nav class="pager" {
+        link to="/docs/styling" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Styling" } }
+        link to="/docs/data" class="next" { span class="dir" { "Next" } span class="ttl" { "Data & content →" } }
+    }
+}

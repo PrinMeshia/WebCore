@@ -1,0 +1,116 @@
+page "docs/seo" {
+    h1 { "SEO & metadata" }
+    p class="lead" {
+        "Metadata is declarative and rendered into every page at build time — titles, Open Graph, structured data, sitemaps and feeds. There is nothing to configure at runtime."
+    }
+
+    h2 { "The head block" }
+    p {
+        "Declare document metadata in a "
+        code { "head" }
+        " block — globally in "
+        code { "app.webc" }
+        ", or per page to override it. Values accept "
+        code { "\{...}" }
+        " interpolation, so they localize automatically."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"head {
+    title \"\{t(\"page_title\")}\"
+    meta description=\"\{t(\"page_desc\")}\"
+    meta og:title=\"My Site\"
+    meta og:image=\"/og.png\"                 // absolutized with the site url
+    meta twitter:card=\"summary_large_image\"
+    meta theme-color=\"#0b0c0f\" media=\"(prefers-color-scheme: dark)\"
+    link rel=\"preload\" href=\"/inter.woff2\" as=\"font\"
+    favicon \"/favicon.svg\"
+}"
+        } }
+    }
+    ul {
+        li { "A key starting with " code { "og:" } " emits " code { "property=" } "; everything else emits " code { "name=" } "." }
+        li { "Extra attributes after the value pass through — e.g. " code { "media=" } " for light/dark " code { "theme-color" } " variants." }
+        li { "Root-relative " code { "og:image" } " / " code { "twitter:image" } " are rewritten to absolute URLs using " code { "[app] url" } "." }
+    }
+
+    h2 { "Structured data" }
+    p {
+        "A "
+        code { "jsonld" }
+        " block emits a "
+        code { "application/ld+json" }
+        " script. Keys keep their declared order and nest into objects and arrays."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"head {
+    jsonld {
+        \"@context\": \"https://schema.org\"
+        \"@type\": \"Person\"
+        name: \"\{author}\"
+        address: { \"@type\": \"PostalAddress\"  addressCountry: \"FR\" }
+        sameAs: [ \"https://github.com/x\", \"https://mastodon.social/@x\" ]
+    }
+}"
+        } }
+    }
+
+    h2 { "Sitemap, robots & feeds" }
+    ul {
+        li { code { "robots.txt" } " is always written; its " code { "Sitemap:" } " line appears once you set " code { "[app] url" } "." }
+        li { code { "sitemap.xml" } " lists every clean URL (localized routes included, " code { "404" } " excluded) — it needs " code { "[app] url" } "." }
+        li { "An RSS 2.0 " code { "feed.xml" } " is generated from a data collection when you add a " code { "[feed]" } " section." }
+    }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "webc.toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"[app]
+url = \"https://example.com\"
+
+[feed]
+collection  = \"posts\"          # a JSON array import
+title       = \"My Blog\"
+date_field  = \"date\"
+limit       = 20"
+        } }
+    }
+
+    h2 { "Progressive web app" }
+    p {
+        "Adding a "
+        code { "[pwa]" }
+        " section emits a "
+        code { "manifest.webmanifest" }
+        " and a network-first service worker, and links them into every page along with Apple web-app metadata."
+    }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "webc.toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"[pwa]
+name        = \"My Site\"
+short_name  = \"Site\"
+theme_color = \"#f97316\"
+display     = \"standalone\""
+        } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "If your "
+            code { "head" }
+            " already declares a "
+            code { "theme-color" }
+            " (say, light/dark variants), the PWA's own "
+            code { "theme-color" }
+            " is skipped so it doesn't override yours."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/i18n" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Internationalization" } }
+        link to="/docs/islands" class="next" { span class="dir" { "Next" } span class="ttl" { "Islands →" } }
+    }
+}

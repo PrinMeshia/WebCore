@@ -30,6 +30,104 @@ impl SsgContext<'_> {
     pub(crate) fn eval_cond(&self, cond: &str) -> Option<bool> {
         eval_cond_initial(cond, self.state)
     }
+
+    /// Resolve every `{expr}` interpolation in a raw string to its static value
+    /// for the active locale, leaving literal text untouched. Used to pre-render
+    /// interpolated `head { }` metadata (`title "{t("key")}"`, `meta … = "…"`).
+    ///
+    /// An unresolvable interpolation collapses to an empty string, matching the
+    /// SSG behaviour of body-text interpolation.
+    pub(crate) fn resolve_interpolated(&self, raw: &str) -> String {
+        resolve_interpolated_with(raw, |expr| self.eval_expr(expr))
+    }
+}
+
+/// Whether a `{` at the start of `rest` opens a real interpolation, returning
+/// the offset of its closing `}`. Mirrors `parser::elements::interpolation_close`
+/// (kept in the core layer to avoid a codegen→parser dependency).
+fn interpolation_close(rest: &[char]) -> Option<usize> {
+    match rest.first() {
+        Some(&c) if c == ' ' || c == '}' => return None,
+        None => return None,
+        _ => {}
+    }
+    for (k, &c) in rest.iter().enumerate() {
+        match c {
+            '}' => return Some(k),
+            '{' | '\n' | '\r' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split `raw` into literal text and `{expr}` interpolations (same detection as
+/// `split_interpolated_text`), evaluating each interpolation with `eval` and
+/// concatenating the result. Handles `\{`, `\}`, `\"`, `\\` escapes.
+/// Un-escape `\"`, `\'` and `\\` inside an interpolation expression.
+fn unescape_expr(expr: &str) -> String {
+    if !expr.contains('\\') {
+        return expr.to_string();
+    }
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out = String::with_capacity(expr.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\'' | '\\') {
+            out.push(chars[i + 1]);
+            i += 2;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Resolve interpolations with no state/locale context: literal escapes are
+/// undone and `{…}` interpolations collapse to empty. Used where an SSG context
+/// is unavailable (e.g. non-SSG tests).
+pub(crate) fn resolve_interpolated_static(raw: &str) -> String {
+    resolve_interpolated_with(raw, |_| None)
+}
+
+fn resolve_interpolated_with(raw: &str, eval: impl Fn(&str) -> Option<String>) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let len = chars.len();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0usize;
+    while i < len {
+        if chars[i] == '\\' && i + 1 < len {
+            match chars[i + 1] {
+                '{' => out.push('{'),
+                '}' => out.push('}'),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                other => {
+                    out.push('\\');
+                    out.push(other);
+                }
+            }
+            i += 2;
+        } else if chars[i] == '{' {
+            if let Some(close) = interpolation_close(&chars[i + 1..]) {
+                let expr: String = chars[i + 1..i + 1 + close].iter().collect();
+                // The expression itself may carry escaped quotes when it comes
+                // from a string literal (e.g. `{t(\"key\")}` in a validate:*
+                // value); un-escape before evaluating so `t("key")` resolves.
+                let expr = unescape_expr(expr.trim());
+                out.push_str(&eval(&expr).unwrap_or_default());
+                i += close + 2;
+            } else {
+                out.push('{');
+                i += 1;
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Collect the initial default value of every state/store variable.
@@ -181,6 +279,44 @@ pub(crate) fn eval_expr_with_locale(
         return Some(format!("{n}"));
     }
 
+    // Built-in function folding (#57): `math.round(<static>)`, `str.upper(…)`, …
+    // Deterministic builtins are pre-computed at build time when every argument
+    // resolves — numbers for `math.*`, text for `str.*`.
+    for b in crate::core::builtins::BUILTINS {
+        let prefix = format!("{}(", b.source);
+        let Some(rest) = expr.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(inner) = rest.strip_suffix(')') else {
+            continue;
+        };
+        let args = crate::core::builtins::split_args(inner);
+        match b.ssg {
+            crate::core::builtins::Ssg::None => {}
+            crate::core::builtins::Ssg::Num(fold) => {
+                let vals: Option<Vec<f64>> = args
+                    .iter()
+                    .map(|a| eval_number_expr(a.trim(), state))
+                    .collect();
+                if let Some(n) = vals.and_then(|v| fold(&v)) {
+                    if n == n.floor() && n.abs() < 1e15 {
+                        return Some(format!("{}", n as i64));
+                    }
+                    return Some(format!("{n}"));
+                }
+            }
+            crate::core::builtins::Ssg::Str(fold) => {
+                let vals: Option<Vec<String>> = args
+                    .iter()
+                    .map(|a| eval_expr_with_locale(a.trim(), state, locales, locale))
+                    .collect();
+                if let Some(s) = vals.and_then(|v| fold(&v)) {
+                    return Some(s);
+                }
+            }
+        }
+    }
+
     // .length on a state variable
     if let Some(var_name) = expr.strip_suffix(".length") {
         if let Some(val) = state.get(var_name.trim()) {
@@ -235,6 +371,48 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn builtin_math_folds_at_build_time() {
+        // #57 — deterministic numeric builtins fold when args are static or
+        // resolve to a state number.
+        let s = state(&[("n", "5")]);
+        let e = |x: &str| eval_expr_with_locale(x, &s, &BTreeMap::new(), "");
+        assert_eq!(e("math.round(2.4)"), Some("2".into()));
+        assert_eq!(e("math.round(2.6)"), Some("3".into()));
+        assert_eq!(e("math.clamp(99, 0, 10)"), Some("10".into()));
+        assert_eq!(e("math.clamp(-4, 0, 10)"), Some("0".into()));
+        assert_eq!(e("math.round(n)"), Some("5".into()));
+        assert_eq!(e("math.floor(2.9)"), Some("2".into()));
+        assert_eq!(e("math.ceil(2.1)"), Some("3".into()));
+        assert_eq!(e("math.pow(2, 10)"), Some("1024".into()));
+        assert_eq!(e("math.sqrt(144)"), Some("12".into()));
+        assert_eq!(e("math.sign(-3)"), Some("-1".into()));
+        assert_eq!(e("math.hypot(3, 4)"), Some("5".into()));
+        // Unknown / non-numeric args don't fold.
+        assert_eq!(e("math.round(unknownVar)"), None);
+    }
+
+    #[test]
+    fn builtin_str_folds_at_build_time() {
+        // #60 — deterministic text builtins fold when args resolve to strings
+        // (literals or state values).
+        let s = state(&[("name", "webCore")]);
+        let e = |x: &str| eval_expr_with_locale(x, &s, &BTreeMap::new(), "");
+        assert_eq!(e("str.upper(\"ab\")"), Some("AB".into()));
+        assert_eq!(e("str.lower(\"AB\")"), Some("ab".into()));
+        assert_eq!(e("str.capitalize(name)"), Some("WebCore".into()));
+        assert_eq!(e("str.trim(\"  hi  \")"), Some("hi".into()));
+        assert_eq!(
+            e("str.slugify(\"Hello, World!\")"),
+            Some("hello-world".into())
+        );
+        assert_eq!(e("str.truncate(\"abcdef\", 3)"), Some("abc\u{2026}".into()));
+        assert_eq!(e("str.truncate(\"ab\", 3)"), Some("ab".into()));
+        assert_eq!(e("str.repeat(\"ab\", 3)"), Some("ababab".into()));
+        // Unknown args don't fold.
+        assert_eq!(e("str.upper(unknownVar)"), None);
     }
 
     #[test]

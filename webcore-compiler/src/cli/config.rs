@@ -15,6 +15,9 @@ pub(crate) struct Config {
     pub(crate) url: Option<String>,
     /// When true (and mode="prod"), a strict `Content-Security-Policy` meta tag is emitted.
     pub(crate) csp: bool,
+    /// `[app] view_transitions` — wrap SPA navigation in the View Transitions
+    /// API for animated page changes (graceful no-op where unsupported).
+    pub(crate) view_transitions: bool,
     /// Indent size for `webc fmt` (default: 4).
     pub(crate) fmt_indent: Option<usize>,
     /// PWA settings (`[pwa]` in webc.toml). When present, `webc build` emits a
@@ -24,6 +27,42 @@ pub(crate) struct Config {
     /// per locale: the default locale at the root, every other locale under a
     /// `/{locale}/` prefix, plus `hreflang` alternate links. Off by default.
     pub(crate) i18n_static: bool,
+    /// RSS/Atom feed settings (`[feed]` in webc.toml). When present (and a site
+    /// `url` is set), `webc build` emits `dist/feed.xml` from a data collection.
+    pub(crate) feed: Option<Feed>,
+    /// Responsive-image settings (`[images]`). When `widths` is non-empty,
+    /// `webc build` generates resized variants and `webc:img` emits a `srcset`.
+    pub(crate) images: Images,
+}
+
+/// Responsive-image settings (`[images]` in webc.toml). Empty `widths` disables
+/// the feature.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Images {
+    /// Target widths in px (variants are only made for widths < the original).
+    pub(crate) widths: Vec<u32>,
+    /// The `sizes` attribute emitted alongside `srcset` (default `100vw`).
+    pub(crate) sizes: String,
+}
+
+/// Resolved feed settings (opt-in via a `[feed]` section). Field names map the
+/// collection's item fields to feed entries; sensible defaults are applied.
+#[derive(Debug, Clone)]
+pub(crate) struct Feed {
+    /// Data-import name to draw items from (`import posts from "..."`).
+    pub(crate) collection: String,
+    /// Channel title (defaults to the app title) and description.
+    pub(crate) title: String,
+    pub(crate) description: String,
+    /// Item field names.
+    pub(crate) title_field: String,
+    pub(crate) link_field: String,
+    pub(crate) date_field: String,
+    pub(crate) summary_field: String,
+    /// Prepended to the `link_field` value to build the item URL.
+    pub(crate) link_prefix: String,
+    /// Max number of items (newest first). `None` = all.
+    pub(crate) limit: Option<usize>,
 }
 
 /// Resolved Progressive-Web-App settings (opt-in via a `[pwa]` section).
@@ -42,6 +81,27 @@ struct WebcToml {
     fmt: Option<FmtSection>,
     pwa: Option<PwaSection>,
     i18n: Option<I18nSection>,
+    feed: Option<FeedSection>,
+    images: Option<ImagesSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ImagesSection {
+    widths: Option<Vec<u32>>,
+    sizes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeedSection {
+    collection: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    title_field: Option<String>,
+    link_field: Option<String>,
+    date_field: Option<String>,
+    summary_field: Option<String>,
+    link_prefix: Option<String>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +129,7 @@ struct AppSection {
     mode: Option<String>,
     url: Option<String>,
     csp: Option<bool>,
+    view_transitions: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +203,46 @@ pub(crate) fn read_config() -> Result<Config, String> {
         .and_then(|i| i.static_pages)
         .unwrap_or(false);
 
+    let feed = parsed.feed.as_ref().and_then(|f| {
+        // A collection is required; without it there is nothing to feed from.
+        let collection = f.collection.clone()?;
+        Some(Feed {
+            collection,
+            title: f.title.clone().unwrap_or_else(|| app_title.clone()),
+            description: f.description.clone().unwrap_or_default(),
+            title_field: f.title_field.clone().unwrap_or_else(|| "title".to_string()),
+            link_field: f.link_field.clone().unwrap_or_else(|| "url".to_string()),
+            date_field: f.date_field.clone().unwrap_or_else(|| "date".to_string()),
+            summary_field: f
+                .summary_field
+                .clone()
+                .unwrap_or_else(|| "summary".to_string()),
+            link_prefix: f.link_prefix.clone().unwrap_or_default(),
+            limit: f.limit,
+        })
+    });
+
+    let images = parsed
+        .images
+        .as_ref()
+        .map(|im| Images {
+            widths: {
+                let mut w = im.widths.clone().unwrap_or_default();
+                w.retain(|&x| x > 0);
+                w.sort_unstable();
+                w.dedup();
+                w
+            },
+            sizes: im.sizes.clone().unwrap_or_else(|| "100vw".to_string()),
+        })
+        .unwrap_or_default();
+
+    let view_transitions = parsed
+        .app
+        .as_ref()
+        .and_then(|a| a.view_transitions)
+        .unwrap_or(false);
+
     Ok(Config {
         app_title,
         app_lang,
@@ -149,9 +250,12 @@ pub(crate) fn read_config() -> Result<Config, String> {
         mode,
         url,
         csp,
+        view_transitions,
         fmt_indent,
         pwa,
         i18n_static,
+        feed,
+        images,
     })
 }
 
@@ -165,9 +269,12 @@ pub(crate) fn load_config() -> Result<Config, String> {
             mode: "dev".to_string(),
             url: None,
             csp: false,
+            view_transitions: false,
             fmt_indent: None,
             pwa: None,
             i18n_static: false,
+            feed: None,
+            images: Images::default(),
         });
     }
     read_config()

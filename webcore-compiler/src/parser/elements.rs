@@ -14,6 +14,15 @@ pub(super) fn parse_element(pair: Pair<Rule>) -> Result<Element, ParseError> {
         Rule::control_flow => super::directives::parse_control_flow(inner),
         Rule::slot_element => parse_slot(inner),
         Rule::fragment_element => parse_fragment(inner),
+        Rule::markdown_element => {
+            let span = Span::from_pest(inner.as_span());
+            let path = inner
+                .into_inner()
+                .next()
+                .map(|p| extract_string_literal(p.as_str()))
+                .unwrap_or_default();
+            Ok(Element::Markdown(path, span))
+        }
         Rule::tag_element => parse_tag(inner),
         Rule::text_element => parse_text_element(inner),
         _ => Err(ParseError::new(format!(

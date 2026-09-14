@@ -1,0 +1,100 @@
+page "home" {
+    div class="landing" {
+
+        section class="hero" {
+            span class="hero-badge" { "▸ Compiled by Rust · zero runtime by default" }
+            h1 {
+                "Build the web, "
+                span class="grad" { "declaratively" }
+            }
+            p class="hero-sub" {
+                "WebCore turns a single "
+                code { ".webc" }
+                " language into semantic HTML, scoped CSS and a minimal reactive runtime. No Node, no bundler, no dependencies shipped to the browser."
+            }
+            div class="btn-row" {
+                link to="/docs" class="btn btn-primary" { "Get started →" }
+                a href="https://github.com/PrinMeshia/Webcore" class="btn btn-ghost" { "View on GitHub" }
+            }
+            p class="hero-meta" { "One binary · One language · Ships zero JS on a static page" }
+        }
+
+        section class="showcase" {
+            div class="showcase-text" {
+                h2 { "One language for the whole page" }
+                p {
+                    "State, view and scoped style live together. The compiler pre-renders the HTML and attaches a tiny signal-based runtime — only where a page is actually interactive."
+                }
+                link to="/docs/components" class="showcase-link" { "Learn the model →" }
+            }
+            div class="code" data-lang="webc" {
+                div class="code-head" {
+                    span class="lang" { "Counter.webc" }
+                    button class="copy-btn" { "Copy" }
+                }
+                pre { code {
+"component Counter {
+    state { count: Number = 0 }
+    computed { doubled = count * 2 }
+    view {
+        button on:click={ count += 1 } {
+            \"Clicked \{count} times\"
+        }
+        p { \"Doubled: \{doubled}\" }
+    }
+}"
+                } }
+            }
+        }
+
+        section class="features" {
+            h2 class="section-title" { "Everything, built in" }
+            p class="section-sub" { "The batteries a real site needs — none of them bolted on." }
+            div class="cards" {
+                link to="/docs/components" class="card" {
+                    h3 { "Components & state" }
+                    p { "Reactive components with typed state, computed values and clean templating." }
+                }
+                link to="/docs/styling" class="card" {
+                    h3 { "Scoped styling" }
+                    p { "Per-component CSS, design tokens from theme.toml, automatic light/dark." }
+                }
+                link to="/docs/islands" class="card" {
+                    h3 { "Islands architecture" }
+                    p { "Ship HTML by default; hydrate only the interactive parts, on idle or on view." }
+                }
+                link to="/docs/i18n" class="card" {
+                    h3 { "Internationalization" }
+                    p { "Per-locale static generation with hreflang, built right into the compiler." }
+                }
+                link to="/docs/seo" class="card" {
+                    h3 { "SEO by default" }
+                    p { "Metadata, JSON-LD, sitemaps and RSS feeds generated at build time." }
+                }
+                link to="/docs/cli" class="card" {
+                    h3 { "One binary" }
+                    p { "Scaffold, develop with hot reload, and build — all from a single CLI." }
+                }
+            }
+        }
+
+        section class="cta" {
+            h2 { "Ready in 30 seconds" }
+            div class="code cta-code" data-lang="bash" {
+                div class="code-head" {
+                    span class="lang" { "bash" }
+                    button class="copy-btn" { "Copy" }
+                }
+                pre { code {
+"webc new my-app
+cd my-app
+webc dev"
+                } }
+            }
+            div class="btn-row" {
+                link to="/docs/installation" class="btn btn-primary" { "Install WebCore →" }
+                link to="/docs/examples" class="btn btn-ghost" { "Browse examples" }
+            }
+        }
+    }
+}

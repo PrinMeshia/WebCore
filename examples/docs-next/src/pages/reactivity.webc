@@ -1,0 +1,104 @@
+page "docs/reactivity" {
+    h1 { "Reactivity" }
+    p class="lead" {
+        "WebCore pre-renders every page to static HTML, then attaches a tiny signal-based runtime that updates only the exact nodes a state change touches. There is no virtual DOM and no re-render of the tree."
+    }
+
+    h2 { "The model in one paragraph" }
+    p {
+        "State lives in a small "
+        code { "State" }
+        " object. Reading a value inside a binding records that binding as a subscriber of the key; writing a value re-runs only the subscribers of that key. Bindings are wrapped in effects, so a change to "
+        code { "count" }
+        " re-runs the handful of effects that read "
+        code { "count" }
+        " — nothing else."
+    }
+    div class="code" data-lang="js" {
+        div class="code-head" { span class="lang" { "runtime" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"S.get('count')      // reading subscribes the running effect to 'count'
+S.set('count', 3)   // writing re-runs every effect that read 'count'
+                    // …and is a no-op if the value is unchanged (Object.is)"
+        } }
+    }
+
+    h2 { "Where updates come from" }
+    p { "You never call the runtime directly. Assigning to state inside an event handler is the trigger:" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"button on:click=\{count += 1} { \"+\" }
+p { \"Count: \{count}\" }        // this text node re-renders, nothing else"
+        } }
+    }
+    p {
+        "Interpolations, "
+        code { "@if" }
+        ", "
+        code { "@for" }
+        ", dynamic attributes and "
+        code { "class:" }
+        " / "
+        code { "style:" }
+        " bindings each compile to their own effect. Keyed "
+        code { "@for" }
+        " loops diff at the node level so focus and animations survive updates."
+    }
+
+    h2 { "Lists" }
+    p { "List state gets ergonomic mutators that produce a new array (so the change is detected):" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"items.push(value)   // append
+items.remove(i)     // remove by index
+items.clear()       // empty the list"
+        } }
+    }
+
+    h2 { "Global state: stores" }
+    p {
+        "A top-level "
+        code { "store" }
+        " block holds state shared across components. Read and write it through the "
+        code { "$store" }
+        " prefix; the same signal machinery keeps every reader in sync."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"store {
+    state { theme: String = \"light\" }
+}
+
+// anywhere:
+button on:click=\{$store.theme = \"dark\"} { \"Dark mode\" }
+p { \"Theme: \{$store.theme}\" }"
+        } }
+    }
+
+    h2 { "Why it stays small & safe" }
+    ul {
+        li { strong { "No eval. " } "Every reactive expression is compiled to a closure at build time, so " code { "script-src 'self'" } " works without " code { "unsafe-eval" } "." }
+        li { strong { "Pre-rendered. " } "The HTML is complete before any JS runs; the runtime attaches to " code { "data-webcore-*" } " hooks instead of building nodes." }
+        li { strong { "Tree-shaken. " } "Each feature you don't use is dropped from the bundle — a page with no state or events ships " strong { "no script at all." } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Which runtime chunks a page includes depends entirely on what it uses: "
+            code { "@if" }
+            " pulls in the conditional binder, "
+            code { "@for" }
+            " the list binder, "
+            code { "computed" }
+            " the recompute pass, and so on. In production the identifiers are minified too."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/data" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Data & content" } }
+        link to="/docs/i18n" class="next" { span class="dir" { "Next" } span class="ttl" { "Internationalization →" } }
+    }
+}

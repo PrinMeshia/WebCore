@@ -1,0 +1,110 @@
+page "docs/first-app" {
+    h1 { "Your first app" }
+    p class="lead" {
+        "We'll build a small page with an interactive component, from an empty folder to a running dev server."
+    }
+
+    h2 { "1. Create the project" }
+    p { "Scaffold and start the dev server:" }
+    div class="code" data-lang="bash" {
+        div class="code-head" {
+            span class="lang" { "bash" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"webc new hello
+cd hello
+webc dev"
+        } }
+    }
+    p {
+        "Open "
+        code { "http://localhost:3000" }
+        ". Edits to any "
+        code { ".webc" }
+        " file reload the page instantly."
+    }
+
+    h2 { "2. Write a component" }
+    p {
+        "Create "
+        code { "src/components/Greeting.webc" }
+        ". A component owns its state, its view, and — optionally — its own scoped style."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component Greeting {
+    state { name: String = \"world\" }
+    view {
+        div class=\"greeting\" {
+            h2 { \"Hello, \{name}!\" }
+            input bind:value=\{name} placeholder=\"Your name\" {}
+        }
+    }
+    style {
+        .greeting { padding: 1rem; border: 1px solid var(--color-border); }
+        h2 { color: var(--color-primary); }
+    }
+}"
+        } }
+    }
+
+    h2 { "3. Use it on a page" }
+    p {
+        "Import the component and drop it into a page. Pages are placed into your layout automatically."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"import Greeting from \"../components/Greeting.webc\"
+
+page \"home\" {
+    h1 { \"My first WebCore app\" }
+    Greeting {}
+}"
+        } }
+    }
+
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "The " code { "bind:value" } " directive is two-way: typing in the input updates "
+            code { "name" } ", which updates the heading. WebCore hydrates just this component — the rest of the page stays static HTML."
+        } }
+    }
+
+    h2 { "4. Build for production" }
+    p { "When you're ready to ship:" }
+    div class="code" data-lang="bash" {
+        div class="code-head" {
+            span class="lang" { "bash" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"webc build        # → dist/  (static HTML, scoped CSS, minimal JS)"
+        } }
+    }
+    p {
+        "The "
+        code { "dist/" }
+        " folder is a self-contained static site you can host anywhere."
+    }
+
+    nav class="pager" {
+        link to="/docs/installation" class="prev" {
+            span class="dir" { "Previous" }
+            span class="ttl" { "← Installation" }
+        }
+        link to="/docs/components" class="next" {
+            span class="dir" { "Next" }
+            span class="ttl" { "Components & state →" }
+        }
+    }
+}

@@ -1,0 +1,41 @@
+app WebCoreDocs {
+    theme: "default"
+    layout: DocsLayout
+    head {
+        favicon "/assets/logo.png"
+        meta description="WebCore — a declarative language for building web interfaces, compiled by Rust to static HTML, scoped CSS and a minimal reactive runtime."
+        meta name="viewport" content="width=device-width, initial-scale=1"
+    }
+    routes {
+        "/": HomePage
+
+        // Getting Started
+        "/docs":              IntroPage
+        "/docs/installation": InstallPage
+        "/docs/first-app":    FirstAppPage
+
+        // Core concepts
+        "/docs/components":  ComponentsPage
+        "/docs/templating":  TemplatingPage
+        "/docs/styling":     StylingPage
+        "/docs/routing":     RoutingPage
+        "/docs/data":        DataPage
+        "/docs/reactivity":  ReactivityPage
+
+        // Guides
+        "/docs/i18n":    I18nPage
+        "/docs/seo":     SeoPage
+        "/docs/islands": IslandsPage
+        "/docs/forms":   FormsPage
+
+        // Reference
+        "/docs/syntax":    SyntaxPage
+        "/docs/cli":       CliPage
+        "/docs/config":    ConfigPage
+        "/docs/functions": FunctionsPage
+
+        // Resources
+        "/docs/examples":   ExamplesPage
+        "/docs/playground": PlaygroundPage
+    }
+}

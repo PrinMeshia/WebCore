@@ -200,6 +200,7 @@ pub(super) fn generate_layout_with_page_and_components(
         expr_counter: 0,
         has_route_params,
         has_query_params,
+        loop_vars: Vec::new(),
     };
     let (html, handlers) = generate_elements(&resolved, &mut ctx, None)?;
     Ok(HtmlGenerationResult {

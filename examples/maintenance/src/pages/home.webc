@@ -1,0 +1,30 @@
+page "home" {
+    section class="maint" {
+        div class="maint-card" {
+            div class="maint-icon" aria-hidden="true" { "🔧" }
+
+            span class="maint-badge" {
+                span class="maint-badge-dot" aria-hidden="true" {}
+                "Maintenance en cours"
+            }
+
+            h1 class="maint-title" { "Le site est en maintenance" }
+
+            p class="maint-text" {
+                "Nous effectuons actuellement une mise à jour pour améliorer votre "
+                "expérience. Le site sera de retour très bientôt — merci de votre patience."
+            }
+
+            // Trois points animés (purement décoratifs)
+            div class="maint-dots" aria-hidden="true" {
+                span {} span {} span {}
+            }
+
+            p class="maint-contact" {
+                "Une question urgente ? Écrivez-nous à "
+                a href="mailto:contact@exemple.fr" { "contact@exemple.fr" }
+                "."
+            }
+        }
+    }
+}

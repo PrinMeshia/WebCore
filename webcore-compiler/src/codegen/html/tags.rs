@@ -14,6 +14,25 @@ use super::elements::generate_elements;
 use super::utils::{html_escape, is_void_element, push_close_tag};
 use super::{GenContext, HandlerMapping};
 
+/// Warn when a `webc:img` source names a real file of `public/` but omits the
+/// `/assets/` prefix under which that directory is served.
+///
+/// Such a URL used to fail twice in silence: no dimensions (the file was never
+/// found where the lookup expected it) and a 404 in the browser (nothing is
+/// emitted at the site root). Naming the form that works costs one line here
+/// and saves an author the whole investigation.
+fn warn_unprefixed_public_src(root: &std::path::Path, src: &str) {
+    let Some(rel) = crate::core::asset_url::looks_like_unprefixed_public_url(src) else {
+        return;
+    };
+    if root.join("public").join(rel).exists() {
+        eprintln!(
+            "warning[assets]: <img webc:img src=\"{src}\"> — les fichiers de public/ sont servis sous /assets/. Écrivez src=\"{}\" ; sinon : pas de dimensions, pas de srcset, et une 404 à l'affichage.",
+            crate::core::asset_url::url_from_public_rel(rel)
+        );
+    }
+}
+
 /// Generate HTML for a single `<tag>` element, including:
 /// - CSS scope attribute (`data-v`)
 /// - Static, boolean, and expression attributes
@@ -42,20 +61,59 @@ pub(super) fn generate_tag_element(
     let mut resolved_href: Option<String> = None;
     write!(result, "<{mapped_name}").expect("write! to String is infallible");
 
+    // Event delegation keys handlers by the element's `id`. An author-supplied
+    // `id` is therefore reused as the handler id — emitting a second, generated
+    // `id` would be a duplicate attribute (the browser keeps the first one) and
+    // every handler on the element would become unreachable.
+    let has_event_attrs = attributes
+        .iter()
+        .any(|a| a.name.starts_with("on:") && matches!(a.value, AttributeValue::Expression(_)));
+    let author_id = attributes.iter().find(|a| a.name == "id").map(|a| &a.value);
+    let element_id = if has_event_attrs {
+        match author_id {
+            Some(AttributeValue::String(id)) => id.clone(),
+            Some(AttributeValue::Expression(_)) => {
+                eprintln!(
+                    "warning: <{name}> has both a dynamic `id={{…}}` and event handlers — \
+                     the runtime id overwrites the delegation key and the handlers will not fire"
+                );
+                ctx.counter += 1;
+                format!("{}btn{}", ctx.prefix, ctx.counter)
+            }
+            _ => {
+                ctx.counter += 1;
+                format!("{}btn{}", ctx.prefix, ctx.counter)
+            }
+        }
+    } else {
+        String::new()
+    };
+    // Only emit an `id` when we generated one — the author's is written by the
+    // attribute loop below.
+    if has_event_attrs && !matches!(author_id, Some(AttributeValue::String(_))) {
+        write!(result, " id=\"{}\"", html_escape(&element_id))
+            .expect("write! to String is infallible");
+    }
+    let mut event_descriptors: Vec<String> = Vec::new();
+
     // Add scope attribute for CSS scoping
     if let Some(sid) = scope_id {
         write!(result, " {}=\"{}\"", attr_names::SCOPE, sid)
             .expect("write! to String is infallible");
     }
 
-    // Mark elements that have dynamic (expression) or spread attribute bindings
+    // Mark elements that have dynamic (expression) or spread attribute bindings.
+    // Loop-scoped expressions are excluded: they emit per-item `data-webcore-fattr-*`
+    // resolved by `fillItem`, not the global `bindAttrs` binder.
     if attributes.iter().any(|a| {
-        !a.name.starts_with("on:")
-            && !a.name.starts_with("class:")
-            && matches!(
-                &a.value,
-                AttributeValue::Expression(_) | AttributeValue::Spread(_)
-            )
+        if a.name.starts_with("on:") || a.name.starts_with("class:") {
+            return false;
+        }
+        match &a.value {
+            AttributeValue::Expression(e) => !ctx.emits_per_item(e),
+            AttributeValue::Spread(_) => true,
+            _ => false,
+        }
     }) {
         write!(result, " {}", attr_names::BOUND).expect("write! to String is infallible");
     }
@@ -134,16 +192,40 @@ pub(super) fn generate_tag_element(
         if !scan.has_decoding {
             result.push_str(" decoding=\"async\"");
         }
-        // Read image dimensions at compile time
+        // Read image dimensions at compile time. The URL → path mapping lives in
+        // `core::asset_url`: `public/` is served at `/assets/`, and resolving it
+        // here by hand is what used to make `src` and `width`/`height` mutually
+        // exclusive (one convention read the file, the other rewrote the URL).
         if let Some(root) = ctx.project_root {
             if let Some(src) = &scan.src_value {
-                let rel = src.trim_start_matches('/');
-                let img_path = root.join("public").join(rel);
-                if img_path.exists() {
-                    if let Ok(sz) = imagesize::size(&img_path) {
-                        write!(result, " width=\"{}\" height=\"{}\"", sz.width, sz.height)
-                            .expect("write! to String is infallible");
+                match crate::core::asset_url::public_rel_from_url(src) {
+                    Some(rel) => {
+                        let img_path = root.join("public").join(rel);
+                        if img_path.exists() {
+                            if let Ok(sz) = imagesize::size(&img_path) {
+                                write!(result, " width=\"{}\" height=\"{}\"", sz.width, sz.height)
+                                    .expect("write! to String is infallible");
+                                // Responsive-images marker (#74): the post-build
+                                // pass turns this into a `srcset` (or strips it)
+                                // for raster sources. Vector images (svg) don't
+                                // get variants. The value is the public-relative
+                                // path, which that pass turns back into URLs
+                                // through `asset_url`.
+                                let ext = rel.rsplit('.').next().unwrap_or("").to_lowercase();
+                                if matches!(ext.as_str(), "png" | "jpg" | "jpeg") {
+                                    write!(
+                                        result,
+                                        " {}=\"{}|{}\"",
+                                        attr_names::IMG_MARKER,
+                                        html_escape(rel),
+                                        sz.width
+                                    )
+                                    .expect("write! to String is infallible");
+                                }
+                            }
+                        }
                     }
+                    None => warn_unprefixed_public_src(root, src),
                 }
             }
         }
@@ -222,17 +304,37 @@ pub(super) fn generate_tag_element(
                     }
                 } else if attr.name.starts_with("on:") {
                     // Event handler: on:click={ count += 1 }
-                    if let Some(s) = handle_event_attr(
+                    if let Some(descriptor) = handle_event_attr(
                         &attr.name,
                         expr,
                         is_link,
-                        ctx.prefix,
-                        &mut ctx.counter,
+                        &element_id,
                         &mut handlers,
                         &mut resolved_href,
                     ) {
-                        result.push_str(&s);
+                        event_descriptors.push(descriptor);
                     }
+                } else if ctx.emits_per_item(expr) {
+                    // Per-item attribute inside a runtime `@for`: emit the raw
+                    // loop expression for `fillItem` to resolve per item, not a
+                    // global closure ID (which has no `it` in scope). A shape
+                    // `resolveScoped` cannot walk stays here too — a global
+                    // closure would throw and abort the binder — and is reported.
+                    if let Some(var) = ctx.unresolvable_loop_var(expr) {
+                        super::warn_unresolvable_loop_expr(
+                            expr.trim(),
+                            var,
+                            &format!("attribut `{}`", attr.name),
+                        );
+                    }
+                    write!(
+                        result,
+                        " {}{}=\"{}\"",
+                        attr_names::FOR_ATTR_PREFIX,
+                        attr.name,
+                        html_escape(expr.trim())
+                    )
+                    .expect("write! to String is infallible");
                 } else {
                     // Dynamic attribute: bound at runtime via bindAttrs().
                     // SSG (#45): when the expression is statically known
@@ -258,12 +360,23 @@ pub(super) fn generate_tag_element(
         }
     }
 
+    // One `data-webcore-e` per element, listing every delegated event type:
+    // `data-webcore-e="input,blur|stop"`.
+    if !event_descriptors.is_empty() {
+        write!(
+            result,
+            " data-webcore-e=\"{}\"",
+            html_escape(&event_descriptors.join(","))
+        )
+        .expect("write! to String is infallible");
+    }
+
     // Emit validate:* attrs as data-webcore-validate-* attributes
     for attr in attributes
         .iter()
         .filter(|a| a.name.starts_with("validate:"))
     {
-        if let Some(s) = handle_validation_attr(attr) {
+        if let Some(s) = handle_validation_attr(attr, ctx.ssg) {
             result.push_str(&s);
         }
     }

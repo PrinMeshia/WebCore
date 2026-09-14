@@ -1,0 +1,78 @@
+page "docs" {
+    h1 { "Introduction" }
+    p class="lead" {
+        "WebCore is a compiler. You write "
+        code { ".webc" }
+        " files in a small declarative language, and it emits a fast static site — semantic HTML, scoped CSS, and just enough JavaScript to make the interactive parts work."
+    }
+
+    h2 { "What WebCore is" }
+    p {
+        "Most modern web frameworks ship a runtime to the browser and re-render your UI at runtime. WebCore takes the opposite approach: it does the work "
+        strong { "at build time" }
+        ". The output is plain HTML and CSS that render instantly, plus a tree-shaken runtime that only appears when a page actually needs it."
+    }
+    ul {
+        li { strong { "One language. " } "Layouts, pages, components, styling and state all live in " code { ".webc" } " files." }
+        li { strong { "One binary. " } "The " code { "webc" } " CLI scaffolds, serves with hot reload, and builds. No Node toolchain." }
+        li { strong { "Zero runtime by default. " } "A purely static page ships zero JavaScript. Interactivity is opt-in and hydrated as islands." }
+    }
+
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Coming from React or Next.js? The mental model is close — components, props, state — but there is no virtual DOM and no client bundle unless you ask for one."
+        } }
+    }
+
+    h2 { "A first taste" }
+    p { "Here is a complete interactive component: state, a computed value, and a view." }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component Counter {
+    state { count: Number = 0 }
+    computed { doubled = count * 2 }
+    view {
+        button on:click={ count += 1 } { \"Clicked \{count} times\" }
+        p { \"Doubled: \{doubled}\" }
+    }
+}"
+        } }
+    }
+    p {
+        "That compiles to a small chunk of HTML and a reactive island that hydrates in place. Nothing else on the page pays for it."
+    }
+
+    h2 { "How the pieces fit" }
+    ul {
+        li { code { "app.webc" } " — declares your routes and the document " code { "<head>" } "." }
+        li { code { "layouts/" } " — shared page shells with " code { "slot" } " placeholders." }
+        li { code { "pages/" } " — one file per route, dropped into a layout." }
+        li { code { "components/" } " — reusable building blocks with their own state and style." }
+        li { code { "theme.toml" } " — design tokens compiled into CSS variables." }
+    }
+
+    h2 { "Where to go next" }
+    div class="cards" {
+        link to="/docs/installation" class="card" {
+            h3 { "Installation →" }
+            p { "Build the compiler and scaffold your first project." }
+        }
+        link to="/docs/first-app" class="card" {
+            h3 { "Your first app →" }
+            p { "Go from an empty folder to a running page in a few minutes." }
+        }
+    }
+
+    nav class="pager" {
+        span {}
+        link to="/docs/installation" class="next" {
+            span class="dir" { "Next" }
+            span class="ttl" { "Installation →" }
+        }
+    }
+}

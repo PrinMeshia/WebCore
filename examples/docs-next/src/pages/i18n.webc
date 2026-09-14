@@ -1,0 +1,120 @@
+page "docs/i18n" {
+    h1 { "Internationalization" }
+    p class="lead" {
+        "WebCore generates a fully static, per-locale site: one set of pages per language, correct "
+        code { "lang" }
+        " attributes, and "
+        code { "hreflang" }
+        " alternates — all at build time, with no client-side i18n library."
+    }
+
+    h2 { "Configuration" }
+    p {
+        "Set your default locale and opt into per-locale static output in "
+        code { "webc.toml" }
+        ". A site "
+        code { "url" }
+        " is needed for absolute "
+        code { "hreflang" }
+        " links."
+    }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"[app]
+lang   = \"en\"
+locale = \"en\"
+url    = \"https://example.com\"
+
+[i18n]
+static = true"
+        } }
+    }
+
+    h2 { "Translation catalogs" }
+    p {
+        "Each locale is a flat "
+        code { ".toml" }
+        " file under "
+        code { "locales/" }
+        ", named by its locale code."
+    }
+    div class="code" data-lang="toml" {
+        div class="code-head" { span class="lang" { "locales/fr.toml" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"welcome     = \"Bienvenue\"
+greeting    = \"Bonjour, {{0}}\"
+items_one   = \"{{count}} article\"
+items_other = \"{{count}} articles\""
+        } }
+    }
+
+    h2 { "Translating in templates" }
+    p {
+        "Look up a key with "
+        code { "t(...)" }
+        ", including inside attributes. Missing keys fall back to the key itself."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"h1 { \"\{t(\"welcome\")}\" }
+p  { \"\{t(\"greeting\", username)}\" }         // fills {{0}}
+p  { \"\{t(\"items\", count)}\" }               // pluralizes on {{count}}
+a href=\"/cv.pdf\" aria-label=\{t(\"download\")} { \"CV\" }"
+        } }
+    }
+    ul {
+        li { code { "t(\"key\")" } " — plain lookup." }
+        li { code { "t(\"key\", n)" } " with a number — picks " code { "key_one" } " (when " code { "n" } " is 1) or " code { "key_other" } ", and substitutes " code { "{{count}}" } "." }
+        li { code { "t(\"key\", value)" } " with anything else — substitutes " code { "{{0}}" } "." }
+    }
+
+    h2 { "What gets generated" }
+    p {
+        "With "
+        code { "static = true" }
+        ", the default locale is emitted at the root and every other locale under its own prefix:"
+    }
+    div class="code" data-lang="text" {
+        div class="code-head" { span class="lang" { "text" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"dist/
+├─ index.html          # default locale (en) at the root
+├─ about/index.html
+└─ fr/
+   ├─ index.html       # French
+   └─ about/index.html"
+        } }
+    }
+    p { "Each page carries the right " code { "lang" } ", a self-referencing canonical, and " code { "hreflang" } " alternates for every locale plus " code { "x-default" } ":" }
+    div class="code" data-lang="html" {
+        div class="code-head" { span class="lang" { "html" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"<link rel=\"alternate\" hreflang=\"en\"        href=\"https://example.com/\">
+<link rel=\"alternate\" hreflang=\"fr\"        href=\"https://example.com/fr/\">
+<link rel=\"alternate\" hreflang=\"x-default\" href=\"https://example.com/\">"
+        } }
+    }
+    p {
+        "Run "
+        link to="/docs/cli" { code { "webc check" } }
+        " to catch missing or mismatched keys across locales before you ship."
+    }
+
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "Pages generated from a "
+            code { "each" }
+            " collection are currently emitted in the "
+            strong { "default locale only" }
+            "."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/reactivity" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Reactivity" } }
+        link to="/docs/seo" class="next" { span class="dir" { "Next" } span class="ttl" { "SEO & metadata →" } }
+    }
+}

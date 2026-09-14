@@ -43,127 +43,100 @@ pub(super) struct RuntimeFeatures {
     /// Any component instance carries a `client:idle` / `client:visible`
     /// partial-hydration directive (islands, #50).
     pub has_islands: bool,
+    /// Any component declares a `computed { }` var. Set by the JS generator
+    /// (not by `detect_features`) once the computed table is built.
+    pub has_computed: bool,
 }
 
 pub(super) fn detect_features_in_elements(elements: &[Element], f: &mut RuntimeFeatures) {
-    for elem in elements {
-        match elem {
-            Element::Interpolation(expr, _) => {
-                f.has_interpolation = true;
-                if expr.contains("$query.") {
-                    f.has_query_params = true;
-                }
+    crate::core::ast::walk_elements(elements, &mut |elem| match elem {
+        Element::Interpolation(expr, _) => {
+            f.has_interpolation = true;
+            if expr.contains("$query.") {
+                f.has_query_params = true;
             }
-            Element::For {
-                content, iterable, ..
-            } => {
-                f.has_for = true;
-                if iterable.contains("$query.") {
-                    f.has_query_params = true;
-                }
-                detect_features_in_elements(content, f);
+        }
+        Element::For { iterable, .. } => {
+            f.has_for = true;
+            if iterable.contains("$query.") {
+                f.has_query_params = true;
             }
-            Element::If {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                f.has_if = true;
-                if condition.contains("$query.") {
-                    f.has_query_params = true;
-                }
-                detect_features_in_elements(then_branch, f);
-                if let Some(eb) = else_branch {
-                    detect_features_in_elements(eb, f);
-                }
+        }
+        Element::If { condition, .. } => {
+            f.has_if = true;
+            if condition.contains("$query.") {
+                f.has_query_params = true;
             }
-            Element::Tag {
-                name,
-                attributes,
-                content,
-                ..
-            } => {
-                if name == "link" && attributes.iter().any(|a| a.name == "to") {
-                    f.has_navigation = true;
+        }
+        Element::Tag {
+            name, attributes, ..
+        } => {
+            if name == "link" && attributes.iter().any(|a| a.name == "to") {
+                f.has_navigation = true;
+            }
+            for attr in attributes {
+                if attr.name.starts_with("validate:") {
+                    f.has_validation = true;
                 }
-                for attr in attributes {
-                    if attr.name.starts_with("validate:") {
-                        f.has_validation = true;
+                if attr.name.starts_with("class:") {
+                    f.has_class_binding = true;
+                }
+                if attr.name.contains("|debounce") {
+                    f.has_debounce = true;
+                }
+                if attr.name.starts_with("ref:") {
+                    f.has_refs = true;
+                }
+                if attr.name.starts_with("style:") {
+                    f.has_style_binding = true;
+                }
+                if attr.name == "webc:transition" {
+                    f.has_transition = true;
+                }
+                match &attr.value {
+                    AttributeValue::Spread(_) => {
+                        f.has_spread = true;
+                        f.has_dynamic_attrs = true;
                     }
-                    if attr.name.starts_with("class:") {
-                        f.has_class_binding = true;
-                    }
-                    if attr.name.contains("|debounce") {
-                        f.has_debounce = true;
-                    }
-                    if attr.name.starts_with("ref:") {
-                        f.has_refs = true;
-                    }
-                    if attr.name.starts_with("style:") {
-                        f.has_style_binding = true;
-                    }
-                    if attr.name == "webc:transition" {
-                        f.has_transition = true;
-                    }
-                    match &attr.value {
-                        AttributeValue::Spread(_) => {
-                            f.has_spread = true;
+                    AttributeValue::Expression(expr) => {
+                        if !attr.name.starts_with("on:")
+                            && !attr.name.starts_with("class:")
+                            && !attr.name.starts_with("ref:")
+                            && !attr.name.starts_with("style:")
+                            && attr.name != "webc:transition"
+                        {
                             f.has_dynamic_attrs = true;
                         }
-                        AttributeValue::Expression(expr) => {
-                            if !attr.name.starts_with("on:")
-                                && !attr.name.starts_with("class:")
-                                && !attr.name.starts_with("ref:")
-                                && !attr.name.starts_with("style:")
-                                && attr.name != "webc:transition"
-                            {
-                                f.has_dynamic_attrs = true;
-                            }
-                            if expr.contains("webcore_navigate(") {
-                                f.has_navigation = true;
-                            }
-                            if expr.contains("$query.") {
-                                f.has_query_params = true;
-                            }
+                        if expr.contains("webcore_navigate(") {
+                            f.has_navigation = true;
                         }
-                        AttributeValue::String(s) if s.contains("$query.") => {
+                        if expr.contains("$query.") {
                             f.has_query_params = true;
                         }
-                        _ => {}
                     }
-                }
-                detect_features_in_elements(content, f);
-            }
-            Element::Defer { content, .. } => {
-                f.has_defer = true;
-                detect_features_in_elements(content, f);
-            }
-            Element::Component {
-                attributes,
-                content,
-                ..
-            } => {
-                if crate::core::ast::island_strategy(attributes).is_some() {
-                    f.has_islands = true;
-                }
-                detect_features_in_elements(content, f);
-            }
-            Element::SlotContent { content, .. } | Element::Fragment { content, .. } => {
-                detect_features_in_elements(content, f);
-            }
-            Element::ErrorBlock { content, .. } => {
-                f.has_validation = true;
-                detect_features_in_elements(content, f);
-            }
-            Element::Text(t, _) => {
-                if t.contains("$query.") {
-                    f.has_query_params = true;
+                    AttributeValue::String(s) if s.contains("$query.") => {
+                        f.has_query_params = true;
+                    }
+                    _ => {}
                 }
             }
-            Element::Slot(..) => {}
         }
-    }
+        Element::Defer { .. } => f.has_defer = true,
+        Element::Component { attributes, .. } => {
+            if crate::core::ast::island_strategy(attributes).is_some() {
+                f.has_islands = true;
+            }
+        }
+        Element::ErrorBlock { .. } => f.has_validation = true,
+        Element::Text(t, _) => {
+            if t.contains("$query.") {
+                f.has_query_params = true;
+            }
+        }
+        // Slot: no runtime impact. Markdown: inlined as static HTML at build.
+        Element::Slot(..) | Element::SlotContent { .. } | Element::Fragment { .. } => {}
+        Element::Markdown(..) => {}
+    });
 }
 
 pub(super) fn detect_features(document: &WebCoreDocument) -> RuntimeFeatures {

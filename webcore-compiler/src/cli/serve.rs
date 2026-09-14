@@ -3,7 +3,7 @@
 use super::build::build_project;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
-use std::net::{TcpListener, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -117,21 +117,52 @@ pub(crate) fn handle_request(request: Request, ws_port: u16) -> Result<(), Strin
     }
 }
 
-fn bind_server_with_fallback(start_port: u16, max_tries: u16) -> Result<(Server, u16), String> {
+/// Resolve the address the dev server binds to, from the optional `--host` value.
+///
+/// `--host` used to be display-only: the listeners were hard-coded to
+/// `0.0.0.0`, so `webc dev --host 127.0.0.1` printed a reassuring loopback URL
+/// while still accepting requests from every machine on the network. The flag
+/// now decides where we actually listen, which means an unparseable value has
+/// to be an error — silently falling back to the wildcard is exactly the
+/// mismatch this is fixing.
+pub(crate) fn resolve_bind_ip(host: Option<&str>) -> Result<IpAddr, String> {
+    match host {
+        None => Ok(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+        Some(h) => h.parse::<IpAddr>().map_err(|_| {
+            format!("--host attend une adresse IP (ex: 0.0.0.0, 127.0.0.1, ::1) — reçu '{h}'")
+        }),
+    }
+}
+
+fn bind_server_with_fallback(
+    ip: IpAddr,
+    start_port: u16,
+    max_tries: u16,
+) -> Result<(Server, u16), String> {
     let mut port = start_port;
     for _ in 0..max_tries {
-        match Server::http(("0.0.0.0", port)) {
+        match Server::http((ip, port)) {
             Ok(server) => return Ok((server, port)),
             Err(e) => {
-                let is_in_use = e
+                let kind = e
                     .as_ref()
                     .downcast_ref::<std::io::Error>()
-                    .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::AddrInUse);
-                if is_in_use {
-                    port = port.saturating_add(1);
-                    continue;
+                    .map(std::io::Error::kind);
+                match kind {
+                    Some(std::io::ErrorKind::AddrInUse) => {
+                        port = port.saturating_add(1);
+                        continue;
+                    }
+                    // The requested address belongs to no interface on this
+                    // machine — a bad `--host`, not a busy port. Retrying on
+                    // the next port would loop 50 times over the same failure.
+                    Some(std::io::ErrorKind::AddrNotAvailable) => {
+                        return Err(format!(
+                            "impossible d'écouter sur {ip} : cette adresse n'est portée par aucune interface de cette machine"
+                        ))
+                    }
+                    _ => return Err(format!("server error: {e}")),
                 }
-                return Err(format!("server error: {e}"));
             }
         }
     }
@@ -142,13 +173,22 @@ fn bind_server_with_fallback(start_port: u16, max_tries: u16) -> Result<(Server,
     ))
 }
 
-fn get_primary_ipv4() -> Option<String> {
+/// Render an IP as it must appear in a URL — IPv6 literals need brackets,
+/// otherwise the `:` of the address collides with the port separator.
+pub(crate) fn format_host(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => format!("[{v6}]"),
+    }
+}
+
+fn get_primary_ipv4() -> Option<IpAddr> {
     if let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) {
         if socket.connect(("8.8.8.8", 80)).is_ok() {
             if let Ok(addr) = socket.local_addr() {
-                if let std::net::IpAddr::V4(ipv4) = addr.ip() {
+                if let IpAddr::V4(ipv4) = addr.ip() {
                     if !ipv4.is_loopback() {
-                        return Some(ipv4.to_string());
+                        return Some(IpAddr::V4(ipv4));
                     }
                 }
             }
@@ -162,6 +202,10 @@ pub(crate) fn serve_project(
     host: Option<String>,
     auto_open: bool,
 ) -> Result<(), String> {
+    // Resolve `--host` before building: a typo in the flag should fail in a
+    // second, not after a full compilation.
+    let bind_ip = resolve_bind_ip(host.as_deref())?;
+
     // initial build
     build_project(None).map_err(|e| e.to_string())?;
 
@@ -201,31 +245,39 @@ pub(crate) fn serve_project(
         .map_err(|e| format!("watch error: {e}"))?;
 
     // start HTTP server with port auto-increment if in use
-    let (server, bound_port) = bind_server_with_fallback(port, 50)?;
+    let (server, bound_port) = bind_server_with_fallback(bind_ip, port, 50)?;
     let ws_port = bound_port + 1;
 
-    // start WebSocket server for hot reload
-    let ws_listener = TcpListener::bind(format!("0.0.0.0:{ws_port}"))
-        .map_err(|e| format!("WS bind error: {e}"))?;
+    // The HMR socket follows the HTTP server: restricting one while leaving
+    // the other on the wildcard would keep the process reachable anyway.
+    let ws_listener =
+        TcpListener::bind((bind_ip, ws_port)).map_err(|e| format!("WS bind error: {e}"))?;
 
-    let local_host = match host.as_deref() {
-        Some("0.0.0.0") | None => "localhost".to_string(),
-        Some(h) => h.to_string(),
+    // A wildcard bind has no address of its own to show, so the local URL is
+    // spelled `localhost`; any other bind is displayed as-is.
+    let local_host = if bind_ip.is_unspecified() {
+        "localhost".to_string()
+    } else {
+        format_host(bind_ip)
     };
     println!("🚀 Dev server running at:");
     println!("  Local:   http://{local_host}:{bound_port}");
     println!("  HMR:     WebSocket on ws://{local_host}:{ws_port}");
-    let network_ip = match host.as_deref() {
-        Some("0.0.0.0") | None => get_primary_ipv4(),
-        Some(h) => Some(h.to_string()),
+
+    // Only advertise a Network URL when the server really answers on it: the
+    // wildcard reaches the LAN address, a loopback bind reaches nothing else.
+    let network_ip = if bind_ip.is_unspecified() {
+        get_primary_ipv4()
+    } else if bind_ip.is_loopback() {
+        None
+    } else {
+        Some(bind_ip)
     };
     let mut qr_url: Option<String> = None;
-    if let Some(ip) = network_ip.clone() {
-        if ip != "127.0.0.1" && ip != "localhost" && ip != "0.0.0.0" {
-            let url = format!("http://{ip}:{bound_port}");
-            println!("  Network: {url}");
-            qr_url = Some(url);
-        }
+    if let Some(ip) = network_ip {
+        let url = format!("http://{}:{bound_port}", format_host(ip));
+        println!("  Network: {url}");
+        qr_url = Some(url);
     }
 
     // auto-open browser

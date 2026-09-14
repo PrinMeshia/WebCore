@@ -343,6 +343,9 @@ pub fn format_element(el: &Element, depth: usize, opts: &FmtOptions) -> String {
         Element::Text(s, _) => {
             format!("{ind}\"{s}\"\n")
         }
+        Element::Markdown(path, _) => {
+            format!("{ind}markdown \"{path}\"\n")
+        }
         Element::Interpolation(expr, _) => {
             format!("{ind}\"{{{expr}}}\"\n")
         }

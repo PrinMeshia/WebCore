@@ -197,7 +197,9 @@ pub(crate) fn compile_list_method(expr: &str, vars: &CompiledVars) -> Option<Str
     None
 }
 
-/// Replace utility functions with short aliases (U.max, etc.)
+/// Replace utility functions with short aliases (U.max, etc.) and rewrite
+/// namespaced built-ins (`math.round(` → `_bmround(`, …) to their runtime
+/// helpers (#57).
 pub(super) fn replace_utils_short(expr: &str) -> String {
     let mut result = expr.to_string();
     for (old, new) in [("max(", "U.max("), ("min(", "U.min("), ("abs(", "U.abs(")] {
@@ -205,7 +207,7 @@ pub(super) fn replace_utils_short(expr: &str) -> String {
             result = result.replace(old, new);
         }
     }
-    result
+    crate::core::builtins::rewrite(&result)
 }
 
 /// Replace `$store.varname` (sentinel: `__STORE_varname__`) then local vars, then restore.

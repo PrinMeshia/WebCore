@@ -1,6 +1,6 @@
 # Spécification du langage WebCore
 
-> Version : 4.0.0 — Référence complète de la syntaxe `.webc`
+> Version : 4.2.1 — Référence complète de la syntaxe `.webc`
 
 ---
 
@@ -25,7 +25,8 @@
 10. [Éléments HTML](#éléments-html)
 11. [Attributs](#attributs)
 12. [Événements](#événements)
-13. [Interpolation](#interpolation)
+13. [Fonctions natives (`math.`/`str.`/`fmt.`/`arr.`)](#fonctions-natives-math--str--fmt--arr)
+14. [Interpolation](#interpolation)
 14. [Directives de contrôle](#directives-de-contrôle)
 15. [Routage](#routage)
 16. [Slots](#slots)
@@ -423,9 +424,13 @@ component FullName {
 
 - Les variables computed utilisent `S.setQ(k, v)` — un setter **silencieux** qui met à jour la
   valeur sans déclencher les listeners, évitant ainsi les boucles réactives.
+  Chaque binder réactif (`bind()`, `bindIf()`, `bindAttrs()`, `bindClassBindings()`)
+  appelle donc `rebindComputed()` **à l'intérieur** de son effet : l'effet dépend
+  ainsi de l'état source, et pas de la valeur dérivée qui, elle, ne notifie personne.
 - Les expressions computed supportent les mêmes opérations que les interpolations (`+`, `-`, `*`,
-  `/`, `max()`, `min()`, etc.).
-- Une variable computed peut être utilisée dans `view`, `@if`, `@for` et `style`.
+  `/`, `max()`, `min()`, etc.), ainsi que `.length`.
+- Une variable computed peut être utilisée dans `view`, `@if`, `@for`, `class:`,
+  les attributs dynamiques et `style`.
 - Plusieurs variables computed peuvent être déclarées dans le même bloc.
 
 ```webc
@@ -531,6 +536,17 @@ component Timer {
   les interpolations `{…}`. Les blocs `@if` et attributs dynamiques se mettent à jour
   automatiquement de façon réactive dès le `S.set` (pas besoin de `bind()`).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
+
+> **`on:mount` ne rejoue pas après une navigation SPA.** Le corps s'exécute une
+> seule fois, au `DOMContentLoaded` du chargement initial ; `nav()` remplace le
+> `<main>` et relance les binders réactifs, pas les hooks de montage (alors que
+> `on:destroy`, lui, s'exécute **avant chaque** navigation). Un
+> `addEventListener` posé dans `on:mount` sur un élément de page est donc absent
+> si la page est atteinte par un lien interne — un `<form>` sans gestionnaire
+> est soumis nativement par le navigateur (rechargement + champs dans l'URL).
+> Utiliser un gestionnaire déclaratif (`on:submit={envoyer()}`), délégué sur
+> `document` et donc insensible aux navigations ; `on:mount` sert alors
+> uniquement à définir la fonction (`window.envoyer = () => { … }`).
 - Le corps `on:mount { }` supporte les accolades imbriquées à **profondeur arbitraire** — les callbacks JS complexes (`setTimeout`, `setInterval`, `addEventListener` avec corps multi-ligne, objets littéraux) sont entièrement supportés.
 
 ### `on:destroy`
@@ -668,6 +684,17 @@ component Timer {
   les interpolations `{…}`. Les blocs `@if` et attributs dynamiques se mettent à jour
   automatiquement de façon réactive dès le `S.set` (pas besoin de `bind()`).
 - Plusieurs composants avec `on:mount` voient leurs corps exécutés dans l'ordre d'apparition.
+
+> **`on:mount` ne rejoue pas après une navigation SPA.** Le corps s'exécute une
+> seule fois, au `DOMContentLoaded` du chargement initial ; `nav()` remplace le
+> `<main>` et relance les binders réactifs, pas les hooks de montage (alors que
+> `on:destroy`, lui, s'exécute **avant chaque** navigation). Un
+> `addEventListener` posé dans `on:mount` sur un élément de page est donc absent
+> si la page est atteinte par un lien interne — un `<form>` sans gestionnaire
+> est soumis nativement par le navigateur (rechargement + champs dans l'URL).
+> Utiliser un gestionnaire déclaratif (`on:submit={envoyer()}`), délégué sur
+> `document` et donc insensible aux navigations ; `on:mount` sert alors
+> uniquement à définir la fonction (`window.envoyer = () => { … }`).
 
 ### `on:destroy`
 
@@ -919,6 +946,82 @@ Chaque instruction du style `var = expr` ou `var += expr` est compilée en un `S
 
 ---
 
+## Fonctions natives (`math.` / `str.` / `fmt.` / `arr.`)
+
+Depuis la 4.1, WebCore fournit une bibliothèque standard de fonctions
+**namespacées**, utilisables partout où une expression est acceptée
+(interpolations, attributs dynamiques, handlers d'événements).
+
+Trois garanties les distinguent d'un simple appel JS :
+
+- **CSP-safe** — chaque fonction est compilée en un petit helper runtime ;
+  aucun `eval`, aucune `new Function`.
+- **Tree-shakée** — seuls les helpers réellement utilisés dans le projet sont
+  émis dans le bundle.
+- **Pliable en SSG** — un appel déterministe à arguments statiques
+  (ex. `math.round(2.4)`, `str.slugify("Hello, World!")`) est **pré-calculé au
+  build** et écrit directement dans le HTML : zéro coût runtime.
+
+### `math.*` — numérique (pliable en SSG)
+
+| Fonction | Description |
+|---|---|
+| `math.round(x)` | Arrondi à l'entier le plus proche |
+| `math.floor(x)` | Arrondi inférieur |
+| `math.ceil(x)` | Arrondi supérieur |
+| `math.clamp(x, a, b)` | Borne `x` dans `[a, b]` |
+| `math.pow(x, y)` | `x` puissance `y` |
+| `math.sqrt(x)` | Racine carrée |
+| `math.sign(x)` | Signe : `-1`, `0` ou `1` |
+| `math.hypot(...a)` | Hypoténuse / norme euclidienne |
+
+### `str.*` — texte (pliable en SSG)
+
+| Fonction | Description |
+|---|---|
+| `str.upper(s)` | Majuscules |
+| `str.lower(s)` | Minuscules |
+| `str.capitalize(s)` | Première lettre en majuscule |
+| `str.trim(s)` | Supprime les espaces de bord |
+| `str.slugify(s)` | Slug URL (`"Hello, World!"` → `hello-world`) |
+| `str.truncate(s, n)` | Tronque à `n` caractères (ajoute `…`) |
+| `str.repeat(s, n)` | Répète `s` `n` fois |
+
+### `fmt.*` — formatage selon la locale (runtime)
+
+Basées sur `Intl`, elles suivent la locale i18n active (`LOCALE`) et retombent
+sur la locale par défaut de l'environnement sinon. **Non pliables en SSG.**
+
+| Fonction | Description |
+|---|---|
+| `fmt.number(n)` | Nombre formaté selon la locale |
+| `fmt.currency(n, "EUR")` | Montant monétaire (code ISO 4217) |
+| `fmt.percent(n)` | Pourcentage (`0.42` → `42 %`) |
+| `fmt.date(d)` | Date (`dateStyle: medium`) |
+
+### `arr.*` — tableaux (runtime)
+
+| Fonction | Description |
+|---|---|
+| `arr.sum(a)` | Somme des éléments |
+| `arr.first(a)` | Premier élément |
+| `arr.last(a)` | Dernier élément |
+| `arr.unique(a)` | Déduplique |
+| `arr.sort(a)` | Trie (numérique ou lexicographique) |
+| `arr.reverse(a)` | Inverse l'ordre |
+| `arr.join(a, sep)` | Joint en chaîne avec `sep` |
+
+```webc
+p "Prix : {fmt.currency(total, "EUR")}"
+p "Slug : {str.slugify(title)}"
+p "Panier : {arr.sum(prices)} articles"
+p "Note : {math.clamp(score, 0, 100)}"
+```
+
+> Les préfixes `math` / `str` / `fmt` / `arr` sont **réservés**.
+
+---
+
 ## Interpolation
 
 ### Dans les chaînes
@@ -935,7 +1038,8 @@ p "Traduction : {t("key")}"  // i18n
 ### Expression arbitraire
 
 L'expression entre `{` et `}` est évaluée au runtime. Elle peut référencer
-n'importe quelle variable du state, variable computed, variable store, et appeler `max`, `min`, `abs`.
+n'importe quelle variable du state, variable computed, variable store, et appeler `max`, `min`, `abs`
+ainsi que les [fonctions natives](#fonctions-natives-math--str--fmt--arr) (`math.` / `str.` / `fmt.` / `arr.`).
 
 ```webc
 p "Pair : {count % 2 == 0}"
@@ -1111,6 +1215,38 @@ Avec key pour le DOM diffing :
     li "{item.text}"
 }
 ```
+
+#### Formes autorisées pour la variable de boucle
+
+Dans le corps d'un `@for` **résolu à l'exécution**, une interpolation ou un
+attribut qui lit la variable de boucle est écrit tel quel dans le HTML
+(`data-webcore-interpolation="item.text"`) et résolu par élément au moment du
+dépliage. Ce résolveur marche un chemin de propriétés, segment par segment — il
+n'évalue pas d'expression. Les seules formes acceptées sont donc :
+
+| Forme | Résolue |
+|---|---|
+| `{item}` · `{i}` (l'index) | oui |
+| `{item.text}` · `{item.author.name}` · `{item.tags.length}` | oui |
+| `{item.likes + 1}` · `{item.tags[0]}` · `{item.text.trim()}` | **non** |
+
+Une forme calculée ne peut pas non plus être compilée en fermeture globale : la
+variable de boucle n'existe dans aucune portée en dehors de la boucle. Le
+compilateur émet donc un avertissement qui nomme les formes qui marchent :
+
+```
+warning[for]: `{item.likes + 1}` (interpolation) lit la variable de boucle `item`
+dans une forme non résoluble par élément. Seuls `item` et ses accès de propriété
+(`item.champ`, `item.a.b`) le sont — une expression calculée rendra du vide.
+```
+
+Les deux contournements : préparer la valeur dans les données (`likesPlusOne`),
+ou passer l'item en prop à un composant, dont les props sont en portée normale
+et où les expressions se compilent comme ailleurs.
+
+Cette limite ne concerne que les boucles résolues à l'exécution. Un `@for` sur
+un **import de données** est déplié à la compilation : les valeurs y sont
+connues, et les expressions ordinaires s'appliquent.
 
 > **Pattern `window.helper`** : la grammaire interdit les accolades dans les expressions `on:click`. Pour créer des objets, définir un helper dans `on:mount` :
 > ```webc
@@ -1772,9 +1908,17 @@ Le bloc `head` dans une déclaration `page` permet de personnaliser le `<head>` 
 ```webc
 page "article" {
     head {
-        title "Mon Article"
-        meta description="Article de blog WebCore"
-        meta og:title="Mon Article"
+        title "{t("article_title")}"
+        meta description="{t("article_desc")}"
+        meta og:title="{t("article_title")}"
+        link rel="preload" href="/fonts/inter.woff2" as="font" crossorigin="anonymous"
+        link rel="alternate" type="application/rss+xml" href="/feed.xml"
+        jsonld {
+            "@context": "https://schema.org"
+            "@type": "Article"
+            headline: "{t("article_title")}"
+            author: "Ada Lovelace"
+        }
         favicon "/assets/logo.png"
     }
     h1 "Hello"
@@ -1785,9 +1929,54 @@ page "article" {
 - `meta name="valeur"` — génère `<meta name="name" content="valeur">`
 - `meta og:title="valeur"` — génère `<meta property="og:title" content="valeur">` (les clés `og:*` utilisent `property`, conforme à OpenGraph ; les autres clés, y compris `twitter:*`, utilisent `name`)
 - `meta theme-color="valeur"` — les clés de `meta` acceptent les tirets, ce qui permet les noms standard tels que `theme-color`, `apple-mobile-web-app-capable`, `msapplication-TileColor`
+- **`meta` multi-attributs** — après la paire `clé="valeur"`, on peut ajouter des attributs supplémentaires : `meta theme-color="#fff" media="(prefers-color-scheme: light)"`. Deux `theme-color` clair/sombre coexistent ainsi (la déduplication se fait sur `(clé, attributs)`).
+- **Interpolation `{t("clé")}` dans `title` et `meta`** — les valeurs acceptent les interpolations et sont **résolues par locale au build** (SSG). Avec `[i18n] static=true`, chaque page localisée (`/`, `/en/`, …) reçoit des `<title>`/`<meta>` réellement traduits et indexables — plus de metas en langue par défaut sur les pages étrangères.
+- `link attr="..." …` — génère un `<link>` générique avec les attributs fournis, dans l'ordre : `preload`, `rel="me"`, flux RSS (`rel="alternate" type="application/rss+xml"`), `dns-prefetch`, etc.
+- `jsonld { … }` — sérialise un objet **JSON-LD** dans un `<script type="application/ld+json">` **du HTML statique** (visible des crawlers, zéro JS). Les valeurs sont **récursives** — scalaire, objet imbriqué, ou tableau — donc une entité Schema.org complète tient en statique :
+
+  ```webc
+  jsonld {
+    "@context": "https://schema.org"
+    "@type": "Person"
+    name: "{t(\"author_name\")}"
+    address: { "@type": "PostalAddress" addressLocality: "Bordeaux" }
+    sameAs: ["https://github.com/x", "https://linkedin.com/x"]
+    knowsAbout: ["PHP", ".NET"]
+  }
+  ```
+
+  Clés/valeurs échappées en JSON, ordre d'écriture préservé (`@context`/`@type` en tête), interpolations `{t()}` résolues dans les scalaires.
 - `favicon "/assets/logo.png"` — génère `<link rel="icon" href="/assets/logo.png">` ; pointe vers un fichier de `public/` (servi sous `/assets/`) et est fingerprinté en mode `prod`
 
 Les autres éléments de la page (ici `h1 "Hello"`) vont dans le `<body>` normalement.
+
+### Variables de build — `{$build.*}`
+
+Des statistiques de build, résolues en **texte statique** au moment de la
+compilation (une fois les sorties générées) — utile pour un pied de page « le
+site est sa propre démo » toujours exact :
+
+| Variable | Valeur |
+|---|---|
+| `{$build.pages}` | nombre de pages |
+| `{$build.components}` | nombre de composants |
+| `{$build.locales}` | nombre de locales |
+| `{$build.jsBytes}` / `{$build.jsKb}` | taille du runtime JS |
+| `{$build.cssBytes}` / `{$build.cssKb}` | taille de `theme.css` |
+| `{$build.totalKb}` | poids total (JS + CSS) |
+| `{$build.jsGzipKb}` / `{$build.cssGzipKb}` / `{$build.totalGzipKb}` | tailles **gzippées** (+ variantes `…GzipBytes`) — le poids réellement transféré sur le réseau |
+
+Aucun binding runtime n'est émis ; un champ inconnu est laissé tel quel (une
+faute de frappe reste visible plutôt que silencieusement vidée).
+
+### Transitions de page — `[app] view_transitions`
+
+Avec `view_transitions = true` dans la section `[app]` de `webc.toml`, la
+navigation SPA est enveloppée dans `document.startViewTransition()` : le
+navigateur anime (cross-fade) le passage entre pages — ce que `@view-transition`
+en CSS pur ne peut pas faire avec un routeur `pushState`. Repli propre (swap
+direct) si l'API n'existe pas ou si l'option est désactivée ; zéro coût runtime
+quand elle l'est.
 
 ### `head { }` global (au niveau `app`)
 
@@ -1953,6 +2142,8 @@ Les modificateurs sont encodés dans l'attribut `data-webcore-e` :
 
 Le listener délégué `D()` lit les modificateurs depuis `data-webcore-e` et les applique. La syntaxe `.webc` reste inchangée — seul le HTML généré reflète les modificateurs.
 
+`|once` est suivi **par type d'événement** : sur un élément portant plusieurs gestionnaires, marquer l'un d'eux comme `once` ne neutralise pas les autres.
+
 ### Compatibilité avec `|debounce`
 
 `|debounce` et les autres modificateurs sont **mutuellement exclusifs** — un handler debouncé utilise un mécanisme `setTimeout` distinct (voir [`on:event|debounce`](#oneventdebounce--handlers-debouncés)).
@@ -1983,6 +2174,30 @@ webc watch
 | Rechargement navigateur (HMR) | Non | Oui (WebSocket) |
 | Idéal pour | CI/CD, builds continus, scripts | Développement interactif |
 
+### Adresse d'écoute (`--host`)
+
+`webc dev` écoute par défaut sur `0.0.0.0`, c'est-à-dire sur **toutes les
+interfaces réseau** de la machine. C'est ce qui permet d'ouvrir la page en cours
+depuis un téléphone du même Wi-Fi (l'URL réseau et son QR code sont affichés au
+démarrage) — et c'est aussi ce qui rend le serveur joignable par les autres
+machines du réseau.
+
+`--host <ip>` change l'adresse réellement écoutée, pour le serveur HTTP **comme
+pour la socket HMR** :
+
+```bash
+webc dev                      # 0.0.0.0 — accessible depuis le réseau local
+webc dev --host 127.0.0.1     # loopback — accessible depuis cette machine seule
+webc dev 8080 --host ::1       # port + loopback IPv6
+```
+
+Restreint à une adresse de loopback, le démarrage n'affiche ni URL réseau ni QR
+code, puisque le serveur ne répond plus sur ces adresses.
+
+La valeur doit être une adresse IP littérale : un nom d'hôte (`localhost`) ou une
+adresse non portée par une interface de la machine fait échouer le démarrage avec
+un message explicite, plutôt que de retomber silencieusement sur `0.0.0.0`.
+
 ---
 
 ## Commande `webc check`
@@ -2002,6 +2217,19 @@ Contrôles effectués :
 | Routes → pages | `/about: AboutPage` déclarée mais aucune page `"about"` dans les fichiers `.webc` |
 | Composants instanciés | `Counter {}` utilisé mais composant `Counter` introuvable |
 | Types de props | Prop `count: Number` reçoit `label="hello"` (type incohérent) |
+
+Contrôles **non bloquants** (avertissements ; n'échouent qu'avec `--strict`) :
+
+| Contrôle | Code | Exemple |
+|---|---|---|
+| Accessibilité (opt-in `--a11y`) | `a11y-*` | `<img>` sans alternative textuelle |
+| **Parité des locales** | `i18n-parity` | une clé déclarée dans `fr.toml` mais absente de `en.toml` |
+| **`t()` résolvable** | `i18n-missing-key` | `t("clé")` dont la clé n'existe dans aucune locale (variantes plurielles `_one`/`_other` tolérées) |
+| **Assets orphelins** | `orphan-asset` | un fichier de `public/` référencé nulle part dans les sources (best-effort, hors `.md`) |
+
+Les contrôles i18n et assets orphelins sont **automatiques** dès que le projet
+déclare des locales / un dossier `public/` ; l'accessibilité reste opt-in via
+`--a11y`. `--strict` transforme tous ces avertissements en échec (idéal en CI).
 
 En cas d'erreur, `webc check` affiche le fichier, la ligne et un message explicite, puis quitte avec code 1.
 Si tout est valide, il affiche `✓ projet valide` et quitte avec code 0.
@@ -2251,19 +2479,30 @@ La directive `webc:img` sur un élément `img` déclenche une transformation com
 ### Syntaxe
 
 ```webc
-img webc:img src="/hero.png" alt="Hero"
-img webc:img src="/logo.svg" alt="Logo" class="logo"
+img webc:img src="/assets/hero.png" alt="Hero"
+img webc:img src="/assets/logo.svg" alt="Logo" class="logo"
+```
+
+`public/` est servi sous `/assets/` : un fichier `public/photos/hero.png` s'écrit
+`src="/assets/photos/hero.png"`, partout et sans exception. Le préfixe n'est
+**pas** ajouté pour vous — une URL écrite sans lui (`src="/hero.png"`) ne
+désigne aucun fichier du site et provoque un avertissement au build :
+
+```
+warning[assets]: <img webc:img src="/hero.png"> — les fichiers de public/ sont
+servis sous /assets/. Écrivez src="/assets/hero.png" ; sinon : pas de
+dimensions, pas de srcset, et une 404 à l'affichage.
 ```
 
 ### Sortie compilée
 
 ```html
-<img src="/assets/hero.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">
+<img src="/assets/hero.7f3c1a90.png" loading="lazy" decoding="async" width="1200" height="630" alt="Hero">
 ```
 
 - `loading="lazy"` et `decoding="async"` sont **toujours** injectés sur tout `img` portant `webc:img`
 - `width` et `height` sont lus depuis le fichier réel dans `public/` — le crate `imagesize` extrait les dimensions sans décoder l'image entière
-- `src` pointe vers `dist/assets/` (le préfixe `/assets/` est appliqué automatiquement)
+- `src` est réécrit vers le nom fingerprinté du fichier, comme toute référence `/assets/…` (voir [Fingerprinting des images](#fingerprinting-des-images))
 - L'attribut `webc:img` est **supprimé** de la sortie HTML — ce n'est pas un attribut HTML valide
 
 ### Avertissement `alt` manquant
@@ -2316,10 +2555,17 @@ Le même algorithme déterministe est utilisé pour les IDs de scope CSS (`data-
 
 ### Réécriture des références
 
-Toutes les occurrences de `logo.png` dans les fichiers `.html` et `.css` générés sont remplacées par `logo.a3f9c1b2.png` avant l'écriture sur disque. Cela couvre :
+Les références `/assets/logo.png` des fichiers `.html` et `.css` générés sont
+remplacées par `/assets/logo.a3f9c1b2.png` avant l'écriture sur disque. Cela
+couvre :
 
-- Les attributs `src` et `href` dans le HTML
-- Les propriétés `url(...)` dans le CSS (images de fond, etc.)
+- Les **valeurs d'attributs** du HTML — `src`, `href`, `srcset`, `content`, `data-webcore-fattr-*`…
+- Les propriétés `url(...)` du CSS (images de fond, etc.), y compris en CSS inliné
+
+La réécriture ne touche **que** les endroits où une référence peut vivre : le
+texte d'une page est du contenu, pas une référence. Une page de documentation
+qui cite `/assets/logo.png` dans un bloc de code garde le chemin qu'elle a
+écrit.
 
 ### Cache-busting parfait
 
@@ -2957,6 +3203,139 @@ quelques Ko de HTML pur par article.
 
 ---
 
+### Collections de données en page — `@for … in <import>`
+
+Là où `each` génère **une page par élément**, on peut aussi **itérer une
+collection de données au sein d'une même page** : le compilateur déplie le
+`@for` **à la compilation** et écrit du HTML statique (zéro JS, zéro
+`<template>` runtime).
+
+```webc
+import projects from "data/projects.json"
+
+page "home" {
+    section class="grid" {
+        @for project in projects {
+            article class="card" {
+                h3 "{project.title}"
+                p "{project.summary}"
+                a href={project.url} { "Voir le projet" }
+            }
+        }
+    }
+}
+```
+
+```json
+// data/projects.json — un tableau JSON d'objets
+[
+  {"title": "Alpha", "summary": "…", "url": "/p/alpha"},
+  {"title": "Beta",  "summary": "…", "url": "/p/beta"}
+]
+```
+
+À `webc build`, chaque `{project.champ}` devient du texte statique, chaque
+`attr={project.champ}` un attribut statique — le runtime ne voit jamais la
+boucle. Détails :
+
+- La donnée doit être **un tableau JSON** (ou, pour un `.toml` en
+  *array-of-tables*, un objet à un seul champ tableau).
+- Champs imbriqués (`{project.meta.year}`) et variable d'index
+  (`@for p, i in projects`) supportés.
+- Les références `project.champ` dans les conditions `@if`, les handlers
+  `on:*` et autres expressions sont remplacées par les valeurs littérales de
+  l'élément.
+- Une boucle `@for x in <state>` (variable d'état réactive) reste **runtime**
+  comme avant — seule une itérable liée à un **import de données** est dépliée
+  au build.
+
+---
+
+### Markdown — `markdown "fichier.md"`
+
+Inline un fichier Markdown **rendu en HTML à la compilation** (CommonMark +
+tables, strikethrough, task lists, notes de bas de page). Le chemin est relatif
+à la racine du projet.
+
+```webc
+page "article" {
+    article class="prose" {
+        markdown "content/post.md"
+    }
+}
+```
+
+- Le HTML généré est **statique** (zéro JS) et insété tel quel.
+- Un bloc de **front-matter** en tête (`---\n…\n---` ou `+++\n…\n+++`) est
+  retiré avant le rendu (il ne s'affiche pas).
+- Combiné aux collections de données et aux collections SSG (`each`), on peut
+  générer un blog / des études de cas dirigés par des fichiers `.md`.
+
+---
+
+### Images responsives — `[images]`
+
+Une section `[images]` fait générer, au build, des **variantes redimensionnées**
+des images matricielles (`webc:img`) et émet un `srcset` responsive.
+
+```toml
+[images]
+widths = [480, 960, 1440]   # largeurs cibles (px) — variantes < largeur source
+sizes  = "100vw"            # attribut `sizes` émis avec le srcset (défaut : 100vw)
+```
+
+```webc
+img webc:img src="/hero.png" alt="…"
+```
+
+Produit (pour une source de 1600 px de large) :
+
+```html
+<img src="/hero.png" alt="…" loading="lazy" decoding="async"
+     width="1600" height="900"
+     srcset="/assets/hero-480w.png 480w, /assets/hero-960w.png 960w,
+             /assets/hero-1440w.png 1440w, /assets/hero.png 1600w"
+     sizes="100vw">
+```
+
+- Variantes générées dans le **format d'origine** (PNG/JPEG) via
+  redimensionnement Lanczos ; le ratio est préservé.
+- Seules les largeurs **strictement inférieures** à la source sont produites
+  (pas d'agrandissement) ; les images vectorielles (`svg`) sont ignorées.
+- **Hors périmètre v1** : conversion WebP/AVIF (piste suivante — encodeurs plus
+  lourds à intégrer).
+
+---
+
+### Flux RSS — `[feed]`
+
+Dans la lignée du `sitemap.xml`, une section `[feed]` dans `webc.toml` fait
+générer `dist/feed.xml` (RSS 2.0) à partir d'une collection de données. Requiert
+une `url` de site (les liens du flux doivent être absolus).
+
+```toml
+[app]
+title = "Mon blog"
+url   = "https://example.com"
+
+[feed]
+collection    = "posts"        # nom de l'import de données (obligatoire)
+description   = "Derniers articles"
+title_field   = "title"        # défaut : "title"
+link_field    = "slug"         # défaut : "url"
+link_prefix   = "/post/"       # défaut : "" — préfixe du lien de l'item
+date_field    = "date"         # défaut : "date" (tri décroissant, ISO-8601)
+summary_field = "summary"      # défaut : "summary"
+limit         = 20             # optionnel — les N plus récents
+```
+
+- Lien d'un item = `url + link_prefix + <valeur de link_field>`.
+- Les items sont triés par `date_field` **décroissant** et tronqués à `limit`.
+- Un `<link rel="alternate" type="application/rss+xml" href="/feed.xml">`
+  d'auto-découverte est injecté dans le `<head>` de chaque page.
+
+---
+
 ### Résolution des imports de données au build
 
 Les déclarations `import name from "file.json"` sont désormais réellement résolues
@@ -2990,6 +3369,30 @@ Depuis v2.5.0, les handlers d'événements ne sont plus émis comme attributs HT
 Un unique `document.addEventListener` par type d'événement est enregistré dans le runtime JS via délégation. Cela rend le HTML entièrement compatible avec `script-src 'self'` — plus aucun JS inline.
 
 > La **syntaxe `.webc` ne change pas** : `on:click`, `on:submit`, `on:change` etc. fonctionnent exactement pareil pour le développeur. Seul le HTML généré change.
+
+#### Clé de délégation : l'`id` de l'élément
+
+Les gestionnaires sont stockés dans la table `H` sous la clé
+`<id de l'élément>@<type d'événement>`, et `D()` la résout à partir de
+`el.id`. Conséquences :
+
+- **Un `id` écrit par l'auteur est réutilisé** comme clé — le compilateur n'en
+  génère un (`p0btn3`) que si l'élément n'en a pas. Un élément ne porte donc
+  jamais deux attributs `id`.
+- **Plusieurs types d'événements** sur un même élément coexistent :
+  `data-webcore-e="input,blur"` les liste tous, chacun avec ses propres
+  modificateurs (`data-webcore-e="input,click|stop"`).
+- **Un seul gestionnaire par (élément, type d'événement)**. `bind:value`
+  s'ajoutant à un `on:input` existant, l'affectation d'état est **fusionnée en
+  tête** du gestionnaire de l'auteur :
+
+  ```webc
+  textarea bind:value={message} on:input={count = event.target.value.length} {}
+  // → H["msg@input"] : message = event.target.value; count = event.target.value.length
+  ```
+
+- **`id={expr}` dynamique + gestionnaires = incompatible** : l'`id` réécrit au
+  runtime casserait la résolution. Le compilateur émet un avertissement.
 
 ### Navigation SPA `data-webcore-nav`
 

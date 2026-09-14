@@ -9,6 +9,726 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [4.2.1]
+
+### Corrigé — `@for`
+
+- **Expressions calculées sur la variable de boucle : du vide silencieux** — le
+  correctif précédent (« variable de boucle dans les interpolations &
+  attributs ») avait laissé une seconde version du bug. `is_loop_scoped` décidait
+  par un test de préfixe (`expr.starts_with("post.")`) tandis que
+  `resolveScoped`, à l'exécution, découpe tout ce qui suit le nom de l'item sur
+  les points et marche l'objet segment par segment. Les deux s'accordaient sur
+  `{post.title}` et divergeaient partout ailleurs : `{post.likes + 1}` était émis
+  tel quel, puis cherché comme une propriété littéralement nommée `likes + 1`,
+  introuvable, convertie en chaîne vide — sans erreur, sans avertissement, nulle
+  part. Un bug bruyant (`ReferenceError`) était devenu un bug silencieux.
+  Les deux côtés partagent désormais **une seule définition** de la forme
+  résoluble — `is_property_path_on` côté compilateur, un test de segment côté
+  runtime : l'item ou l'index seul, ou des accès de propriété simples
+  (`post`, `i`, `post.title`, `post.author.name`, `post.tags.length`).
+- **Une forme non résoluble est signalée au build** — `warning[for]` nomme la
+  variable, la forme écrite, et les formes qui marchent. Elle reste émise telle
+  quelle plutôt que compilée en fermeture globale : une fermeture sur une
+  variable de boucle lève, et une exception non rattrapée dans le `forEach` du
+  binder emporterait le reste des liaisons de la page. Le dégât reste sur
+  l'élément concerné, et l'auteur est prévenu avant la mise en ligne.
+- **`resolveScoped` refuse ce qu'il ne peut pas marcher** — il valide chaque
+  segment du chemin avant de descendre et renvoie son sentinelle
+  *non-applicable* sinon, au lieu d'écrire une chaîne vide par-dessus l'élément.
+- Sans effet sur les `@for` sur un **import de données**, dépliés à la
+  compilation : les valeurs y sont substituées avant la génération, et les
+  expressions ordinaires continuent de s'y appliquer (`{post.likes + 1}` rend
+  `5`). Limite documentée dans `docs/spec.md`.
+
+### Corrigé — assets
+
+- **`webc:img` : dimensions et URL fonctionnelle n'étaient plus exclusives** —
+  deux passes traduisaient une URL en chemin de fichier, et pas de la même
+  manière : la réécriture des références lisait `/assets/X` comme `public/X`, la
+  lecture des dimensions lisait `/X` comme `public/X`. L'auteur devait choisir
+  laquelle satisfaire — `src="/photos/hero.png"` donnait les dimensions et une
+  404, `src="/assets/hero.png"` une URL correcte et aucune dimension. Les deux
+  passent désormais par `core::asset_url` (`public_rel_from_url` /
+  `url_from_public_rel`), seule définition de la règle « `public/` est servi sous
+  `/assets/` » ; elle rejette aussi les segments `..`, puisqu'elle alimente un
+  `Path::join`. Une URL sans le préfixe qui désigne un fichier réel de `public/`
+  déclenche un `warning[assets]` qui **nomme la forme qui marche**, au lieu
+  d'échouer deux fois en silence.
+- **`srcset` : l'entrée pleine résolution renvoyait une 404** — elle nommait
+  l'image source, présente dans `dist/` uniquement sous son nom fingerprinté.
+  `apply_responsive_srcset` s'exécute maintenant **avant** `rewrite_asset_refs`,
+  qui transforme cette URL en fichier réellement présent ; les variantes
+  générées ne portent pas de hash et sont laissées telles quelles.
+- **La réécriture des références ne réécrit plus le texte des pages** — c'était
+  un `String::replace` sur le fichier entier : une page documentant le pipeline
+  d'assets voyait le `/assets/hero.png` de son propre exemple de code remplacé
+  en silence par le nom haché. La réécriture ne s'applique plus qu'aux valeurs
+  d'attributs et aux `url(...)` du CSS inliné.
+- **La documentation promettait une réécriture qui n'existait pas** — la spec
+  annonçait « le préfixe `/assets/` est appliqué automatiquement » et l'exemple
+  de `examples/docs` montrait `src="/hero.png"` → `src="/assets/hero.png"`.
+  Aucune passe ne l'a jamais fait ; c'est de là que venaient les deux
+  conventions. Spec et exemple corrigés.
+
+### Corrigé — sécurité
+
+- **`webc dev --host` n'était qu'un affichage** — la valeur servait uniquement à
+  composer les URL du bandeau de démarrage ; les deux écoutes (serveur HTTP et
+  socket HMR) restaient câblées sur `0.0.0.0`. `webc dev --host 127.0.0.1`
+  affichait donc une adresse de loopback rassurante tout en continuant de
+  répondre à toutes les machines du réseau. `--host` décide désormais de
+  l'adresse réellement écoutée, pour le HTTP **comme pour le WebSocket**.
+  Le défaut reste `0.0.0.0` (URL réseau + QR code inchangés) ; une adresse de
+  loopback n'affiche plus ni URL réseau ni QR code, puisque le serveur n'y répond
+  pas. Une valeur qui n'est pas une IP littérale (`localhost`) ou qui n'est portée
+  par aucune interface échoue au démarrage avec un message explicite, au lieu de
+  retomber silencieusement sur le joker — `resolve_bind_ip()` + `format_host()`
+  (crochets IPv6 dans les URL), 4 tests
+
+### Corrigé — tests
+
+- **Suite de tests non compilable** — `seo_tests` importait `Pwa` depuis
+  `super::` alors que la structure vit dans `cli::config` ; `cargo test` échouait
+  à la compilation sur l'ensemble du crate
+
+---
+
+## [4.2.1]
+
+### Corrigé — délégation d'événements & réactivité
+
+- **`id` auteur écrasé par l'`id` généré** — un élément portant à la fois un
+  `id="…"` et un gestionnaire (`on:click`, ou l'`on:input` produit par
+  `bind:value`) recevait un **second** attribut `id` généré. Le navigateur ne
+  garde que le premier, si bien que `H[el.id]` ne trouvait rien : **aucun**
+  gestionnaire ne se déclenchait sur ces éléments (un formulaire avec des
+  `id` sur ses champs restait totalement inerte, `bind:value` compris).
+  L'`id` de l'auteur sert désormais de clé de délégation ; aucun `id` n'est
+  généré dans ce cas. Un `id={expr}` dynamique sur un élément à gestionnaires
+  émet un avertissement de compilation (l'id runtime casserait la délégation).
+- **Plusieurs événements sur un même élément** — les gestionnaires sont
+  désormais indexés `<id élément>@<type d'événement>` et `data-webcore-e`
+  liste tous les types (`data-webcore-e="input,blur"`). Auparavant un élément
+  avec deux `on:` (ex. `bind:value` + `on:blur`) émettait deux `id` et deux
+  `data-webcore-e` en double : seul le premier survivait au parsing HTML et
+  l'autre gestionnaire était perdu. Le modificateur `|once` est maintenant
+  suivi par type d'événement.
+- **`bind:value` + `on:input` sur le même élément** — l'affectation d'état est
+  fusionnée dans le gestionnaire de l'auteur (`état = event.target.value;
+  <code auteur>`) au lieu d'émettre un second `on:input` concurrent. Un
+  compteur de caractères `on:input={n = event.target.value.length}` posé à côté
+  d'un `bind:value` fonctionne. Les gestionnaires `|debounce` restent séparés
+  (les fusionner retarderait la mise à jour de l'état).
+- **`computed` non recalculé dans les effets réactifs** — les valeurs
+  `computed` sont écrites via `setQ` (silencieux) : un `@if computedVar`, un
+  `class:x={computedVar}` ou un attribut dynamique lisant une valeur dérivée
+  ne se mettait donc **jamais** à jour. `bindIf`, `bindAttrs` et
+  `bindClassBindings` recalculent désormais les `computed` **dans** leur effet,
+  comme le fait déjà `bind()` — l'effet dépend alors de l'état source.
+
+### Ajouté — i18n
+
+- **Fusion de plusieurs fichiers TOML par langue** — un même code de langue peut
+  désormais être alimenté par plusieurs fichiers : `locales/fr.toml`
+  (écrit à la main) **et** `locales/fr.projects.toml` (généré par un outil
+  externe) fusionnent dans la même map `fr`. Le code de langue est la partie du
+  nom de fichier **avant le premier `.`** — `fr.toml` continue de marcher tel
+  quel. Les fichiers sont chargés par ordre alphabétique (fusion déterministe) ;
+  en cas de collision de clé, **le dernier chargé gagne** et un **avertissement**
+  nomme les deux fichiers (une clé générée qui masque une clé écrite à la main
+  se voit). Corrige deux bugs : `fr.projects.toml` créait auparavant une langue
+  `fr.projects` (et, sous `[i18n] static`, un site `/fr.projects/` fantôme avec
+  hreflang/sitemap) ; `{$build.locales}` reste juste (compte `fr` une fois).
+
+### Corrigé — runtime
+
+- **`@for` runtime : variable de boucle dans les interpolations & attributs** —
+  un `@for item in <état/http>` rendait des cartes vides + `ReferenceError:
+  item is not defined`. Les interpolations et attributs scopés-boucle
+  (`{item.title}`, `href={item.url}`) émettaient un ID de closure global `_e`
+  évalué en portée globale (sans `item`). Ils émettent désormais l'expression
+  brute (`data-webcore-interpolation="item.title"`,
+  `data-webcore-fattr-href="item.url"`), résolue par item par `fillItem` ;
+  le binder global ignore ces spans. Les attributs par item sont maintenant
+  gérés (ils ne l'étaient pas). L'exemple `@for post in posts` de la spec
+  fonctionne.
+
+### Ajouté / Corrigé — head & build
+
+- **Variables de build gzippées** — `{$build.jsGzipKb}`, `{$build.cssGzipKb}`,
+  `{$build.totalGzipKb}` (+ `…GzipBytes`) exposent la taille **gzippée** (poids
+  réellement transféré), en plus des tailles minifiées. Un pied de page « ~N kB
+  de JS (gzip) » redevient exact et auto-maintenu.
+- **theme-color PWA : la page l'emporte** — le module `[pwa]` n'émet plus son
+  propre `<meta name="theme-color">` lorsque le `head` en déclare déjà un (ex.
+  variantes `media` clair/sombre) ; auparavant le meta PWA, émis en dernier,
+  les écrasait systématiquement. Les autres balises PWA restent inchangées.
+
+### Ajouté — head, build & runtime
+
+- **jsonld imbriqué (objets & tableaux)** (#2) — les valeurs `jsonld` sont
+  désormais récursives (scalaire, objet, tableau), permettant une fiche
+  Schema.org complète statique (`address: { … }`, `sameAs: [ … ]`). Émis dans
+  l'ordre d'écriture, échappement via `serde_json`, interpolations `{t()}`
+  résolues. Remplace l'injection JS runtime invisible aux crawlers.
+- **`meta` multi-attributs** (#3) — `meta key = "valeur"` accepte des attributs
+  additionnels (comme `link`), ex. `meta theme-color="#fff"
+  media="(prefers-color-scheme: light)"` — deux `theme-color` clair/sombre
+  coexistent.
+- **Variables de build `{$build.*}`** (#4) — `{$build.pages}`, `{$build.jsKb}`,
+  `{$build.totalKb}`… résolues en texte statique aux vraies stats de build
+  (pages, composants, locales, tailles JS/CSS). Un pied de page « ~N kB de JS /
+  M pages » devient littéralement exact et auto-maintenu.
+- **Transitions de page** (#5) — `[app] view_transitions = true` enveloppe la
+  navigation SPA dans `document.startViewTransition()` (cross-fade animé),
+  avec repli propre si l'API est absente ; zéro coût si désactivé.
+
+### Corrigé
+
+- **`webc check` : faux positifs d'assets orphelins** (#1) — un favicon déclaré
+  dans `src/app.webc` et une feuille `public/*.css` auto-injectée ne sont plus
+  signalés orphelins (corrige un échec `webc check --strict` en CI).
+
+### Amélioré — collections & validation
+
+- **`webc check` : assets référencés depuis `data/*`** — le détecteur d'assets
+  orphelins scanne désormais aussi les fichiers de `data/` (JSON/TOML), donc un
+  asset utilisé uniquement dans un champ de collection (ex. `webcore.png` via
+  `image: "/webcore.png"`) n'est plus signalé orphelin à tort.
+- **Pliage `@if` : truthiness d'une chaîne/valeur nue** — `eval_literal_cond`
+  gère maintenant une condition réduite à un seul littéral (`@if item.thumb` →
+  `"thumb.png"` vrai, `""` faux, `0` faux), en plus des comparaisons.
+- **Interpolation dans les valeurs `validate:*`** — `{t("clé")}` (et
+  interpolations en général) sont désormais résolues par locale au build dans
+  les messages de validation, avec dé-échappement des littéraux (`\"` → `"`).
+- **Pliage des `@if` littéraux après dépliage d'une collection** — quand une
+  condition `@if` devient une constante après substitution des champs de
+  l'élément (ex. `item.featured == true` → `true`), la branche est **pliée au
+  build** (seule la branche prise est émise, plus de binding runtime).
+- **`@for` imbriqués sur les sous-tableaux d'une collection** — `@for tag in
+  item.tags` est déplié statiquement au build (une fois par sous-élément),
+  comme les collections de premier niveau.
+- **Échappement HTML de `data-webcore-in`** (et du nom d'item / conteneur) dans
+  les boucles `@for` — corrige une valeur d'attribut non échappée.
+
+### Ajouté — bibliothèque standard (4.1)
+
+- **Fonctions natives — `math.*`** (#57 · #58 · #59) — début de la bibliothèque
+  standard WebCore. Des fonctions namespacées utilisables dans les
+  interpolations/expressions : `math.round`, `math.floor`, `math.ceil`,
+  `math.clamp`, `math.pow`, `math.sqrt`, `math.sign`, `math.hypot`. Trois
+  garanties : **CSP-safe** (compilées en helpers runtime, jamais d'`eval`),
+  **tree-shakées** (seuls les helpers réellement utilisés sont émis), et
+  **pliables en SSG** (un appel à arguments statiques comme `math.round(2.4)`
+  est pré-calculé au build → zéro JS). Un registre unique
+  (`core/builtins.rs`) alimente à la fois le compilateur d'expressions et
+  l'évaluateur SSG ; les namespaces `str.*` / `fmt.*` / `arr.*` s'y grefferont.
+- **Fonctions natives — `str.*`** (#60) — transformations de texte
+  déterministes : `str.upper`, `str.lower`, `str.capitalize`, `str.trim`,
+  `str.slugify`, `str.truncate(s, n)`, `str.repeat(s, n)`. Mêmes garanties que
+  `math.*` (CSP-safe, tree-shakées, pliables en SSG — `str.slugify("Hello,
+  World!")` est pré-calculé en `hello-world` au build). Le découpage des
+  arguments respecte désormais les littéraux de chaîne (une virgule entre
+  guillemets n'est plus prise pour un séparateur).
+- **Fonctions natives — `fmt.*`** (#61) — formatage sensible à la locale via
+  `Intl` : `fmt.number`, `fmt.currency(n, "EUR")`, `fmt.percent`,
+  `fmt.date`. Ces fonctions dépendent de la locale active (`LOCALE`), donc
+  elles restent **runtime-only** (jamais pliées en SSG) et retombent
+  proprement sur la locale par défaut de l'environnement quand l'i18n n'est
+  pas configurée.
+- **Fonctions natives — `arr.*`** (#62) — helpers de tableaux : `arr.sum`,
+  `arr.first`, `arr.last`, `arr.unique`, `arr.sort`, `arr.reverse`,
+  `arr.join(a, sep)`. Runtime-only (les tableaux ne font pas partie de l'état
+  SSG), toujours tree-shakés.
+
+### Corrigé — qualité de sortie
+
+- **Validateur CSS : faux positifs supprimés** (#63) — des propriétés
+  parfaitement standard (`inset`, `backdrop-filter`, `filter`, `user-select`,
+  `tab-size`, `background-clip`, et une large série de propriétés modernes)
+  déclenchaient `warning[css]: unknown property`, noyant les vraies erreurs.
+  L'allowlist est élargie et les propriétés **préfixées vendeur** (`-webkit-`,
+  `-moz-`, …) ne warnent plus (au même titre que les custom properties `--*`).
+- **public/ : les docs internes ne sont plus déployées** (#64) — les fichiers
+  `.md` de `public/` (README internes…) étaient copiés dans `dist/`. Ils sont
+  désormais exclus de la copie (avec une ligne d'info récapitulative).
+- **Assets fingerprintés dédupliqués** (#65) — chaque image se retrouvait en
+  double dans `dist/` (`logo.svg` **et** `logo.<hash>.svg`), doublant le poids
+  déployé. L'image n'est plus émise qu'une fois, sous sa forme content-hashée
+  (les références étant déjà réécrites vers le nom hashé).
+
+### Ajouté — Performance
+
+- **Images responsives au build** (#74) — une section `[images] widths = […]`
+  fait générer des variantes redimensionnées (format d'origine, ratio préservé,
+  filtre Lanczos) pour les sources `webc:img` matricielles, et émet un `srcset`
+  + `sizes`. Seules les largeurs inférieures à la source sont produites ; les
+  `svg` sont ignorés. Conversion WebP/AVIF hors périmètre v1.
+
+### Ajouté — Contenu
+
+- **Support Markdown** (#73) — un élément `markdown "fichier.md"` rend un
+  fichier Markdown en HTML **à la compilation** (CommonMark + tables,
+  strikethrough, task lists, notes de bas de page, via `pulldown-cmark`) et
+  l'inline comme contenu statique. Le front-matter (`---`/`+++`) en tête est
+  retiré. Combiné aux collections, c'est le chaînon pour un vrai SSG de
+  contenu (blog, études de cas).
+- **Génération de flux RSS** (#69) — une section `[feed]` dans `webc.toml` fait
+  générer `dist/feed.xml` (RSS 2.0) à partir d'une collection de données
+  (import), avec mapping des champs (`title_field`, `link_field`,
+  `date_field`, `summary_field`, `link_prefix`, `limit`). Items triés du plus
+  récent au plus ancien, liens absolus (requiert `url`), et un
+  `<link rel="alternate" type="application/rss+xml">` d'auto-découverte injecté
+  dans chaque `<head>`.
+- **Collections de données en page** (#72) — `@for item in <import>`, où
+  l'itérable est un **import de données build-time** (`import projects from
+  "data/projects.json"`), est **déplié à la compilation** en HTML statique :
+  `{item.champ}` devient du texte, `attr={item.champ}` un attribut statique, et
+  les références dans les `@if`/handlers sont remplacées par les valeurs de
+  l'élément. Zéro JS, zéro `<template>` runtime — idéal pour des cartes projets
+  / une grille de contenu générées depuis une source de données. Supporte les
+  champs imbriqués, la variable d'index, et les tableaux JSON comme les
+  `.toml` en array-of-tables. Une boucle sur une variable d'**état** reste
+  runtime comme avant.
+
+### Ajouté — DX (`webc check`)
+
+- **Vérification i18n : parité des locales + `t()` résolvables** (#70) —
+  `webc check` signale désormais (a) toute clé déclarée dans une locale mais
+  absente d'une autre (`i18n-parity`) et (b) tout `t("clé")` du code (vues,
+  attributs, `head`) référençant une clé définie dans aucune locale
+  (`i18n-missing-key`, tolère les variantes plurielles `_one`/`_other`). Ce
+  sont des **avertissements** (n'échouent qu'avec `--strict`). Au passage, les
+  messages « Loaded locale » passent sur `stderr` pour ne plus polluer la
+  sortie JSON de `webc check --json`.
+- **Détection d'assets orphelins** (#71) — `webc check` signale les fichiers de
+  `public/` référencés nulle part dans les sources (`orphan-asset`,
+  best-effort : matching par nom de fichier pour éviter les faux positifs, les
+  `.md` internes sont ignorés). Avertissement, n'échoue qu'avec `--strict`.
+
+### Ajouté — SEO / i18n dans le `head`
+
+- **Interpolation `{t()}` dans `head`** (#66) — les valeurs de `title` et `meta`
+  acceptent les interpolations et sont résolues **par locale au build** (SSG).
+  Avec `[i18n] static=true`, chaque page localisée reçoit des `<title>`/`<meta>`
+  réellement traduits et indexables (fini les metas en langue par défaut sur
+  les pages `/en/`).
+- **Item `link` générique dans `head`** (#67) — `link rel="preload" href="…"
+  as="font"`, `link rel="alternate" type="application/rss+xml" href="/feed.xml"`,
+  `rel="me"`… émis tels quels en `<link>` (ordre des attributs préservé).
+  Auparavant seul `favicon` pouvait produire un `<link>`.
+- **JSON-LD déclaratif dans `head`** (#68) — un bloc `jsonld { "@type": "…"
+  name: "…" }` est sérialisé en `<script type="application/ld+json">` **dans le
+  HTML statique** (visible des crawlers sans JS). Clés/valeurs échappées via
+  `serde_json`, ordre des clés préservé, valeurs interpolables (`{t()}`).
+
+---
+
+## [4.1.0]
+
+### Corrigé — délégation d'événements & réactivité
+
+- **`id` auteur écrasé par l'`id` généré** — un élément portant à la fois un
+  `id="…"` et un gestionnaire (`on:click`, ou l'`on:input` produit par
+  `bind:value`) recevait un **second** attribut `id` généré. Le navigateur ne
+  garde que le premier, si bien que `H[el.id]` ne trouvait rien : **aucun**
+  gestionnaire ne se déclenchait sur ces éléments (un formulaire avec des
+  `id` sur ses champs restait totalement inerte, `bind:value` compris).
+  L'`id` de l'auteur sert désormais de clé de délégation ; aucun `id` n'est
+  généré dans ce cas. Un `id={expr}` dynamique sur un élément à gestionnaires
+  émet un avertissement de compilation (l'id runtime casserait la délégation).
+- **Plusieurs événements sur un même élément** — les gestionnaires sont
+  désormais indexés `<id élément>@<type d'événement>` et `data-webcore-e`
+  liste tous les types (`data-webcore-e="input,blur"`). Auparavant un élément
+  avec deux `on:` (ex. `bind:value` + `on:blur`) émettait deux `id` et deux
+  `data-webcore-e` en double : seul le premier survivait au parsing HTML et
+  l'autre gestionnaire était perdu. Le modificateur `|once` est maintenant
+  suivi par type d'événement.
+- **`bind:value` + `on:input` sur le même élément** — l'affectation d'état est
+  fusionnée dans le gestionnaire de l'auteur (`état = event.target.value;
+  <code auteur>`) au lieu d'émettre un second `on:input` concurrent. Un
+  compteur de caractères `on:input={n = event.target.value.length}` posé à côté
+  d'un `bind:value` fonctionne. Les gestionnaires `|debounce` restent séparés
+  (les fusionner retarderait la mise à jour de l'état).
+- **`computed` non recalculé dans les effets réactifs** — les valeurs
+  `computed` sont écrites via `setQ` (silencieux) : un `@if computedVar`, un
+  `class:x={computedVar}` ou un attribut dynamique lisant une valeur dérivée
+  ne se mettait donc **jamais** à jour. `bindIf`, `bindAttrs` et
+  `bindClassBindings` recalculent désormais les `computed` **dans** leur effet,
+  comme le fait déjà `bind()` — l'effet dépend alors de l'état source.
+
+### Ajouté — i18n
+
+- **Fusion de plusieurs fichiers TOML par langue** — un même code de langue peut
+  désormais être alimenté par plusieurs fichiers : `locales/fr.toml`
+  (écrit à la main) **et** `locales/fr.projects.toml` (généré par un outil
+  externe) fusionnent dans la même map `fr`. Le code de langue est la partie du
+  nom de fichier **avant le premier `.`** — `fr.toml` continue de marcher tel
+  quel. Les fichiers sont chargés par ordre alphabétique (fusion déterministe) ;
+  en cas de collision de clé, **le dernier chargé gagne** et un **avertissement**
+  nomme les deux fichiers (une clé générée qui masque une clé écrite à la main
+  se voit). Corrige deux bugs : `fr.projects.toml` créait auparavant une langue
+  `fr.projects` (et, sous `[i18n] static`, un site `/fr.projects/` fantôme avec
+  hreflang/sitemap) ; `{$build.locales}` reste juste (compte `fr` une fois).
+
+### Corrigé — runtime
+
+- **`@for` runtime : variable de boucle dans les interpolations & attributs** —
+  un `@for item in <état/http>` rendait des cartes vides + `ReferenceError:
+  item is not defined`. Les interpolations et attributs scopés-boucle
+  (`{item.title}`, `href={item.url}`) émettaient un ID de closure global `_e`
+  évalué en portée globale (sans `item`). Ils émettent désormais l'expression
+  brute (`data-webcore-interpolation="item.title"`,
+  `data-webcore-fattr-href="item.url"`), résolue par item par `fillItem` ;
+  le binder global ignore ces spans. Les attributs par item sont maintenant
+  gérés (ils ne l'étaient pas). L'exemple `@for post in posts` de la spec
+  fonctionne.
+
+### Ajouté / Corrigé — head & build
+
+- **Variables de build gzippées** — `{$build.jsGzipKb}`, `{$build.cssGzipKb}`,
+  `{$build.totalGzipKb}` (+ `…GzipBytes`) exposent la taille **gzippée** (poids
+  réellement transféré), en plus des tailles minifiées. Un pied de page « ~N kB
+  de JS (gzip) » redevient exact et auto-maintenu.
+- **theme-color PWA : la page l'emporte** — le module `[pwa]` n'émet plus son
+  propre `<meta name="theme-color">` lorsque le `head` en déclare déjà un (ex.
+  variantes `media` clair/sombre) ; auparavant le meta PWA, émis en dernier,
+  les écrasait systématiquement. Les autres balises PWA restent inchangées.
+
+### Ajouté — head, build & runtime
+
+- **jsonld imbriqué (objets & tableaux)** (#2) — les valeurs `jsonld` sont
+  désormais récursives (scalaire, objet, tableau), permettant une fiche
+  Schema.org complète statique (`address: { … }`, `sameAs: [ … ]`). Émis dans
+  l'ordre d'écriture, échappement via `serde_json`, interpolations `{t()}`
+  résolues. Remplace l'injection JS runtime invisible aux crawlers.
+- **`meta` multi-attributs** (#3) — `meta key = "valeur"` accepte des attributs
+  additionnels (comme `link`), ex. `meta theme-color="#fff"
+  media="(prefers-color-scheme: light)"` — deux `theme-color` clair/sombre
+  coexistent.
+- **Variables de build `{$build.*}`** (#4) — `{$build.pages}`, `{$build.jsKb}`,
+  `{$build.totalKb}`… résolues en texte statique aux vraies stats de build
+  (pages, composants, locales, tailles JS/CSS). Un pied de page « ~N kB de JS /
+  M pages » devient littéralement exact et auto-maintenu.
+- **Transitions de page** (#5) — `[app] view_transitions = true` enveloppe la
+  navigation SPA dans `document.startViewTransition()` (cross-fade animé),
+  avec repli propre si l'API est absente ; zéro coût si désactivé.
+
+### Corrigé
+
+- **`webc check` : faux positifs d'assets orphelins** (#1) — un favicon déclaré
+  dans `src/app.webc` et une feuille `public/*.css` auto-injectée ne sont plus
+  signalés orphelins (corrige un échec `webc check --strict` en CI).
+
+### Amélioré — collections & validation
+
+- **`webc check` : assets référencés depuis `data/*`** — le détecteur d'assets
+  orphelins scanne désormais aussi les fichiers de `data/` (JSON/TOML), donc un
+  asset utilisé uniquement dans un champ de collection (ex. `webcore.png` via
+  `image: "/webcore.png"`) n'est plus signalé orphelin à tort.
+- **Pliage `@if` : truthiness d'une chaîne/valeur nue** — `eval_literal_cond`
+  gère maintenant une condition réduite à un seul littéral (`@if item.thumb` →
+  `"thumb.png"` vrai, `""` faux, `0` faux), en plus des comparaisons.
+- **Interpolation dans les valeurs `validate:*`** — `{t("clé")}` (et
+  interpolations en général) sont désormais résolues par locale au build dans
+  les messages de validation, avec dé-échappement des littéraux (`\"` → `"`).
+- **Pliage des `@if` littéraux après dépliage d'une collection** — quand une
+  condition `@if` devient une constante après substitution des champs de
+  l'élément (ex. `item.featured == true` → `true`), la branche est **pliée au
+  build** (seule la branche prise est émise, plus de binding runtime).
+- **`@for` imbriqués sur les sous-tableaux d'une collection** — `@for tag in
+  item.tags` est déplié statiquement au build (une fois par sous-élément),
+  comme les collections de premier niveau.
+- **Échappement HTML de `data-webcore-in`** (et du nom d'item / conteneur) dans
+  les boucles `@for` — corrige une valeur d'attribut non échappée.
+
+### Ajouté — bibliothèque standard (4.1)
+
+- **Fonctions natives — `math.*`** (#57 · #58 · #59) — début de la bibliothèque
+  standard WebCore. Des fonctions namespacées utilisables dans les
+  interpolations/expressions : `math.round`, `math.floor`, `math.ceil`,
+  `math.clamp`, `math.pow`, `math.sqrt`, `math.sign`, `math.hypot`. Trois
+  garanties : **CSP-safe** (compilées en helpers runtime, jamais d'`eval`),
+  **tree-shakées** (seuls les helpers réellement utilisés sont émis), et
+  **pliables en SSG** (un appel à arguments statiques comme `math.round(2.4)`
+  est pré-calculé au build → zéro JS). Un registre unique
+  (`core/builtins.rs`) alimente à la fois le compilateur d'expressions et
+  l'évaluateur SSG ; les namespaces `str.*` / `fmt.*` / `arr.*` s'y grefferont.
+- **Fonctions natives — `str.*`** (#60) — transformations de texte
+  déterministes : `str.upper`, `str.lower`, `str.capitalize`, `str.trim`,
+  `str.slugify`, `str.truncate(s, n)`, `str.repeat(s, n)`. Mêmes garanties que
+  `math.*` (CSP-safe, tree-shakées, pliables en SSG — `str.slugify("Hello,
+  World!")` est pré-calculé en `hello-world` au build). Le découpage des
+  arguments respecte désormais les littéraux de chaîne (une virgule entre
+  guillemets n'est plus prise pour un séparateur).
+- **Fonctions natives — `fmt.*`** (#61) — formatage sensible à la locale via
+  `Intl` : `fmt.number`, `fmt.currency(n, "EUR")`, `fmt.percent`,
+  `fmt.date`. Ces fonctions dépendent de la locale active (`LOCALE`), donc
+  elles restent **runtime-only** (jamais pliées en SSG) et retombent
+  proprement sur la locale par défaut de l'environnement quand l'i18n n'est
+  pas configurée.
+- **Fonctions natives — `arr.*`** (#62) — helpers de tableaux : `arr.sum`,
+  `arr.first`, `arr.last`, `arr.unique`, `arr.sort`, `arr.reverse`,
+  `arr.join(a, sep)`. Runtime-only (les tableaux ne font pas partie de l'état
+  SSG), toujours tree-shakés.
+
+### Corrigé — qualité de sortie
+
+- **Validateur CSS : faux positifs supprimés** (#63) — des propriétés
+  parfaitement standard (`inset`, `backdrop-filter`, `filter`, `user-select`,
+  `tab-size`, `background-clip`, et une large série de propriétés modernes)
+  déclenchaient `warning[css]: unknown property`, noyant les vraies erreurs.
+  L'allowlist est élargie et les propriétés **préfixées vendeur** (`-webkit-`,
+  `-moz-`, …) ne warnent plus (au même titre que les custom properties `--*`).
+- **public/ : les docs internes ne sont plus déployées** (#64) — les fichiers
+  `.md` de `public/` (README internes…) étaient copiés dans `dist/`. Ils sont
+  désormais exclus de la copie (avec une ligne d'info récapitulative).
+- **Assets fingerprintés dédupliqués** (#65) — chaque image se retrouvait en
+  double dans `dist/` (`logo.svg` **et** `logo.<hash>.svg`), doublant le poids
+  déployé. L'image n'est plus émise qu'une fois, sous sa forme content-hashée
+  (les références étant déjà réécrites vers le nom hashé).
+
+### Ajouté — Performance
+
+- **Images responsives au build** (#74) — une section `[images] widths = […]`
+  fait générer des variantes redimensionnées (format d'origine, ratio préservé,
+  filtre Lanczos) pour les sources `webc:img` matricielles, et émet un `srcset`
+  + `sizes`. Seules les largeurs inférieures à la source sont produites ; les
+  `svg` sont ignorés. Conversion WebP/AVIF hors périmètre v1.
+
+### Ajouté — Contenu
+
+- **Support Markdown** (#73) — un élément `markdown "fichier.md"` rend un
+  fichier Markdown en HTML **à la compilation** (CommonMark + tables,
+  strikethrough, task lists, notes de bas de page, via `pulldown-cmark`) et
+  l'inline comme contenu statique. Le front-matter (`---`/`+++`) en tête est
+  retiré. Combiné aux collections, c'est le chaînon pour un vrai SSG de
+  contenu (blog, études de cas).
+- **Génération de flux RSS** (#69) — une section `[feed]` dans `webc.toml` fait
+  générer `dist/feed.xml` (RSS 2.0) à partir d'une collection de données
+  (import), avec mapping des champs (`title_field`, `link_field`,
+  `date_field`, `summary_field`, `link_prefix`, `limit`). Items triés du plus
+  récent au plus ancien, liens absolus (requiert `url`), et un
+  `<link rel="alternate" type="application/rss+xml">` d'auto-découverte injecté
+  dans chaque `<head>`.
+- **Collections de données en page** (#72) — `@for item in <import>`, où
+  l'itérable est un **import de données build-time** (`import projects from
+  "data/projects.json"`), est **déplié à la compilation** en HTML statique :
+  `{item.champ}` devient du texte, `attr={item.champ}` un attribut statique, et
+  les références dans les `@if`/handlers sont remplacées par les valeurs de
+  l'élément. Zéro JS, zéro `<template>` runtime — idéal pour des cartes projets
+  / une grille de contenu générées depuis une source de données. Supporte les
+  champs imbriqués, la variable d'index, et les tableaux JSON comme les
+  `.toml` en array-of-tables. Une boucle sur une variable d'**état** reste
+  runtime comme avant.
+
+### Ajouté — DX (`webc check`)
+
+- **Vérification i18n : parité des locales + `t()` résolvables** (#70) —
+  `webc check` signale désormais (a) toute clé déclarée dans une locale mais
+  absente d'une autre (`i18n-parity`) et (b) tout `t("clé")` du code (vues,
+  attributs, `head`) référençant une clé définie dans aucune locale
+  (`i18n-missing-key`, tolère les variantes plurielles `_one`/`_other`). Ce
+  sont des **avertissements** (n'échouent qu'avec `--strict`). Au passage, les
+  messages « Loaded locale » passent sur `stderr` pour ne plus polluer la
+  sortie JSON de `webc check --json`.
+- **Détection d'assets orphelins** (#71) — `webc check` signale les fichiers de
+  `public/` référencés nulle part dans les sources (`orphan-asset`,
+  best-effort : matching par nom de fichier pour éviter les faux positifs, les
+  `.md` internes sont ignorés). Avertissement, n'échoue qu'avec `--strict`.
+
+### Ajouté — SEO / i18n dans le `head`
+
+- **Interpolation `{t()}` dans `head`** (#66) — les valeurs de `title` et `meta`
+  acceptent les interpolations et sont résolues **par locale au build** (SSG).
+  Avec `[i18n] static=true`, chaque page localisée reçoit des `<title>`/`<meta>`
+  réellement traduits et indexables (fini les metas en langue par défaut sur
+  les pages `/en/`).
+- **Item `link` générique dans `head`** (#67) — `link rel="preload" href="…"
+  as="font"`, `link rel="alternate" type="application/rss+xml" href="/feed.xml"`,
+  `rel="me"`… émis tels quels en `<link>` (ordre des attributs préservé).
+  Auparavant seul `favicon` pouvait produire un `<link>`.
+- **JSON-LD déclaratif dans `head`** (#68) — un bloc `jsonld { "@type": "…"
+  name: "…" }` est sérialisé en `<script type="application/ld+json">` **dans le
+  HTML statique** (visible des crawlers sans JS). Clés/valeurs échappées via
+  `serde_json`, ordre des clés préservé, valeurs interpolables (`{t()}`).
+
+---
+
+## [4.0.0]
+
+- **PWA installable + hors-ligne** — une section `[pwa]` dans `webc.toml`
+  (opt-in) fait générer par `webc build`, à la racine de `dist/`, un
+  `manifest.webmanifest` (nom, couleurs, `display`, icônes fingerprintées) et un
+  `sw.js` (service worker offline, network-first + fallback cache). Le manifeste,
+  la `theme-color` et les balises Apple web-app (+ `apple-touch-icon`) sont
+  injectés dans chaque `<head>`, et l'enregistrement du service worker est ajouté
+  au runtime partagé. Le site devient installable (mobile/desktop) et consultable
+  hors-ligne. Icônes attendues dans `public/` (`icon-192.png`, `icon-512.png`,
+  `icon-maskable.png`, `apple-touch-icon.png`).
+
+- **`webc build --prod` / `--dev`** — override du mode de build en ligne de
+  commande, indépendamment du `mode` déclaré dans `webc.toml`. On garde
+  `mode = "dev"` (serveur de dev lisible, source maps) et on produit un build
+  déployable minifié avec `webc build --prod` (minification HTML/CSS/JS,
+  critical CSS inliné, renommage d'identifiants, SRI) — sans éditer la config.
+
+- **`webc check --a11y`** (#49) — lints d'accessibilité (RGAA/WCAG) intégrés au
+  compilateur : `<img>` sans alternative textuelle (1.1), `<label>` sans `for`
+  ni champ imbriqué (11.1), `<a>`/`<button>` sans intitulé accessible (6.1) —
+  avec position `fichier:ligne:colonne`. Les alternatives correctes (`alt=""`
+  décoratif, `aria-hidden`, `aria-label`, champ imbriqué…) ne sont pas signalées.
+  Sortie humaine ou `--json` (éditeurs/CI) ; avertissements par défaut, `--strict`
+  pour faire échouer la commande.
+
+- **Hydratation partielle (islands)** (#50) — directive `client="idle"` /
+  `client="visible"` sur une instance de composant pour différer sa réactivité.
+  Le composant est rendu statiquement (SSG) puis « hydraté » seulement au moment
+  choisi : `visible` via `IntersectionObserver` (au défilement à l'écran),
+  `idle` via `requestIdleCallback` (navigateur inoccupé). Tant que l'île n'est
+  pas hydratée, ses liaisons réactives (`bind`/`bindAttrs`/`bindIf`/`bindFor`/
+  classes) et son `on:mount` ne s'exécutent pas — le HTML pré-rendu reste
+  affiché et les gestionnaires d'événements (délégués au niveau du document)
+  continuent de fonctionner. La machinerie d'îles est entièrement tree-shakée
+  pour les projets qui n'utilisent pas la directive (runtime inchangé). Idéal
+  pour les composants lourds sous la ligne de flottaison (canvas, WebGL, listes).
+
+- **SSG i18n : une page statique par locale + `hreflang`** (#46) — option
+  d'activation `[i18n] static = true` dans `webc.toml`. `webc build` génère alors
+  une page par locale : la locale par défaut à la racine (`/`, `/about/`) et
+  chaque autre locale sous un préfixe `/{locale}/` (`/en/`, `/en/about/`). Chaque
+  page porte le bon `lang`, son contenu (`t(...)` et attributs interpolés) est
+  pré-rendu dans la langue voulue, et des balises
+  `<link rel="alternate" hreflang="…">` (une par locale + `x-default`) sont
+  émises. Le `sitemap.xml` liste toutes les URL localisées. Le runtime initialise
+  désormais sa locale depuis `<html lang>`, évitant le flash de langue à
+  l'hydratation d'une page `/en/`. (Les collections dynamiques `:slug` restent en
+  locale par défaut pour l'instant.)
+
+- **Attributs interpolés pré-rendus en SSG** (#45) — un attribut dynamique dont
+  l'expression est statiquement connue (`aria-label={t("nav_cv")}`,
+  `href={base}`…) est désormais émis avec sa valeur résolue dans le HTML généré,
+  à côté de la liaison `data-webcore-attr-*`. L'attribut est ainsi présent pour
+  les moteurs de recherche, les lecteurs d'écran et le premier rendu (sans JS) ;
+  le runtime continue de le mettre à jour de façon réactive (changement de
+  langue, état). Sans contexte SSG ou pour une expression non résoluble, seule
+  la liaison runtime est émise (aucune valeur statique erronée).
+
+### Corrections
+
+- **État réactif scopé par composant** (#42) — le runtime utilisait un store
+  global indexé par le nom brut de la variable d'état, si bien que deux
+  composants déclarant un état de même nom (`open`) se marchaient dessus (ex. un
+  menu burger qui ouvrait aussi une palette de commandes). Une passe AST
+  (`core::scope`) exécutée avant la génération réécrit désormais chaque référence
+  à l'état/computed *local* d'un composant vers une clé unique `<Composant>__<var>`
+  — y compris dans le code `on:mount` (`S.get('x')` / `S.set('x', …)`). Le
+  `$store` global reste partagé. Golden test de non-collision ajouté.
+  
+- **CSS scopé sur l'élément racine du composant** (#43) — le scoping préfixait
+  les sélecteurs par `[data-v="…"] .foo` (combinateur descendant), qui ne peut
+  pas cibler l'élément *racine* du composant. Comme chaque élément rendu porte
+  l'attribut de scope, on l'**appose** désormais au sujet du sélecteur (façon
+  Vue) : `.foo` → `.foo[data-v="…"]`, `.a > .b` → `.a > .b[data-v="…"]`. Racine
+  **et** descendants couverts. Le contournement « CSS en global » n'est plus
+  nécessaire.
+  
+- **Harnais de non-régression du pipeline dev + prod** (#44) — chaque exemple est
+  buildé en **dev ET prod** dans les tests d'intégration, avec des invariants qui
+  verrouillent les classes de bugs rencontrées : aucune closure `()=>…` ne fuit
+  dans le HTML, aucune closure `_e` double-emballée (`()=>()=>`), JS valide
+  (`node --check`), builds déterministes.
+
+---
+
+## [3.3.0]
+
+- **PWA installable + hors-ligne** — une section `[pwa]` dans `webc.toml`
+  (opt-in) fait générer par `webc build`, à la racine de `dist/`, un
+  `manifest.webmanifest` (nom, couleurs, `display`, icônes fingerprintées) et un
+  `sw.js` (service worker offline, network-first + fallback cache). Le manifeste,
+  la `theme-color` et les balises Apple web-app (+ `apple-touch-icon`) sont
+  injectés dans chaque `<head>`, et l'enregistrement du service worker est ajouté
+  au runtime partagé. Le site devient installable (mobile/desktop) et consultable
+  hors-ligne. Icônes attendues dans `public/` (`icon-192.png`, `icon-512.png`,
+  `icon-maskable.png`, `apple-touch-icon.png`).
+
+- **`webc build --prod` / `--dev`** — override du mode de build en ligne de
+  commande, indépendamment du `mode` déclaré dans `webc.toml`. On garde
+  `mode = "dev"` (serveur de dev lisible, source maps) et on produit un build
+  déployable minifié avec `webc build --prod` (minification HTML/CSS/JS,
+  critical CSS inliné, renommage d'identifiants, SRI) — sans éditer la config.
+
+### Nettoyage interne
+
+- **Noms de `meta` avec tiret** — la clé d'une balise `meta key="…"` dans un bloc
+  `head { }` accepte désormais les tirets, en plus des lettres, chiffres, `_` et `:`.
+  Cela autorise les noms de meta standard tels que `theme-color`,
+  `apple-mobile-web-app-capable` ou `msapplication-TileColor`. Les namespaces à deux
+  points (`og:title`, `twitter:card`) restent inchangés.
+
+- **URL canoniques & images sociales absolues** — quand `[app] url` est défini,
+  chaque page reçoit un `<link rel="canonical">` **et un `meta og:url`** (URL +
+  route ; la page `404` en est exclue), et les `meta og:image` / `twitter:image`
+  en chemin racine (`/…`) sont réécrites en **URLs absolues** — indispensable
+  pour que LinkedIn / Slack / Twitter affichent l'aperçu. Le fingerprint d'asset
+  reste appliqué.
+
+- **Fichiers SEO à la racine du build** — `webc build` génère désormais
+  automatiquement, à la racine de `dist/` (et non sous `/assets/`) :
+  - **`robots.txt`** (toujours) — autorise l'indexation et pointe vers le
+    sitemap quand une URL de site est configurée ;
+  - **`sitemap.xml`** — la liste des routes en URLs absolues, généré quand
+    `[app] url = "https://…"` est présent dans `webc.toml` (la page `404` en est
+    exclue) ;
+  - **`404.html`** — copie de la page `404` du projet à la racine, là où les
+    hébergeurs statiques (GitHub Pages, Netlify, Cloudflare Pages…) la servent
+    sur une route inconnue.
+
+### Corrections
+
+- **Fingerprint des images de sous-dossiers ignoré** — les images sous
+  `public/<sous-dossier>/` (ex. `public/projects/webcore.png`) recevaient bien un
+  hash, mais celui-ci était écrit **à plat** dans `assets/` et mappé par nom de
+  fichier seul, si bien que la réécriture ne trouvait pas la référence
+  `/assets/projects/webcore.png` → le **nom non hashé** restait utilisé (pas de
+  cache-busting). `fingerprint_images` préserve désormais l'arborescence (hash
+  dans le sous-dossier, clé = chemin relatif) → les références sous-dossier sont
+  réécrites avec le hash. +1 test.
+
+- **Espaces significatifs supprimés en build `--prod`** — la minification HTML
+  supprimait *toute* suite d'espaces entre `>` et `<`, y compris un espace
+  significatif entre deux éléments inline (`<span>Mes</span> <span>projets</span>`
+  → « Mesprojets »). Elle **collapse désormais en un seul espace** (comme le
+  navigateur le fait des sauts de ligne du source), donc le prod rend à
+  l'identique du dev. +3 tests.
+
+- **Changement de langue inopérant en build `--prod`** — le nettoyage prod
+  retirait du DOM les attributs `data-webcore-*` (dont `data-webcore-interpolation`)
+  après le rendu initial. Or `setLocale` re-rend en **re-interrogeant** ces
+  attributs (`querySelectorAll`), qui n'existaient plus → le texte ne changeait pas
+  (la réactivité pilotée par l'état continuait de marcher car ses effets capturent
+  les références). Le nettoyage est désormais **ignoré quand le projet utilise
+  l'i18n**, pour que le sélecteur de langue fonctionne aussi en prod. +1 test.
+
+- **Minification JS cassée par un commentaire en fin de ligne** — `minify_js`
+  collait toutes les lignes **sans séparateur** ; un commentaire `//` en fin de
+  ligne dans du code `on:mount` transformait alors tout le reste du fichier en
+  commentaire (`Uncaught SyntaxError: Unexpected end of input`), et l'absence de
+  saut de ligne cassait aussi l'insertion automatique de points-virgules (ASI).
+  Les lignes sont désormais jointes avec `\n`. Le build `--prod` produit un JS
+  valide même quand le code utilisateur contient des commentaires en ligne. +2 tests.
+
+- **Nom de page commençant par un chiffre → JS invalide** — les ids d'éléments
+  sont préfixés par un dérivé du nom de page et émis comme **clés d'objet JS non
+  quotées** (`H = { … }`, `_e = { … }`). Une page `404` produisait `404btn1:` /
+  `404e0:`, une erreur de syntaxe qui cassait tout le runtime partagé.
+  `safe_id_prefix` garantit désormais un préfixe qui est un identifiant JS valide
+  (préfixe `p` si le nom commence par un chiffre : `404` → `p404`). +3 tests.
+
+---
+
 ## [4.0.0]
 
 - **Source maps CSS → `.webc`** (#54) — en mode dev, `webc build` écrit un
@@ -200,6 +920,113 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `404e0:`, une erreur de syntaxe qui cassait tout le runtime partagé.
   `safe_id_prefix` garantit désormais un préfixe qui est un identifiant JS valide
   (préfixe `p` si le nom commence par un chiffre : `404` → `p404`). +3 tests.
+
+---
+
+## [4.0.0]
+
+- **Source maps CSS → `.webc`** (#54) — en mode dev, `webc build` écrit un
+  `dist/assets/theme.css.map` (source map v3 multi-sources) et ajoute un
+  commentaire `/*# sourceMappingURL */` à `theme.css`. Chaque règle scopée
+  pointe vers la ligne d'origine de son composant `.webc` (contenu embarqué via
+  `sourcesContent`), pour déboguer dans les DevTools. Le CSS dev est servi tel
+  que généré (toujours validé par LightningCSS) pour que le mapping reste exact ;
+  le build prod reste minifié, sans source map (comme pour le JS).
+
+- **Grammaire : `@keyframes` avec tiret + sélecteurs multi-lignes** (#47) — le nom
+  d'un bloc `@keyframes` accepte désormais les tirets (`@keyframes spin-cw`), comme
+  le CSS. Une liste de sélecteurs séparés par des virgules peut s'étendre sur
+  plusieurs lignes (`.a:hover,\n.a.active { … }`) — chaque partie reste scopée
+  indépendamment.
+
+- **Messages d'erreur enrichis + codes stables** (#48) — les erreurs de parsing
+  portent un code stable `WCxxxx` (ex. `error[WC1003]`) réutilisable dans les
+  éditeurs/CI (sortie `--json`), en plus de l'extrait de code annoté (caret) et du
+  hint contextuel déjà présents. De nouveaux hints couvrent d'autres cas courants
+  (noms d'@keyframes, types d'état, attributs sans valeur, routes). *(Les source
+  maps CSS→`.webc` restent un chantier séparé, non inclus dans ce lot.)*
+
+- **PWA installable + hors-ligne** — une section `[pwa]` dans `webc.toml`
+  (opt-in) fait générer par `webc build`, à la racine de `dist/`, un
+  `manifest.webmanifest` (nom, couleurs, `display`, icônes fingerprintées) et un
+  `sw.js` (service worker offline, network-first + fallback cache). Le manifeste,
+  la `theme-color` et les balises Apple web-app (+ `apple-touch-icon`) sont
+  injectés dans chaque `<head>`, et l'enregistrement du service worker est ajouté
+  au runtime partagé. Le site devient installable (mobile/desktop) et consultable
+  hors-ligne. Icônes attendues dans `public/` (`icon-192.png`, `icon-512.png`,
+  `icon-maskable.png`, `apple-touch-icon.png`).
+
+- **`webc build --prod` / `--dev`** — override du mode de build en ligne de
+  commande, indépendamment du `mode` déclaré dans `webc.toml`. On garde
+  `mode = "dev"` (serveur de dev lisible, source maps) et on produit un build
+  déployable minifié avec `webc build --prod` (minification HTML/CSS/JS,
+  critical CSS inliné, renommage d'identifiants, SRI) — sans éditer la config.
+
+- **`webc check --a11y`** (#49) — lints d'accessibilité (RGAA/WCAG) intégrés au
+  compilateur : `<img>` sans alternative textuelle (1.1), `<label>` sans `for`
+  ni champ imbriqué (11.1), `<a>`/`<button>` sans intitulé accessible (6.1) —
+  avec position `fichier:ligne:colonne`. Les alternatives correctes (`alt=""`
+  décoratif, `aria-hidden`, `aria-label`, champ imbriqué…) ne sont pas signalées.
+  Sortie humaine ou `--json` (éditeurs/CI) ; avertissements par défaut, `--strict`
+  pour faire échouer la commande.
+
+- **Hydratation partielle (islands)** (#50) — directive `client="idle"` /
+  `client="visible"` sur une instance de composant pour différer sa réactivité.
+  Le composant est rendu statiquement (SSG) puis « hydraté » seulement au moment
+  choisi : `visible` via `IntersectionObserver` (au défilement à l'écran),
+  `idle` via `requestIdleCallback` (navigateur inoccupé). Tant que l'île n'est
+  pas hydratée, ses liaisons réactives (`bind`/`bindAttrs`/`bindIf`/`bindFor`/
+  classes) et son `on:mount` ne s'exécutent pas — le HTML pré-rendu reste
+  affiché et les gestionnaires d'événements (délégués au niveau du document)
+  continuent de fonctionner. La machinerie d'îles est entièrement tree-shakée
+  pour les projets qui n'utilisent pas la directive (runtime inchangé). Idéal
+  pour les composants lourds sous la ligne de flottaison (canvas, WebGL, listes).
+
+- **SSG i18n : une page statique par locale + `hreflang`** (#46) — option
+  d'activation `[i18n] static = true` dans `webc.toml`. `webc build` génère alors
+  une page par locale : la locale par défaut à la racine (`/`, `/about/`) et
+  chaque autre locale sous un préfixe `/{locale}/` (`/en/`, `/en/about/`). Chaque
+  page porte le bon `lang`, son contenu (`t(...)` et attributs interpolés) est
+  pré-rendu dans la langue voulue, et des balises
+  `<link rel="alternate" hreflang="…">` (une par locale + `x-default`) sont
+  émises. Le `sitemap.xml` liste toutes les URL localisées. Le runtime initialise
+  désormais sa locale depuis `<html lang>`, évitant le flash de langue à
+  l'hydratation d'une page `/en/`. (Les collections dynamiques `:slug` restent en
+  locale par défaut pour l'instant.)
+
+- **Attributs interpolés pré-rendus en SSG** (#45) — un attribut dynamique dont
+  l'expression est statiquement connue (`aria-label={t("nav_cv")}`,
+  `href={base}`…) est désormais émis avec sa valeur résolue dans le HTML généré,
+  à côté de la liaison `data-webcore-attr-*`. L'attribut est ainsi présent pour
+  les moteurs de recherche, les lecteurs d'écran et le premier rendu (sans JS) ;
+  le runtime continue de le mettre à jour de façon réactive (changement de
+  langue, état). Sans contexte SSG ou pour une expression non résoluble, seule
+  la liaison runtime est émise (aucune valeur statique erronée).
+
+### Corrections
+
+- **État réactif scopé par composant** (#42) — le runtime utilisait un store
+  global indexé par le nom brut de la variable d'état, si bien que deux
+  composants déclarant un état de même nom (`open`) se marchaient dessus (ex. un
+  menu burger qui ouvrait aussi une palette de commandes). Une passe AST
+  (`core::scope`) exécutée avant la génération réécrit désormais chaque référence
+  à l'état/computed *local* d'un composant vers une clé unique `<Composant>__<var>`
+  — y compris dans le code `on:mount` (`S.get('x')` / `S.set('x', …)`). Le
+  `$store` global reste partagé. Golden test de non-collision ajouté.
+  
+- **CSS scopé sur l'élément racine du composant** (#43) — le scoping préfixait
+  les sélecteurs par `[data-v="…"] .foo` (combinateur descendant), qui ne peut
+  pas cibler l'élément *racine* du composant. Comme chaque élément rendu porte
+  l'attribut de scope, on l'**appose** désormais au sujet du sélecteur (façon
+  Vue) : `.foo` → `.foo[data-v="…"]`, `.a > .b` → `.a > .b[data-v="…"]`. Racine
+  **et** descendants couverts. Le contournement « CSS en global » n'est plus
+  nécessaire.
+  
+- **Harnais de non-régression du pipeline dev + prod** (#44) — chaque exemple est
+  buildé en **dev ET prod** dans les tests d'intégration, avec des invariants qui
+  verrouillent les classes de bugs rencontrées : aucune closure `()=>…` ne fuit
+  dans le HTML, aucune closure `_e` double-emballée (`()=>()=>`), JS valide
+  (`node --check`), builds déterministes.
 
 ---
 
@@ -655,20 +1482,6 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.0]
-
-### Ajouts
-
-- **`$watch varName => { body }`** — nouvelle directive dans les composants pour observer les changements d'état sans effet DOM direct ; émet `S.on('varName', varName => { body })` dans le bloc `DOMContentLoaded` ; permet d'exécuter du code réactif (logs, analytics, synchronisation) quand une variable change
-- **`on:click` avec objets littéraux imbriqués** — `on:click={handler({key: val})}` est maintenant supporté ; `expression_content` utilise une règle récursive `expr_brace_seq` qui gère les accolades imbriquées arbitrairement ; `on:click={x = {val: 1}.val}` parse correctement
-- **`@for key={expr}` — expressions de clé complexes** — en plus de `key=item.id`, la syntaxe `key={item.id + "-" + item.type}` permet des expressions arbitraires comme clé de diffing DOM ; le parser détecte `for_key_braced` vs `for_key_expr` automatiquement
-- **`@for N..M` — syntaxe de plage** — `@for i in 0..5 { ... }` itère `i` de 0 à 4 ; détecté à la compilation via le pattern `N..M` dans l'itérable ; émet `data-webcore-for-range="0..5"` ; le runtime JS génère le tableau `["0","1","2","3","4"]` sans donnée d'état
-- **Expressions SSG étendues** — `eval_expr_with_locale` supporte maintenant : `items.length` (nombre d'éléments d'un tableau ou longueur d'une chaîne), `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; élimine les valeurs vides au pré-rendu SSG
-- **Validation des props à la compilation** — si un composant reçoit un prop non déclaré dans son bloc `props {}`, un avertissement `warning[props]: component 'X' received unknown prop 'y'` est émis sur stderr ; avertissement uniquement (la compilation continue)
-- **Imports de données build-time (JSON/TOML)** — `import posts from "data/posts.json"` dans un fichier `.webc` injecte les données à la compilation ; les fichiers JSON sont validés et émis comme `S.setQ("posts", <json>)` dans le runtime ; les fichiers TOML sont convertis en JSON via la crate `toml` ; sécurité : les chemins qui sortent du répertoire projet sont refusés
-
----
-
 ## [2.2.0]
 
 ### Ajouts
@@ -683,6 +1496,20 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Corrections
 
 - **Avertissement ReDoS** — `validate:pattern` émet un avertissement `warning[security]` à la compilation si le pattern contient des quantificateurs imbriqués (`)+`, `)*`) qui peuvent causer un backtracking catastrophique dans le moteur regex du navigateur
+
+---
+
+## [2.1.0]
+
+### Ajouts
+
+- **`$watch varName => { body }`** — nouvelle directive dans les composants pour observer les changements d'état sans effet DOM direct ; émet `S.on('varName', varName => { body })` dans le bloc `DOMContentLoaded` ; permet d'exécuter du code réactif (logs, analytics, synchronisation) quand une variable change
+- **`on:click` avec objets littéraux imbriqués** — `on:click={handler({key: val})}` est maintenant supporté ; `expression_content` utilise une règle récursive `expr_brace_seq` qui gère les accolades imbriquées arbitrairement ; `on:click={x = {val: 1}.val}` parse correctement
+- **`@for key={expr}` — expressions de clé complexes** — en plus de `key=item.id`, la syntaxe `key={item.id + "-" + item.type}` permet des expressions arbitraires comme clé de diffing DOM ; le parser détecte `for_key_braced` vs `for_key_expr` automatiquement
+- **`@for N..M` — syntaxe de plage** — `@for i in 0..5 { ... }` itère `i` de 0 à 4 ; détecté à la compilation via le pattern `N..M` dans l'itérable ; émet `data-webcore-for-range="0..5"` ; le runtime JS génère le tableau `["0","1","2","3","4"]` sans donnée d'état
+- **Expressions SSG étendues** — `eval_expr_with_locale` supporte maintenant : `items.length` (nombre d'éléments d'un tableau ou longueur d'une chaîne), `name.toUpperCase()`, `name.toLowerCase()`, `str.trim()` ; élimine les valeurs vides au pré-rendu SSG
+- **Validation des props à la compilation** — si un composant reçoit un prop non déclaré dans son bloc `props {}`, un avertissement `warning[props]: component 'X' received unknown prop 'y'` est émis sur stderr ; avertissement uniquement (la compilation continue)
+- **Imports de données build-time (JSON/TOML)** — `import posts from "data/posts.json"` dans un fichier `.webc` injecte les données à la compilation ; les fichiers JSON sont validés et émis comme `S.setQ("posts", <json>)` dans le runtime ; les fichiers TOML sont convertis en JSON via la crate `toml` ; sécurité : les chemins qui sortent du répertoire projet sont refusés
 
 ---
 

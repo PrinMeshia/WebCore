@@ -124,6 +124,11 @@ Les fonctions `bind*` reçoivent la map `_e` en paramètre et appellent directem
 | `bindValidation` | `bindValidation()` | `validate:` présent | Validation `blur`/`submit` ; messages dans `[data-webcore-error]`. |
 | `bindDefer` | `bindDefer()` | `@defer` présent | Révèle le contenu masqué après `DOMContentLoaded`. |
 
+Chaque binder réactif (`bind`, `bindIf`, `bindAttrs`, `bindClassBindings`)
+appelle `rebindComputed()` **dans** son effet quand le projet déclare un bloc
+`computed`. Sans cela l'effet ne s'abonnerait qu'à la valeur dérivée — écrite
+via le `setQ` silencieux — et ne serait jamais réveillé (`@if computedVar` figé).
+
 ### `DOMContentLoaded` — séquence de rebind v3
 
 ```js
@@ -147,13 +152,22 @@ En mode `prod`, les noms courts sont utilisés : `_b(_e);_bi(_e);_bf();_ba(_e);_
 
 ## Délégation d'événements (CSP-safe)
 
-Aucun `onclick=` inline. Chaque élément interactif reçoit un `id` unique
-(`<prefix>btn<n>`) et `data-webcore-e="<type>[|mod…]"` ; les handlers compilés
-sont dans la map `H[id]`. Un seul listener par type d'événement :
+Aucun `onclick=` inline. Chaque élément interactif porte un `id` — **celui de
+l'auteur s'il en a un**, sinon un id généré (`<prefix>btn<n>`) — et un
+`data-webcore-e` listant ses types d'événements séparés par des virgules
+(`"input,click|stop"`). Les handlers compilés sont dans la map `H`, indexée
+`"<id>@<type>"`. Un seul listener par type d'événement :
 
 ```js
-const D = (t, p) => document.addEventListener(t, e => { /* closest('[data-webcore-e]') → H[el.id](e) */ });
+const D = (t, p) => document.addEventListener(t, e => { /* closest('[data-webcore-e]') → H[el.id+'@'+t](e) */ });
 ```
+
+- Un élément ne reçoit **jamais** deux attributs `id` : le navigateur ne garderait
+  que le premier et la résolution `H[el.id+'@'+t]` échouerait silencieusement.
+- Un seul handler par couple (élément, type) : `expand_bind_attrs` fusionne
+  l'affectation de `bind:value` en tête d'un `on:input` déjà présent.
+- `|debounce` reste hors de `H` : wiring direct par `getElementById(<id élément>)`.
+- `|once` est mémorisé par type dans `data-webcore-onced`.
 
 Modificateurs `on:click|stop|prevent|once|self` encodés dans la valeur de l'attribut.
 Liens SPA : `data-webcore-nav` + History API.

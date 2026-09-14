@@ -1,0 +1,168 @@
+/* WebCore Example — Page de maintenance (statique, sans JS) */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  line-height: 1.7;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+a {
+  color: var(--color-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+a:hover { border-color: var(--color-secondary); }
+
+:focus-visible {
+  outline: 2px solid var(--color-secondary);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Halo chaud en fond ─────────────────────────────────────────────────── */
+.bg-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(600px circle at 50% 8%, rgba(245, 158, 11, 0.16), transparent 60%),
+    radial-gradient(700px circle at 85% 90%, rgba(251, 191, 36, 0.10), transparent 55%);
+}
+
+/* ── Zone principale, centrée ───────────────────────────────────────────── */
+.maint-main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+}
+
+.maint-card {
+  width: min(560px, 100%);
+  text-align: center;
+  padding: 3rem 2.25rem;
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Icône ──────────────────────────────────────────────────────────────── */
+.maint-icon {
+  font-size: 3.5rem;
+  line-height: 1;
+  display: inline-block;
+  filter: drop-shadow(0 8px 20px rgba(245, 158, 11, 0.35));
+  animation: wrench-swing 3.2s ease-in-out infinite;
+  transform-origin: 70% 30%;
+}
+
+/* ── Badge « maintenance en cours » ─────────────────────────────────────── */
+.maint-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.4rem 0 1.1rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.maint-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55);
+  animation: pulse-dot 1.8s ease-out infinite;
+}
+
+/* ── Textes ─────────────────────────────────────────────────────────────── */
+.maint-title {
+  font-size: clamp(1.7rem, 5vw, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 0.9rem;
+}
+.maint-text {
+  color: var(--color-muted);
+  font-size: 1.02rem;
+  max-width: 40ch;
+  margin: 0 auto;
+}
+
+/* ── Trois points animés ────────────────────────────────────────────────── */
+.maint-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 1.8rem 0 1.4rem;
+}
+.maint-dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  opacity: 0.35;
+  animation: dot-bounce 1.4s ease-in-out infinite;
+}
+.maint-dots span:nth-child(2) { animation-delay: 0.2s; }
+.maint-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+.maint-contact {
+  font-size: 0.9rem;
+  color: var(--color-muted);
+}
+
+/* ── Pied de page ───────────────────────────────────────────────────────── */
+.maint-footer {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 1.5rem;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+.maint-footer strong { color: var(--color-text); }
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes wrench-swing {
+  0%, 100% { transform: rotate(-8deg); }
+  50%      { transform: rotate(8deg); }
+}
+@keyframes pulse-dot {
+  0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+  70%  { box-shadow: 0 0 0 9px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+@keyframes dot-bounce {
+  0%, 100% { transform: translateY(0);    opacity: 0.35; }
+  50%      { transform: translateY(-7px); opacity: 1; }
+}
+
+/* Respect du confort de mouvement */
+@media (prefers-reduced-motion: reduce) {
+  .maint-icon,
+  .maint-badge-dot,
+  .maint-dots span { animation: none; }
+  .maint-dots span { opacity: 0.7; }
+}

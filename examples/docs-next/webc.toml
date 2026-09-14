@@ -1,0 +1,11 @@
+[app]
+title = "WebCore"
+lang  = "en"
+mode  = "prod"
+# Dogfood WebCore's own features on its docs site.
+view_transitions = true
+
+[pwa]
+name       = "WebCore Docs"
+short_name = "WebCore"
+theme_color = "#f97316"

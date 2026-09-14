@@ -30,10 +30,29 @@ page_decl = { "page" ~ string_literal ~ "{" ~ head_block? ~ element* ~ "}" }
 
 // ============ HEAD BLOCK (inside page) ============
 head_block = { "head" ~ "{" ~ head_item* ~ "}" }
-head_item  = _{ head_title | head_meta | head_favicon }
-head_title = { "title" ~ string_literal }
-head_meta  = { "meta" ~ meta_key ~ "=" ~ string_literal }
+head_item  = _{ head_title | head_meta | head_link | head_jsonld | head_favicon }
+// Title/meta values accept `{…}` interpolations (e.g. `{t("key")}`) so head
+// metadata can be localised; resolved per-locale at build time (SSG).
+head_title = { "title" ~ string_with_interpolation }
+// `meta key = "value"` → `<meta name="key" content="value">`, plus optional
+// extra attributes (e.g. `media="(prefers-color-scheme: dark)"` for theme-color).
+head_meta  = { "meta" ~ meta_key ~ "=" ~ string_with_interpolation ~ head_attr* }
 head_favicon = { "favicon" ~ string_literal }
+// Generic `<link>` — e.g. `link rel="preload" href="/f.woff2" as="font"`,
+// `link rel="alternate" type="application/rss+xml" href="/feed.xml"`.
+head_link  = { "link" ~ head_attr+ }
+head_attr  = { meta_key ~ "=" ~ string_literal }
+// Declarative JSON-LD → `<script type="application/ld+json">`. Values are
+// recursive (scalar string, nested object, or array) so a full Schema.org
+// entity (nested `address`, `sameAs`/`knowsAbout` arrays) can be static.
+// Scalars accept `{…}` interpolations (localisable, SSG-resolved).
+head_jsonld   = { "jsonld" ~ jsonld_object }
+jsonld_object = { "{" ~ jsonld_field* ~ "}" }
+jsonld_field  = { jsonld_key ~ ":" ~ jsonld_value }
+jsonld_value  = { jsonld_object | jsonld_array | string_with_interpolation }
+jsonld_array  = { "[" ~ (jsonld_value ~ ("," ~ jsonld_value)*)? ~ "]" }
+jsonld_key    = ${ string_literal | jsonld_bare_key }
+jsonld_bare_key = @{ ("@" | ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 // meta_key allows og:title, twitter:card (colon namespace) and hyphenated
 // standard meta names (theme-color, apple-mobile-web-app-capable, …).
 meta_key   = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ":" | "-")* }
@@ -102,7 +121,9 @@ keyframe_step = {
 keyframe_selector = @{ (ASCII_DIGIT+ ~ "%" | "from" | "to") ~ ("," ~ WHITESPACE* ~ (ASCII_DIGIT+ ~ "%" | "from" | "to"))* }
 
 // ============ ELEMENTS (VIEW CONTENT) ============
-element = { control_flow | slot_element | fragment_element | tag_element | text_element }
+element = { control_flow | slot_element | fragment_element | markdown_element | tag_element | text_element }
+// Inline a Markdown file, rendered to HTML at build time: `markdown "post.md"`.
+markdown_element = { "markdown" ~ string_literal }
 
 // Fragment shorthand: <>...</> renders children inline with no wrapper tag
 fragment_element = { "<>" ~ element* ~ "</>" }

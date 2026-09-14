@@ -210,6 +210,7 @@ pub(crate) fn parse_webc(source: &str) -> Result<WebCoreDocument, ParseError> {
         locales: BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
+        view_transitions: false,
         layouts: BTreeMap::new(),
         pages: BTreeMap::new(),
         components: BTreeMap::new(),
@@ -336,8 +337,10 @@ fn check_nesting_depth(
             "Element nesting exceeds maximum depth of {max} — reduce component complexity"
         )));
     }
-    for child in el.children() {
-        check_nesting_depth(child, depth + 1, max)?;
+    for child_vec in el.child_vecs() {
+        for child in child_vec {
+            check_nesting_depth(child, depth + 1, max)?;
+        }
     }
     Ok(())
 }

@@ -1,0 +1,188 @@
+page "docs/components" {
+    h1 { "Components & state" }
+    p class="lead" {
+        "Components are the unit of reuse in WebCore. Each one owns its markup, its reactive state, its derived values and its scoped style — declared together in a single "
+        code { ".webc" }
+        " file and inlined at compile time."
+    }
+
+    h2 { "Anatomy of a component" }
+    p { "A component groups a handful of optional blocks. Only the view matters in practice — everything else is opt-in." }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component MyComponent {
+    props    { /* values passed in by the parent */ }
+    state    { /* local reactive state          */ }
+    computed { /* derived values                 */ }
+    on:mount   { /* JS that runs once, on load   */ }
+    on:destroy { /* cleanup before navigation     */ }
+    view     { /* the HTML tree                   */ }
+    style    { /* scoped CSS                       */ }
+}"
+        } }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Blocks can appear in any order and all are optional. You can even place view elements directly in the body without a "
+            code { "view" }
+            " wrapper for tiny components."
+        } }
+    }
+
+    h2 { "State" }
+    p {
+        "State is local, reactive and "
+        strong { "typed" }
+        ". Every variable needs a type annotation; a default value is optional. The type drives how the value is pre-rendered at build time."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component LiveCounter {
+    state {
+        count: Number  = 0
+        step:  Number  = 1
+        label: String  = \"Clicks\"
+        open:  Boolean = false
+        items: List    = null
+    }
+    view {
+        button on:click=\{count += step} { \"+\{step}\" }
+        p { \"\{label}: \{count}\" }
+    }
+}"
+        } }
+    }
+    p {
+        "The available types are "
+        code { "Number" }
+        ", "
+        code { "String" }
+        ", "
+        code { "Boolean" }
+        " and "
+        code { "List" }
+        ". Assigning to a state variable inside an event handler is what drives the UI — see "
+        link to="/docs/reactivity" { "Reactivity" }
+        "."
+    }
+
+    h2 { "Computed values" }
+    p {
+        "A "
+        code { "computed" }
+        " block declares derived values. Each is re-evaluated before the DOM is updated, and reads through to the state it depends on — so it never loops back on itself."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"computed {
+    doubled = count * 2
+    isEven  = count % 2 == 0
+}"
+        } }
+    }
+    p { "Reference a computed value in the view exactly like state: " code { "\{doubled}" } "." }
+
+    h2 { "Props" }
+    p {
+        "Props are values a parent passes in. Unlike state, the type is optional, and you can give a default so the component renders even when nothing is passed."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"component Badge {
+    props { label: String = \"N/A\"  color: String = \"gray\" }
+    view { span class=\{color} { \"Status: \{label}\" } }
+}"
+        } }
+    }
+    p { "A parent can pass props four ways:" }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"Badge label=\"Active\" color=\"green\" {}   // static — substituted at build time
+Badge label=\{statusMsg} {}               // dynamic expression
+Badge \{color} {}                         // shorthand: color=\{color}
+Badge ...attrs {}                        // spread every key of an object"
+        } }
+    }
+
+    h2 { "Lifecycle" }
+    p { "Two lifecycle blocks hold raw JavaScript that runs at well-defined moments." }
+    ul {
+        li { code { "on:mount { }" } " — runs once, after " code { "DOMContentLoaded" } ", when the reactive runtime is ready. Use it to reach for " code { "refs" } ", start timers, or wire third-party code." }
+        li { code { "on:destroy { }" } " — runs before every client-side navigation and on " code { "beforeunload" } ". Use it to tear down what " code { "on:mount" } " set up." }
+    }
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "For reactive side-effects that should re-run when state changes, use "
+            code { "$effect(...)" }
+            " inside "
+            code { "on:mount" }
+            " rather than a manual watcher."
+        } }
+    }
+
+    h2 { "Using a component" }
+    p {
+        "Import a component at the top of a page or another component, then render it like a tag. Imports are resolved and inlined at "
+        strong { "compile time" }
+        " — there is no runtime module loader, and a component you don't import contributes zero bytes to that page."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" {
+            span class="lang" { "webc" }
+            button class="copy-btn" { "Copy" }
+        }
+        pre { code {
+"import Counter from \"../components/Counter.webc\"
+
+page \"home\" {
+    h1 { \"Dashboard\" }
+    Counter {}
+}"
+        } }
+    }
+    div class="callout tip" {
+        span class="ico" { "💡" }
+        div { p {
+            "Components communicate upward with "
+            code { "emit(\"name\", payload)" }
+            ", received by a parent as "
+            code { "on:name=\{handler}" }
+            " with the data on "
+            code { "event.detail" }
+            "."
+        } }
+    }
+
+    nav class="pager" {
+        link to="/docs/first-app" class="prev" {
+            span class="dir" { "Previous" }
+            span class="ttl" { "← Your first app" }
+        }
+        link to="/docs/templating" class="next" {
+            span class="dir" { "Next" }
+            span class="ttl" { "Templating & directives →" }
+        }
+    }
+}

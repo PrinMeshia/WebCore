@@ -1,0 +1,175 @@
+page "docs/templating" {
+    h1 { "Templating & directives" }
+    p class="lead" {
+        "A view is a tree of elements written in a light, HTML-like syntax. Directives — all prefixed with "
+        code { "@" }
+        " for control flow, or "
+        code { "name:" }
+        " for attributes — add conditionals, loops, events and bindings."
+    }
+
+    h2 { "Elements & interpolation" }
+    p {
+        "An element is a tag, optional attributes, and a body in braces or a bare string. Inside a string, "
+        code { "\{expr}" }
+        " interpolates a value — arithmetic, comparisons and function calls all work."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"h1 { \"Dashboard\" }
+p  { \"Count: \{count}\" }
+p  { \"Next: \{count + 1}\" }
+p  { \"Largest: \{max(a, b)}\" }
+span class=\{statusColor} { \"\{label}\" }"
+        } }
+    }
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "A "
+            code { "\{" }
+            " only starts an interpolation when it is immediately followed by a non-space character and closes on the same line. "
+            code { "{ x }" }
+            " with spaces is a literal brace — handy when you want braces in text."
+        } }
+    }
+
+    h2 { "Conditionals" }
+    p { "Use " code { "@if" } " / " code { "@else if" } " / " code { "@else" } ". Note the " code { "else if" } " has no " code { "@" } " on the " code { "if" } "." }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"@if count > 9 {
+    p class=\"badge\" { \"Double digits!\" }
+} @else if count > 0 {
+    p { \"Keep going…\" }
+} @else {
+    p { \"Press + to start\" }
+}"
+        } }
+    }
+    p {
+        "For a fixed set of cases, "
+        code { "@switch" }
+        " compiles to an "
+        code { "@if" }
+        " chain (compared with "
+        code { "===" }
+        ") — zero runtime cost. "
+        code { "@default" }
+        " is optional."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"@switch status {
+    @case \"active\"  { span class=\"green\"  { \"Active\" } }
+    @case \"pending\" { span class=\"yellow\" { \"Pending\" } }
+    @default         { span { \"Unknown\" } }
+}"
+        } }
+    }
+
+    h2 { "Loops" }
+    p {
+        "@for iterates any list. Add an index with "
+        code { ", i" }
+        ", and a "
+        code { "key" }
+        " for stable DOM diffing (preserves focus and animations across updates)."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"@for item in items { li { \"\{item}\" } }
+
+@for item, i in items { li { \"\{i}. \{item}\" } }
+
+@for post key=post.id in posts {
+    article { h3 { \"\{post.title}\" } }
+}"
+        } }
+    }
+
+    h2 { "Events" }
+    p {
+        "Attach a handler with "
+        code { "on:&lt;event>=\{expr}" }
+        ". The handler runs your expression; "
+        code { "event" }
+        " is in scope. Assigning to state is what updates the UI."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"button on:click=\{count += 1} { \"+\" }
+input  on:input=\{name = event.target.value} {}
+button on:click=\{items = [...items, draft]; draft = \"\"} { \"Add\" }
+button on:click=\{emit(\"ping\", count)} { \"Ping\" }"
+        } }
+    }
+    p { "Chain modifiers with " code { "|" } " — " code { "stop" } ", " code { "prevent" } ", " code { "once" } ", " code { "self" } ", " code { "debounce" } " (300 ms):" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"form  on:submit|stop|prevent=\{handleSubmit} { … }
+input on:input|debounce=\{search = event.target.value} {}"
+        } }
+    }
+
+    h2 { "Bindings" }
+    p { "Directive attributes bind reactive values onto elements." }
+    ul {
+        li { code { "bind:value=\{x}" } " — two-way binding; expands to a value plus an " code { "on:input" } " handler. " code { "bind:checked" } " works the same on " code { "on:change" } "." }
+        li { code { "class:active=\{expr}" } " — toggles a class when the expression is truthy." }
+        li { code { "style:color=\{expr}" } " — sets an inline style property reactively (dashes preserved, e.g. " code { "style:background-color" } ")." }
+        li { code { "ref:box=true" } " — populates " code { "refs['box']" } " so " code { "on:mount" } " can reach the element." }
+    }
+
+    h2 { "Async & deferred content" }
+    p {
+        "An "
+        code { "http" }
+        " block fetches data into state on mount and auto-injects "
+        code { "loading" }
+        " and "
+        code { "error" }
+        " variables you can branch on with the "
+        code { "@loading" }
+        " and "
+        code { "@catch" }
+        " sugar."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"component Posts {
+    state { posts: List = null }
+    http  { get: \"/api/posts\"  into: posts }
+    view {
+        @loading { p { \"Loading…\" } }
+        @catch   { p class=\"error\" { \"Failed to load.\" } }
+        @for p in posts { article { h3 { \"\{p.title}\" } } }
+    }
+}"
+        } }
+    }
+    p {
+        code { "@defer { }" }
+        " hides its content until after "
+        code { "DOMContentLoaded" }
+        "; fragments "
+        code { "<>…</>" }
+        " group elements without a wrapper node; and "
+        code { "slot" }
+        " placeholders let layouts receive page content — see "
+        link to="/docs/routing" { "Routing & pages" }
+        "."
+    }
+
+    nav class="pager" {
+        link to="/docs/components" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Components & state" } }
+        link to="/docs/styling" class="next" { span class="dir" { "Next" } span class="ttl" { "Styling →" } }
+    }
+}

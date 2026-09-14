@@ -61,6 +61,9 @@ pub struct WebCoreDocument {
     pub default_locale: String,
     /// Snake-case name of the compiled WASM package, if present.
     pub wasm_module: Option<String>,
+    /// `[app] view_transitions` — wrap SPA navigation in the View Transitions
+    /// API (`document.startViewTransition`) for animated page changes.
+    pub view_transitions: bool,
     pub layouts: BTreeMap<String, Layout>,
     pub pages: BTreeMap<String, Page>,
     pub components: BTreeMap<String, Component>,
@@ -150,11 +153,39 @@ pub struct HttpBlock {
     pub into: String,
 }
 
+/// A `<meta>` declaration: `meta key = "value"` → `<meta name="key"
+/// content="value">`, plus any extra attributes (`media`, …).
+#[derive(Debug, Clone)]
+pub struct HeadMeta {
+    /// The `name`/`property` key (mapped in codegen; `og:*` → `property`).
+    pub key: String,
+    /// The `content` value (may carry `{…}` interpolations).
+    pub value: String,
+    /// Ordered extra `(attr, value)` pairs emitted verbatim after `content`.
+    pub extra: Vec<(String, String)>,
+}
+
+/// A recursive JSON-LD value: a scalar string (possibly interpolated), a nested
+/// object (ordered fields), or an array. Serialised into `application/ld+json`.
+#[derive(Debug, Clone)]
+pub enum JsonLdValue {
+    /// Scalar string; may carry `{…}` interpolations resolved at build.
+    Str(String),
+    Array(Vec<JsonLdValue>),
+    Object(Vec<(String, JsonLdValue)>),
+}
+
 /// Head block inside a page: `head { title "..." meta key="value" }`
 #[derive(Debug, Clone)]
 pub struct HeadBlock {
     pub title: Option<String>,
-    pub metas: Vec<(String, String)>,
+    pub metas: Vec<HeadMeta>,
+    /// Generic `<link>` tags: each entry is an ordered list of `(attr, value)`
+    /// pairs (`link rel="preload" href="..." as="font"`).
+    pub links: Vec<Vec<(String, String)>>,
+    /// Declarative JSON-LD: the top-level object's ordered fields → serialised
+    /// into a `<script type="application/ld+json">`. Empty means no script.
+    pub jsonld: Vec<(String, JsonLdValue)>,
     /// Favicon path (`favicon "/logo.png"`) → `<link rel="icon" href="...">`.
     pub favicon: Option<String>,
 }
@@ -267,9 +298,67 @@ pub enum Element {
         content: Vec<Element>,
         span: Span,
     },
+    /// Inline a Markdown file rendered to HTML at build time: `markdown "x.md"`.
+    Markdown(String, Span),
 }
 
 impl Element {
+    /// Child element vectors of this node (an `@if` contributes both branches).
+    ///
+    /// This — together with [`Element::child_vecs_mut`] — is the **single place**
+    /// that must know every variant's structure: recursive passes (a11y lints,
+    /// i18n checks, state scoping, feature detection, …) recurse through it
+    /// instead of each re-implementing an exhaustive `match`. Adding a variant
+    /// only requires updating these two methods (the compiler enforces it).
+    pub fn child_vecs(&self) -> Vec<&Vec<Element>> {
+        match self {
+            Element::Tag { content, .. }
+            | Element::Component { content, .. }
+            | Element::For { content, .. }
+            | Element::Fragment { content, .. }
+            | Element::Defer { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::ErrorBlock { content, .. } => vec![content],
+            Element::If {
+                then_branch,
+                else_branch,
+                ..
+            } => match else_branch {
+                Some(eb) => vec![then_branch, eb],
+                None => vec![then_branch],
+            },
+            Element::Text(_, _)
+            | Element::Slot(_, _)
+            | Element::Interpolation(_, _)
+            | Element::Markdown(_, _) => Vec::new(),
+        }
+    }
+
+    /// Mutable variant of [`Element::child_vecs`].
+    pub fn child_vecs_mut(&mut self) -> Vec<&mut Vec<Element>> {
+        match self {
+            Element::Tag { content, .. }
+            | Element::Component { content, .. }
+            | Element::For { content, .. }
+            | Element::Fragment { content, .. }
+            | Element::Defer { content, .. }
+            | Element::SlotContent { content, .. }
+            | Element::ErrorBlock { content, .. } => vec![content],
+            Element::If {
+                then_branch,
+                else_branch,
+                ..
+            } => match else_branch {
+                Some(eb) => vec![then_branch, eb],
+                None => vec![then_branch],
+            },
+            Element::Text(_, _)
+            | Element::Slot(_, _)
+            | Element::Interpolation(_, _)
+            | Element::Markdown(_, _) => Vec::new(),
+        }
+    }
+
     /// Returns the source span of this element (reserved for future LSP/IDE use).
     #[allow(dead_code)]
     pub fn span(&self) -> Span {
@@ -284,7 +373,8 @@ impl Element {
             | Element::If { span, .. }
             | Element::ErrorBlock { span, .. }
             | Element::Fragment { span, .. }
-            | Element::Defer { span, .. } => *span,
+            | Element::Defer { span, .. }
+            | Element::Markdown(_, span) => *span,
         }
     }
 
@@ -293,26 +383,35 @@ impl Element {
     pub fn is_tag(&self) -> bool {
         matches!(self, Element::Tag { .. })
     }
+}
 
+/// Depth-first pre-order walk: calls `f` on every element, then recurses into
+/// its children (via [`Element::child_vecs`]). Passes that only need a
+/// per-node action use this instead of hand-rolled recursive `match`es.
+pub fn walk_elements<'a>(elements: &'a [Element], f: &mut dyn FnMut(&'a Element)) {
+    for el in elements {
+        f(el);
+        for child_vec in el.child_vecs() {
+            walk_elements(child_vec, f);
+        }
+    }
+}
+
+/// Mutable depth-first pre-order walk (via [`Element::child_vecs_mut`]).
+pub fn walk_elements_mut(elements: &mut [Element], f: &mut dyn FnMut(&mut Element)) {
+    for el in elements {
+        f(el);
+        for child_vec in el.child_vecs_mut() {
+            walk_elements_mut(child_vec, f);
+        }
+    }
+}
+
+impl Element {
     /// Returns true if this is a Text element (reserved for future LSP use).
     #[allow(dead_code)]
     pub fn is_text(&self) -> bool {
         matches!(self, Element::Text(..))
-    }
-
-    /// Returns the direct children of this element, or an empty slice.
-    pub fn children(&self) -> &[Element] {
-        match self {
-            Element::Tag { content, .. }
-            | Element::Component { content, .. }
-            | Element::SlotContent { content, .. }
-            | Element::For { content, .. }
-            | Element::ErrorBlock { content, .. }
-            | Element::Fragment { content, .. }
-            | Element::Defer { content, .. } => content,
-            Element::If { then_branch, .. } => then_branch,
-            _ => &[],
-        }
     }
 }
 

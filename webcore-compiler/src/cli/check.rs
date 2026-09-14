@@ -72,41 +72,16 @@ pub(crate) fn check_project(json: bool, a11y: bool, strict: bool) -> Result<(), 
         _file: Option<&std::path::Path>,
         issues: &mut Vec<Diagnostic>,
     ) {
-        for elem in elements {
-            match elem {
-                ast::Element::Component {
-                    name,
-                    content,
-                    span: _span,
-                    ..
-                } => {
-                    if !document.components.contains_key(name) {
-                        issues.push(Diagnostic::project_error(
-                            "unknown-component",
-                            format!("component <{name}> used but not declared"),
-                        ));
-                    }
-                    check_elements(content, document, _file, issues);
+        ast::walk_elements(elements, &mut |elem| {
+            if let ast::Element::Component { name, .. } = elem {
+                if !document.components.contains_key(name) {
+                    issues.push(Diagnostic::project_error(
+                        "unknown-component",
+                        format!("component <{name}> used but not declared"),
+                    ));
                 }
-                ast::Element::Tag { content, .. }
-                | ast::Element::For { content, .. }
-                | ast::Element::SlotContent { content, .. }
-                | ast::Element::ErrorBlock { content, .. } => {
-                    check_elements(content, document, _file, issues)
-                }
-                ast::Element::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    check_elements(then_branch, document, _file, issues);
-                    if let Some(eb) = else_branch {
-                        check_elements(eb, document, _file, issues);
-                    }
-                }
-                _ => {}
             }
-        }
+        });
     }
     let file_of = |name: &str| document.source_files.get(name).map(|p| p.as_path());
     for (name, page) in &document.pages {
@@ -126,65 +101,46 @@ pub(crate) fn check_project(json: bool, a11y: bool, strict: bool) -> Result<(), 
         _file: Option<&std::path::Path>,
         issues: &mut Vec<Diagnostic>,
     ) {
-        for elem in elements {
-            if let ast::Element::Component {
-                name,
-                attributes,
-                content,
-                span: _span,
+        ast::walk_elements(elements, &mut |elem| {
+            let ast::Element::Component {
+                name, attributes, ..
             } = elem
-            {
-                if let Some(comp) = document.components.get(name) {
-                    for attr in attributes {
-                        if let ast::AttributeValue::String(val) = &attr.value {
-                            if let Some(prop) = comp.props.iter().find(|p| p.name == attr.name) {
-                                if let Some(t) = &prop.type_ {
-                                    match t.as_str() {
-                                        "Number" if val.parse::<f64>().is_err() => {
-                                            issues.push(Diagnostic::project_error(
-                                                "prop-type",
-                                                format!(
-                                                    "{}:{} — prop \"{}\" expects Number, got \"{}\"",
-                                                    name, attr.name, attr.name, val
-                                                ),
-                                            ));
-                                        }
-                                        "Boolean" if val != "true" && val != "false" => {
-                                            issues.push(Diagnostic::project_error(
-                                                "prop-type",
-                                                format!(
-                                                    "{}:{} — prop \"{}\" expects Boolean, got \"{}\"",
-                                                    name, attr.name, attr.name, val
-                                                ),
-                                            ));
-                                        }
-                                        _ => {}
-                                    }
+            else {
+                return;
+            };
+            let Some(comp) = document.components.get(name) else {
+                return;
+            };
+            for attr in attributes {
+                if let ast::AttributeValue::String(val) = &attr.value {
+                    if let Some(prop) = comp.props.iter().find(|p| p.name == attr.name) {
+                        if let Some(t) = &prop.type_ {
+                            match t.as_str() {
+                                "Number" if val.parse::<f64>().is_err() => {
+                                    issues.push(Diagnostic::project_error(
+                                        "prop-type",
+                                        format!(
+                                            "{}:{} — prop \"{}\" expects Number, got \"{}\"",
+                                            name, attr.name, attr.name, val
+                                        ),
+                                    ));
                                 }
+                                "Boolean" if val != "true" && val != "false" => {
+                                    issues.push(Diagnostic::project_error(
+                                        "prop-type",
+                                        format!(
+                                            "{}:{} — prop \"{}\" expects Boolean, got \"{}\"",
+                                            name, attr.name, attr.name, val
+                                        ),
+                                    ));
+                                }
+                                _ => {}
                             }
                         }
                     }
                 }
-                check_props(content, document, _file, issues);
-            } else {
-                match elem {
-                    ast::Element::Tag { content, .. } | ast::Element::For { content, .. } => {
-                        check_props(content, document, _file, issues)
-                    }
-                    ast::Element::If {
-                        then_branch,
-                        else_branch,
-                        ..
-                    } => {
-                        check_props(then_branch, document, _file, issues);
-                        if let Some(eb) = else_branch {
-                            check_props(eb, document, _file, issues);
-                        }
-                    }
-                    _ => {}
-                }
             }
-        }
+        });
     }
     for (name, page) in &document.pages {
         check_props(&page.content, &document, file_of(name), &mut issues);
@@ -221,15 +177,11 @@ pub(crate) fn check_project(json: bool, a11y: bool, strict: bool) -> Result<(), 
         stack: &mut Vec<String>,
         issues: &mut Vec<Diagnostic>,
     ) {
-        for elem in elements {
-            match elem {
-                ast::Element::Component { name, content, .. } => {
-                    check_cycles(name, document, stack, issues);
-                    collect_component_refs(content, document, stack, issues);
-                }
-                _ => collect_component_refs(elem.children(), document, stack, issues),
+        ast::walk_elements(elements, &mut |el| {
+            if let ast::Element::Component { name, .. } = el {
+                check_cycles(name, document, stack, issues);
             }
-        }
+        });
     }
 
     for component_name in document.components.keys() {
@@ -242,12 +194,22 @@ pub(crate) fn check_project(json: bool, a11y: bool, strict: bool) -> Result<(), 
     } else {
         Vec::new()
     };
+    // ── i18n consistency (locale parity + t() resolution) — always on when the
+    //    project declares locales ──────────────────────────────────────────────
+    let i18n_issues = super::i18n_check::lint(&document);
+    // ── Orphan public/ assets (referenced nowhere) ────────────────────────────
+    let asset_issues = super::asset_check::lint(&document);
 
-    // Default checks are hard errors; accessibility findings are warnings that
-    // only fail the command under `--strict`.
-    let exit_ok = issues.is_empty() && (!strict || a11y_issues.is_empty());
-    let has_a11y = !a11y_issues.is_empty();
-    let combined: Vec<Diagnostic> = issues.into_iter().chain(a11y_issues).collect();
+    // Default checks are hard errors; accessibility, i18n and asset findings are
+    // warnings that only fail the command under `--strict`.
+    let warnings: Vec<Diagnostic> = a11y_issues
+        .into_iter()
+        .chain(i18n_issues)
+        .chain(asset_issues)
+        .collect();
+    let exit_ok = issues.is_empty() && (!strict || warnings.is_empty());
+    let has_warnings = !warnings.is_empty();
+    let combined: Vec<Diagnostic> = issues.into_iter().chain(warnings).collect();
 
     // ── Report ───────────────────────────────────────────────────────────────
     if json {
@@ -299,8 +261,8 @@ pub(crate) fn check_project(json: bool, a11y: bool, strict: bool) -> Result<(), 
     }
 
     if exit_ok {
-        if has_a11y {
-            println!("\n(avertissements d'accessibilité — ajoutez --strict pour échouer)");
+        if has_warnings {
+            println!("\n(avertissements — ajoutez --strict pour échouer)");
         }
         Ok(())
     } else {

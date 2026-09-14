@@ -29,6 +29,13 @@ use crate::codegen::js::collect_state_variables;
 pub(crate) use analysis::collect_page_components;
 pub(crate) use minify::minify_html;
 
+/// Placeholder emitted for a `{$build.<field>}` interpolation. Resolved by the
+/// build's post-pass once output sizes are known — see
+/// `cli::build::substitute_build_vars`. Shared so codegen and the pass agree.
+pub(crate) fn build_var_placeholder(field: &str) -> String {
+    format!("\u{2063}wcbuild:{field}\u{2063}")
+}
+
 // Options passed from the build to influence the page shell
 #[derive(Debug, Clone)]
 pub struct HtmlPageOptions {
@@ -153,9 +160,57 @@ pub(super) struct GenContext<'a> {
     pub has_route_params: bool,
     /// Whether the document uses `$query.` param expressions (for closure compilation).
     pub has_query_params: bool,
+    /// Names of the loop variables (items + indices) currently in scope, innermost
+    /// last. Interpolations/attributes referencing one of these are resolved per
+    /// item at runtime by `fillItem`, so they must emit the raw expression rather
+    /// than a global `_e` closure ID (which would evaluate the loop var in global
+    /// scope and throw `ReferenceError`).
+    pub loop_vars: Vec<String>,
 }
 
 impl<'a> GenContext<'a> {
+    /// True when `expr` is a shape the runtime can resolve against a loop item.
+    ///
+    /// This is one half of a pair: the other is `resolveScoped` in the emitted
+    /// runtime, and the two must accept exactly the same language. They used not
+    /// to. This side tested a bare prefix (`expr.starts_with("post.")`) while
+    /// `resolveScoped` splits everything after the item name on `.` and walks the
+    /// object — so `{post.likes + 1}` was emitted raw, then looked up as a
+    /// property literally named `likes + 1`, found nothing, and wrote an empty
+    /// string. A loud `ReferenceError` had become a silent blank.
+    ///
+    /// So the predicate now matches the resolvable shapes and nothing else: the
+    /// item or index name alone, or plain property accesses on it — `post`, `i`,
+    /// `post.title`, `post.author.name`.
+    pub(super) fn is_loop_scoped(&self, expr: &str) -> bool {
+        let e = expr.trim();
+        self.loop_vars.iter().any(|v| is_property_path_on(e, v))
+    }
+
+    /// True when `expr` must be emitted raw for `fillItem` rather than compiled
+    /// into the global `_e` map — the single rule the three emit sites share.
+    ///
+    /// It covers the unresolvable shapes too, on purpose: a global closure over a
+    /// loop variable throws, and an uncaught throw inside the binder's `forEach`
+    /// takes the rest of the page's bindings with it. Emitting raw keeps the
+    /// damage to the one element, and the build warns.
+    pub(super) fn emits_per_item(&self, expr: &str) -> bool {
+        self.is_loop_scoped(expr) || self.unresolvable_loop_var(expr).is_some()
+    }
+
+    /// True when `expr` reads a loop variable in a shape the runtime *cannot*
+    /// resolve — the case the caller has to report rather than emit silently.
+    pub(super) fn unresolvable_loop_var(&self, expr: &str) -> Option<&str> {
+        let e = expr.trim();
+        if self.is_loop_scoped(e) {
+            return None;
+        }
+        self.loop_vars
+            .iter()
+            .find(|v| mentions_identifier(e, v))
+            .map(String::as_str)
+    }
+
     /// Register a read expression: compile it to a closure, assign an ID, and return the ID.
     /// Falls back to returning the raw expression when compiled_vars is not set (v2 compat / tests).
     pub(super) fn register_expr(&mut self, expr: &str, span: Span) -> String {
@@ -181,6 +236,72 @@ impl<'a> GenContext<'a> {
     }
 }
 
+/// Report an expression that reads a `@for` variable in a shape the runtime
+/// cannot evaluate per item.
+///
+/// Neither available path is right for it: emitted raw, `resolveScoped` writes
+/// an empty string; compiled to a global closure, it throws `ReferenceError`
+/// because the loop variable exists in no scope but the loop's. Both are
+/// silent-ish failures at a place where the compiler knows the answer, so it
+/// says so, and names the shapes that do work.
+pub(super) fn warn_unresolvable_loop_expr(expr: &str, var: &str, where_: &str) {
+    eprintln!(
+        "warning[for]: `{{{expr}}}` ({where_}) lit la variable de boucle `{var}` dans une forme non résoluble par élément. \
+Seuls `{var}` et ses accès de propriété (`{var}.champ`, `{var}.a.b`) le sont — une expression calculée rendra du vide. \
+Préparez la valeur dans les données, ou passez `{var}` en prop à un composant."
+    );
+}
+
+/// Characters that can appear inside a JS identifier.
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// True when `expr` is `name`, or `name` followed only by plain property
+/// accesses (`name.a`, `name.a.b`).
+///
+/// This is the language `resolveScoped` speaks, spelled out on the compiler
+/// side: it takes the text after `name.`, splits it on `.`, and walks the
+/// object one key at a time. So every segment has to be a bare identifier —
+/// no operators, no calls, no indexing, no trailing dot.
+pub(crate) fn is_property_path_on(expr: &str, name: &str) -> bool {
+    let Some(rest) = expr.strip_prefix(name) else {
+        return false;
+    };
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(path) = rest.strip_prefix('.') else {
+        // `postX` merely starts with `post`; it is a different name.
+        return false;
+    };
+    !path.is_empty()
+        && path
+            .split('.')
+            .all(|seg| !seg.is_empty() && seg.chars().all(is_ident_char))
+}
+
+/// True when `name` appears in `expr` as a whole identifier rather than as a
+/// fragment of a longer one — `post` in `post + 1` but not in `postCount`.
+pub(crate) fn mentions_identifier(expr: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let bytes = expr.as_bytes();
+    let mut from = 0;
+    while let Some(rel) = expr[from..].find(name) {
+        let start = from + rel;
+        let end = start + name.len();
+        let before_ok = start == 0 || !is_ident_char(bytes[start - 1] as char);
+        let after_ok = end == expr.len() || !is_ident_char(bytes[end] as char);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
 #[cfg(test)]
 pub(crate) fn generate_spa_html(
     document: &WebCoreDocument,
@@ -202,6 +323,7 @@ pub(crate) fn generate_spa_html(
         options.canonical.as_deref(),
         options.pwa.as_ref(),
         &options.hreflang_alternates,
+        None,
     );
 
     // Generate layout shell (without page content, just the structure)
@@ -266,68 +388,73 @@ fn merge_head(global: Option<&HeadBlock>, page: Option<&HeadBlock>) -> Option<He
     if global.is_none() && page.is_none() {
         return None;
     }
-    let mut metas: Vec<(String, String)> = Vec::new();
+    let mut metas: Vec<crate::core::ast::HeadMeta> = Vec::new();
     if let Some(g) = global {
         metas.extend(g.metas.iter().cloned());
     }
     if let Some(p) = page {
-        for (k, v) in &p.metas {
-            if let Some(slot) = metas.iter_mut().find(|(mk, _)| mk == k) {
-                slot.1 = v.clone();
+        for meta in &p.metas {
+            // A page meta overrides a global one only when both key AND extra
+            // attributes match — so `theme-color` variants that differ by
+            // `media` (light/dark) coexist instead of clobbering each other.
+            if let Some(slot) = metas
+                .iter_mut()
+                .find(|m| m.key == meta.key && m.extra == meta.extra)
+            {
+                slot.value = meta.value.clone();
             } else {
-                metas.push((k.clone(), v.clone()));
+                metas.push(meta.clone());
             }
         }
     }
+    // Links have no unique key to dedupe on, so global and page links are both
+    // kept (global first, then page).
+    let mut links: Vec<Vec<(String, String)>> = Vec::new();
+    if let Some(g) = global {
+        links.extend(g.links.iter().cloned());
+    }
+    if let Some(p) = page {
+        links.extend(p.links.iter().cloned());
+    }
+    // JSON-LD is a single object per page: the page's block replaces the
+    // global one when present, otherwise the global block is used.
+    let jsonld = match page {
+        Some(p) if !p.jsonld.is_empty() => p.jsonld.clone(),
+        _ => global.map(|g| g.jsonld.clone()).unwrap_or_default(),
+    };
     let pick =
         |f: fn(&HeadBlock) -> Option<String>| page.and_then(f).or_else(|| global.and_then(f));
     Some(HeadBlock {
         title: pick(|h| h.title.clone()),
         metas,
+        links,
+        jsonld,
         favicon: pick(|h| h.favicon.clone()),
     })
 }
 
 /// Scan the document AST to check whether any expression uses `$query.`.
 fn document_has_query_params(document: &WebCoreDocument) -> bool {
-    use crate::core::ast::{AttributeValue, Element};
+    use crate::core::ast::{walk_elements, AttributeValue, Element};
     fn check_elements(elements: &[Element]) -> bool {
-        elements.iter().any(|e| match e {
-            Element::Interpolation(expr, _) => expr.contains("$query."),
-            Element::Text(t, _) => t.contains("$query."),
-            Element::Tag {
-                attributes,
-                content,
-                ..
-            } => {
-                attributes.iter().any(|a| match &a.value {
+        let mut found = false;
+        walk_elements(elements, &mut |e| match e {
+            Element::Interpolation(expr, _) => found |= expr.contains("$query."),
+            Element::Text(t, _) => found |= t.contains("$query."),
+            Element::Tag { attributes, .. } => {
+                found |= attributes.iter().any(|a| match &a.value {
                     AttributeValue::Expression(expr) | AttributeValue::Spread(expr) => {
                         expr.contains("$query.")
                     }
                     AttributeValue::String(s) => s.contains("$query."),
                     _ => false,
-                }) || check_elements(content)
+                })
             }
-            Element::For {
-                iterable, content, ..
-            } => iterable.contains("$query.") || check_elements(content),
-            Element::If {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                condition.contains("$query.")
-                    || check_elements(then_branch)
-                    || else_branch.as_ref().is_some_and(|eb| check_elements(eb))
-            }
-            Element::Component { content, .. }
-            | Element::SlotContent { content, .. }
-            | Element::Fragment { content, .. }
-            | Element::ErrorBlock { content, .. }
-            | Element::Defer { content, .. } => check_elements(content),
-            _ => false,
-        })
+            Element::For { iterable, .. } => found |= iterable.contains("$query."),
+            Element::If { condition, .. } => found |= condition.contains("$query."),
+            _ => {}
+        });
+        found
     }
     document.pages.values().any(|p| check_elements(&p.content))
         || document
@@ -383,6 +510,7 @@ pub(crate) fn generate_page(
         options.canonical.as_deref(),
         options.pwa.as_ref(),
         &options.hreflang_alternates,
+        ssg,
     );
 
     // Build CompiledVars for v3 expression compilation
@@ -516,6 +644,7 @@ mod tests {
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
+            view_transitions: false,
             layouts: std::collections::BTreeMap::new(),
             pages: std::collections::BTreeMap::new(),
             components: std::collections::BTreeMap::new(),
@@ -587,6 +716,7 @@ mod tests {
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
+            view_transitions: false,
             layouts: std::collections::BTreeMap::new(),
             pages: std::collections::BTreeMap::new(),
             components: std::collections::BTreeMap::new(),
@@ -662,6 +792,7 @@ mod tests {
             locales: std::collections::BTreeMap::new(),
             default_locale: String::new(),
             wasm_module: None,
+            view_transitions: false,
             layouts: std::collections::BTreeMap::new(),
             pages: std::collections::BTreeMap::new(),
             components: std::collections::BTreeMap::new(),

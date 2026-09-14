@@ -1,0 +1,74 @@
+page "docs/islands" {
+    h1 { "Islands" }
+    p class="lead" {
+        "Every page ships as static HTML. Islands let you hydrate just the interactive parts — on idle or when they scroll into view — so most of the page pays no JavaScript cost at all."
+    }
+
+    h2 { "Opt in with client=" }
+    p {
+        "A component becomes an island only when you mark its usage with "
+        code { "client=" }
+        ". Without it, an interactive component still renders — its markup is pre-rendered and document-level event handlers still fire — but it is not wrapped as a hydration island."
+    }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"page \"home\" {
+    Hero {}                          // eager — part of the initial paint
+    HeavyChart client=\"visible\" {}   // hydrates when scrolled into view
+    Newsletter client=\"idle\" {}      // hydrates when the browser is idle
+}"
+        } }
+    }
+    ul {
+        li { code { "client=\"visible\"" } " — hydrates via an " code { "IntersectionObserver" } " when the island enters the viewport." }
+        li { code { "client=\"idle\"" } " — hydrates on " code { "requestIdleCallback" } " (falls back to a timeout)." }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            "Only "
+            code { "idle" }
+            " and "
+            code { "visible" }
+            " create islands. Plain usage (and "
+            code { "client=\"load\"" }
+            ") hydrates eagerly with the rest of the page."
+        } }
+    }
+
+    h2 { "How hydration works" }
+    p {
+        "The island's HTML is pre-rendered inside a "
+        code { "display:contents" }
+        " wrapper, so layout is identical before and after hydration. When the trigger fires, the runtime binds "
+        strong { "only that subtree" }
+        " — its reactivity and its "
+        code { "on:mount" }
+        " — and marks it ready. Islands on pages you navigate to hydrate the same way."
+    }
+    div class="callout warn" {
+        span class="ico" { "⚠" }
+        div { p {
+            "A "
+            code { "visible" }
+            " island observes its first child element, so it needs a real wrapping element inside — an island whose content is only text has no box to observe and falls back to "
+            code { "idle" }
+            "."
+        } }
+    }
+
+    h2 { "The payoff" }
+    p {
+        "A page with no "
+        code { "client=" }
+        " directive ships a byte-identical runtime to one with none at all — the island machinery is fully tree-shaken. You only pay for hydration where you explicitly ask for it, and you choose "
+        strong { "when" }
+        " that cost lands."
+    }
+
+    nav class="pager" {
+        link to="/docs/seo" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← SEO & metadata" } }
+        link to="/docs/forms" class="next" { span class="dir" { "Next" } span class="ttl" { "Forms & validation →" } }
+    }
+}

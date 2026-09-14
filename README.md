@@ -16,10 +16,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 | | |
 |---|---|
-| **Version** | 4.0.0 |
+| **Version** | 4.2.1 |
 | **Statut** | Release |
 | **Compilateur** | Rust + Pest PEG parser |
-| **Tests** | 256 tests (unitaires, golden, intégration, perf) |
+| **Tests** | 318 tests (unitaires, golden, intégration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -33,11 +33,13 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 - **Blocs déclaratifs** : `app` (routes, layout, thème), `layout`, `page`, `component` (props · state · computed · view · style), `store` global partagé (`$store.x`)
 - **Interpolation d'expressions** : `{count}`, `{count + 1}`, `{max(a, b)}` — y compris dans les chaînes et les attributs
-- **Directives** : `@if` / `@else if` / `@else`, `@switch` / `@case` / `@default`, `@for` (avec `key=` pour le DOM diffing, index `item, i`, plages `0..5`), `@error` pour les messages de validation, `@loading` / `@catch` (sucre pour `@if loading` / `@if error`), `@defer` (affichage différé après DOMContentLoaded)
+- **Fonctions natives** (4.1) : bibliothèque standard namespacée `math.` / `str.` / `fmt.` / `arr.` (ex. `math.clamp`, `str.slugify`, `fmt.currency`, `arr.sum`) — CSP-safe, tree-shakées, et pliées en SSG quand les arguments sont statiques
+- **Directives** : `@if` / `@else if` / `@else`, `@switch` / `@case` / `@default`, `@for` (avec `key=` pour le DOM diffing, index `item, i`, plages `0..5` ; dans une boucle résolue à l'exécution, la variable de boucle se lit en accès de propriété — `{item.a.b}` — les expressions calculées sont signalées au build), `@error` pour les messages de validation, `@loading` / `@catch` (sucre pour `@if loading` / `@if error`), `@defer` (affichage différé après DOMContentLoaded)
 - **Sucre syntaxique props** : `<Component {count}>` ≡ `<Component count={count}>` ; `<div ...attrs>` pour spread d'attributs
 - **Fragments** `<>...</>`, contenu mixte texte/éléments, slots nommés multi-zones avec contenu par défaut
 - **Props** : statiques, réactives (`value={expr}`), valeurs par défaut (`label: String = "Défaut"`), validation à la compilation (warning sur prop inconnue)
 - **Imports de données build-time** : `import posts from "data/posts.json"` (JSON/TOML)
+- **Markdown** : élément `markdown "post.md"` → rendu en HTML statique au build (CommonMark, front-matter retiré) — briques d'un SSG de contenu
 - **Imports de composants build-time** (v3.0.1) : `import Button from "./Button.webc"` — résolu à la compilation, zéro overhead runtime
 
 ### Réactivité & runtime
@@ -62,7 +64,9 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 
 - **SPA** : History API, navigation sans rechargement, routes paramétrées (`/post/:slug` → `{$route.slug}`), query string (`{$query.page}`)
 - **`head {}`** par page (titre, meta), URLs propres (`/about` sans `.html`)
+- **SEO/i18n dans le `head`** : interpolation `{t()}` dans `title`/`meta` (résolue par locale au build), item `link` générique (preload, RSS, `rel=me`), et JSON-LD déclaratif (`jsonld { }` → `<script type="application/ld+json">` statique)
 - **Collections SSG** : `"/post/:slug": PostPage each posts` — une page statique par élément de données
+- **Collections de données en page** : `@for project in projects` sur un import de données → déplié en HTML statique au build (cartes/grilles de contenu, zéro JS)
 
 ### Formulaires & i18n
 
@@ -75,7 +79,10 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **Pages statiques sans JS** : aucun script émis si la page n'en a pas besoin
 - **Mode prod** : minification HTML/CSS/JS, critical CSS inliné (zéro CSS render-blocking), `<script defer>` + preload
 - **Cache-busting** : nom de fichier content-hash (`webcore.<hash8>.js`) + fingerprinting des images (`logo.a3f9c1b2.png`), builds **100 % déterministes**
-- **`webc:img`** : `loading="lazy"`, `decoding="async"` et dimensions injectées à la compilation (anti-CLS)
+- **Variables de build** : `{$build.pages}` / `{$build.jsKb}`… résolues aux stats réelles du build (texte statique)
+- **Transitions de page** : `[app] view_transitions = true` → `document.startViewTransition()` (repli propre)
+- **Flux RSS** : section `[feed]` → `dist/feed.xml` (RSS 2.0) depuis une collection de données, avec auto-découverte injectée dans le `<head>`
+- **`webc:img`** : `loading="lazy"`, `decoding="async"`, dimensions injectées (anti-CLS), et **variantes responsives + `srcset`** au build via `[images]` — les fichiers de `public/` s'écrivent `src="/assets/…"`, le préfixe sous lequel ils sont servis
 
 ### Sécurité
 
@@ -89,7 +96,7 @@ Le compilateur Rust génère un HTML sémantique, un CSS scopé et un runtime JS
 - **CLI complète** : `webc new` · `build` (`--prod` / `--dev`) · `dev` (HMR via WebSocket) · `watch` · `check` · `fmt` (formateur idempotent) · `lsp` (serveur LSP 3.17 sur stdin/stdout — hover, complétion, go-to-definition, rename, **diagnostics temps réel**, **semantic tokens**, **code actions**)
 - **Erreurs façon rustc** : ligne source + caret `^` + hints contextuels, toutes les erreurs agrégées en une passe
 - **Runtime ES2022+** : private class fields, optional chaining, nullish coalescing — zéro dépendance, zéro transpileur ; v3.0 : expressions compilées en fermetures JS (`const _e={e0:()=>...}`) — `evalCond` / `new Function()` supprimés
-- **`webc check`** : valide routes, composants, props et détecte les références circulaires sans rien générer
+- **`webc check`** : valide routes, composants, props et références circulaires ; avertissements non bloquants pour la **parité des locales** + `t()` résolvables (i18n) et les **assets orphelins** de `public/` (`--strict` pour échouer)
 - **Rapport de build** : arborescence `dist/` + analyse du bundle (fonctionnalités incluses vs tree-shakées)
 - **WASM** : détection `wasm/Cargo.toml`, build `wasm-pack`, loader async `globalThis.wasm`
 - **[Extension VS Code](./editors/vscode)** : coloration, snippets, formatage via `webc fmt`
@@ -442,6 +449,8 @@ cd examples/counter
 webc dev
 # Avec un port personnalisé
 webc dev 3000
+# Restreindre l'écoute à cette machine (défaut : 0.0.0.0, tout le réseau local)
+webc dev --host 127.0.0.1
 ```
 
 ### Validation sans build

@@ -16,10 +16,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 | | |
 |---|---|
-| **Version** | 4.0.0 |
+| **Version** | 4.2.1 |
 | **Status** | Release |
 | **Compiler** | Rust + Pest PEG parser |
-| **Tests** | 256 tests (unit, golden, integration, perf) |
+| **Tests** | 318 tests (unit, golden, integration, perf) |
 | **CI** | GitHub Actions (fmt · test · clippy) |
 
 ---
@@ -33,11 +33,13 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 - **Declarative blocks**: `app` (routes, layout, theme), `layout`, `page`, `component` (props · state · computed · view · style), shared global `store` (`$store.x`)
 - **Expression interpolation**: `{count}`, `{count + 1}`, `{max(a, b)}` — including inside strings and attributes
-- **Directives**: `@if` / `@else if` / `@else`, `@switch` / `@case` / `@default`, `@for` (with `key=` for DOM diffing, index `item, i`, ranges `0..5`), `@error` for validation messages, `@loading` / `@catch` (shorthand for `@if loading` / `@if error`), `@defer` (deferred render until DOMContentLoaded)
+- **Built-in functions** (4.1): namespaced standard library `math.` / `str.` / `fmt.` / `arr.` (e.g. `math.clamp`, `str.slugify`, `fmt.currency`, `arr.sum`) — CSP-safe, tree-shaken, and folded at build time (SSG) when arguments are static
+- **Directives**: `@if` / `@else if` / `@else`, `@switch` / `@case` / `@default`, `@for` (with `key=` for DOM diffing, index `item, i`, ranges `0..5`; in a runtime loop the loop variable is read as a property path — `{item.a.b}` — computed expressions are reported at build time), `@error` for validation messages, `@loading` / `@catch` (shorthand for `@if loading` / `@if error`), `@defer` (deferred render until DOMContentLoaded)
 - **Prop shorthand**: `<Component {count}>` ≡ `<Component count={count}>`; `<div ...attrs>` for attribute spreading
 - **Fragments** `<>...</>`, mixed text/element content, named multi-zone slots with default content
 - **Props**: static, reactive (`value={expr}`), default values (`label: String = "Default"`), compile-time validation (warning on unknown props)
 - **Build-time data imports**: `import posts from "data/posts.json"` (JSON/TOML)
+- **Markdown**: `markdown "post.md"` element → rendered to static HTML at build (CommonMark, front-matter stripped) — content-SSG building block
 - **Build-time component imports** (v3.0.1): `import Button from "./Button.webc"` — resolved at compile time, zero runtime overhead
 
 ### Reactivity & runtime
@@ -62,7 +64,9 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 
 - **SPA**: History API, no-reload navigation, parameterized routes (`/post/:slug` → `{$route.slug}`), query string (`{$query.page}`)
 - **Per-page `head {}`** (title, meta), clean URLs (`/about` without `.html`)
+- **SEO/i18n in `head`**: `{t()}` interpolation in `title`/`meta` (resolved per-locale at build), generic `link` item (preload, RSS, `rel=me`), and declarative JSON-LD (`jsonld { }` → static `<script type="application/ld+json">`)
 - **SSG collections**: `"/post/:slug": PostPage each posts` — one static page per data item
+- **In-page data collections**: `@for project in projects` over a data import → expanded to static HTML at build (content cards/grids, zero JS)
 
 ### Forms & i18n
 
@@ -75,7 +79,10 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 - **Zero-JS static pages**: no script emitted when a page doesn't need one
 - **Prod mode**: HTML/CSS/JS minification, inlined critical CSS (zero render-blocking CSS), `<script defer>` + preload
 - **Cache busting**: content-hash filename (`webcore.<hash8>.js`) and image fingerprinting (`logo.a3f9c1b2.png`), **fully deterministic builds**
-- **`webc:img`**: `loading="lazy"`, `decoding="async"` and dimensions injected at compile time (CLS prevention)
+- **Build variables**: `{$build.pages}` / `{$build.jsKb}`… resolved to real build stats (static text)
+- **Page transitions**: `[app] view_transitions = true` → `document.startViewTransition()` (graceful fallback)
+- **RSS feed**: `[feed]` section → `dist/feed.xml` (RSS 2.0) from a data collection, with auto-discovery injected in every `<head>`
+- **`webc:img`**: `loading="lazy"`, `decoding="async"`, dimensions injected (CLS prevention), and **responsive variants + `srcset`** at build via `[images]` — files in `public/` are written `src="/assets/…"`, the prefix they are served under
 
 ### Security
 
@@ -89,7 +96,7 @@ The Rust compiler generates semantic HTML, scoped CSS and a minimal JS runtime
 - **Full CLI**: `webc new` · `build` (`--prod` / `--dev`) · `dev` (HMR over WebSocket) · `watch` · `check` · `fmt` (idempotent formatter) · `lsp` (LSP 3.17 server over stdin/stdout — hover, completion, go-to-definition, rename, **real-time diagnostics**, **semantic tokens**, **code actions**)
 - **rustc-style errors**: source line + `^` caret + contextual hints, all errors aggregated in one pass
 - **ES2022+ runtime**: private class fields, optional chaining, nullish coalescing — zero dependencies, zero transpiler; v3.0: expressions compiled to JS closures (`const _e={e0:()=>...}`) — `evalCond` / `new Function()` removed
-- **`webc check`**: validates routes, components, props and detects circular references without generating anything
+- **`webc check`**: validates routes, components, props and circular references; non-blocking warnings for **locale parity** + resolvable `t()` (i18n) and **orphan `public/` assets** (`--strict` to fail)
 - **Build report**: `dist/` tree + bundle analysis (included vs tree-shaken features)
 - **WASM**: `wasm/Cargo.toml` detection, `wasm-pack` build, async `globalThis.wasm` loader
 - **[VS Code extension](./editors/vscode)**: highlighting, snippets, formatting via `webc fmt`
@@ -442,6 +449,8 @@ cd examples/counter
 webc dev
 # With a custom port
 webc dev 3000
+# Restrict listening to this machine (default: 0.0.0.0, the whole local network)
+webc dev --host 127.0.0.1
 ```
 
 ### Validate without building

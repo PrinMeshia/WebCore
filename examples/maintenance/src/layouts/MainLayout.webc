@@ -1,0 +1,10 @@
+layout MainLayout {
+    // Halo décoratif en fond (ignoré par les technologies d'assistance)
+    div class="bg-glow" aria-hidden="true" {}
+
+    main class="maint-main" { slot content }
+
+    footer class="maint-footer" {
+        p { "Propulsé par " strong { "WebCore" } }
+    }
+}

@@ -1,0 +1,29 @@
+[theme]
+name = "webcore-docs-next"
+
+# Colours here are the dark-mode defaults on `:root`; `public/docs.css` (loaded
+# after this) redefines the semantic tokens for light mode and the theme toggle.
+[theme.colors]
+primary   = "#f97316"
+accent    = "#fbbf24"
+background = "#0b0c0f"
+surface   = "#14161c"
+border    = "#252a34"
+text      = "#e8eaf0"
+muted     = "#9aa2b1"
+
+[theme.fonts]
+sans = "Inter, system-ui, -apple-system, sans-serif"
+mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace"
+
+[theme.spacing]
+xs = "0.4rem"
+sm = "0.75rem"
+md = "1rem"
+lg = "1.75rem"
+xl = "3rem"
+
+[theme.radius]
+sm = "6px"
+md = "10px"
+lg = "16px"

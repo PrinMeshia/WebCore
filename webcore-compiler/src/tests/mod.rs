@@ -192,6 +192,7 @@ fn golden_scoped_css_emits_data_v_selector() {
         locales: std::collections::BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
+        view_transitions: false,
         layouts: std::collections::BTreeMap::new(),
         pages: std::collections::BTreeMap::new(),
         components: std::collections::BTreeMap::new(),
@@ -249,6 +250,7 @@ fn golden_scoped_css_matches_component_root() {
         locales: std::collections::BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
+        view_transitions: false,
         layouts: std::collections::BTreeMap::new(),
         pages: std::collections::BTreeMap::new(),
         components: std::collections::BTreeMap::new(),
@@ -1470,6 +1472,51 @@ page "home" {
 }
 
 #[test]
+fn golden_for_loop_scoped_interpolation_and_attr_are_raw() {
+    // Regression: a runtime `@for` whose body reads the loop variable must emit
+    // the RAW expression (resolved per item by `fillItem`), not a global `_e`
+    // closure ID (which evaluates `post` in global scope → ReferenceError).
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    @for post in posts {
+        a href={post.url} { h3 "{post.title}" }
+    }
+}
+"#;
+    let html = compile_to_html(src);
+    // Interpolation carries the raw loop expression for fillItem.
+    assert!(
+        html.contains("data-webcore-interpolation=\"post.title\""),
+        "loop interpolation should emit the raw expression:\n{html}"
+    );
+    // Per-item attribute uses data-webcore-fattr-*, and the loop element carries
+    // neither the global attr binding nor the `bound` marker (the exact opening
+    // tag proves both — nothing between `<a` and the fattr).
+    assert!(
+        html.contains("<a data-webcore-fattr-href=\"post.url\">"),
+        "loop <a> should carry only the raw per-item attribute:\n{html}"
+    );
+    assert!(
+        !html.contains("data-webcore-attr-href"),
+        "loop attribute must not be globally bound:\n{html}"
+    );
+
+    // Runtime: fillItem resolves scoped exprs + per-item attrs; the global
+    // interpolation binder skips spans whose id isn't a compiled expression.
+    let js = compile_to_js(src);
+    assert!(js.contains("resolveScoped"), "resolveScoped missing:\n{js}");
+    assert!(
+        js.contains("data-webcore-fattr-"),
+        "per-item attribute handling missing in fillItem:\n{js}"
+    );
+    assert!(
+        js.contains("if(!fn)return"),
+        "global interpolation binder must skip raw loop spans:\n{js}"
+    );
+}
+
+#[test]
 fn golden_param_routes_emit_routes_array() {
     let js = compile_to_js(
         r#"
@@ -1757,14 +1804,14 @@ page "article" {
     assert!(
         head.metas
             .iter()
-            .any(|(k, v)| k == "description" && v == "Article de blog WebCore"),
+            .any(|m| m.key == "description" && m.value == "Article de blog WebCore"),
         "description meta missing: {:?}",
         head.metas
     );
     assert!(
         head.metas
             .iter()
-            .any(|(k, v)| k == "og:title" && v == "Mon Article"),
+            .any(|m| m.key == "og:title" && m.value == "Mon Article"),
         "og:title meta missing: {:?}",
         head.metas
     );
@@ -4241,6 +4288,7 @@ page "home" {
         locales: std::collections::BTreeMap::new(),
         default_locale: String::new(),
         wasm_module: None,
+        view_transitions: false,
         layouts: std::collections::BTreeMap::new(),
         pages: parsed.pages.clone(),
         components: std::collections::BTreeMap::new(),
@@ -4937,4 +4985,348 @@ page "home" {
     // Findings carry a precise line (the file path is attached by the loader,
     // not the bare parser used in this unit test).
     assert!(issues.iter().all(|d| d.line.is_some()));
+}
+
+// ── Event delegation: element id ownership & multi-handler elements ──────
+
+#[test]
+fn golden_author_id_is_reused_as_delegation_key() {
+    // An author-supplied `id` must not be shadowed by a generated one: two `id`
+    // attributes on the same tag means the browser keeps the first, and the
+    // `H[el.id+'@'+type]` lookup then finds nothing.
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    button id="save-btn" on:click={count += 1} { "Save" }
+}
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert_eq!(
+        res.html.matches(" id=\"").count(),
+        1,
+        "exactly one id attribute expected:\n{}",
+        res.html
+    );
+    assert!(
+        res.html
+            .contains("id=\"save-btn\" data-webcore-e=\"click\""),
+        "author id must carry the delegation attribute:\n{}",
+        res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(
+        js.contains("\"save-btn@click\""),
+        "handler must be keyed by the author id:\n{js}"
+    );
+}
+
+#[test]
+fn golden_bind_value_merges_into_existing_input_handler() {
+    // `bind:value` + an explicit `on:input` on the same element must produce a
+    // single handler: delegation allows one handler per (element, event type).
+    let src = r#"
+component Editor {
+    state { message: String = "" count: Number = 0 }
+    view {
+        textarea id="msg" bind:value={message} on:input={count = event.target.value.length} {}
+    }
+}
+layout MainLayout { main { slot content } }
+page "home" { Editor {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert_eq!(
+        res.html.matches("data-webcore-e=").count(),
+        1,
+        "one data-webcore-e attribute expected:\n{}",
+        res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert_eq!(
+        js.matches("\"msg@input\"").count(),
+        1,
+        "exactly one input handler expected:\n{js}"
+    );
+    // The state assignment runs first, then the author's own statement.
+    assert!(
+        js.contains("S.set('message',event.target.value);S.set('count',event.target.value.length)"),
+        "bind assignment and author handler must be merged in order:\n{js}"
+    );
+}
+
+#[test]
+fn golden_two_event_types_on_one_element_both_fire() {
+    // Distinct events on one element get distinct handler keys and are listed
+    // together in a single `data-webcore-e`.
+    let src = r#"
+component Field {
+    state { value: String = "" touched: Boolean = false }
+    view {
+        input id="f" bind:value={value} on:blur={touched = true} {}
+    }
+}
+layout MainLayout { main { slot content } }
+page "home" { Field {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    assert!(
+        res.html.contains("data-webcore-e=\"blur,input\"")
+            || res.html.contains("data-webcore-e=\"input,blur\""),
+        "both event types must be listed on the element:\n{}",
+        res.html
+    );
+    let js = generate_runtime_js(&res.handlers, &doc);
+    assert!(js.contains("\"f@input\""), "input handler missing:\n{js}");
+    assert!(js.contains("\"f@blur\""), "blur handler missing:\n{js}");
+    // D() resolves the descriptor list, not a single value.
+    assert!(
+        js.contains("split(',')"),
+        "D() must parse the comma-separated descriptor list:\n{js}"
+    );
+}
+
+#[test]
+fn golden_computed_vars_recomputed_inside_reactive_effects() {
+    // Computed values are written with the silent `setQ`, so an `@if` reading
+    // one subscribes to nothing unless the effect recomputes them itself.
+    let src = r#"
+component Counter {
+    state { message: String = "" }
+    computed { tooLong = message.length > 10 }
+    view {
+        @if tooLong { p { "trop long" } }
+    }
+}
+layout MainLayout { main { slot content } }
+page "home" { Counter {} }
+"#;
+    let doc = parse_webc(src).expect("parse");
+    let res = generate_html(&doc, "home", &opts()).expect("codegen");
+    let js = generate_runtime_js(&res.handlers, &doc);
+    let bind_if = js
+        .split("const bindIf=")
+        .nth(1)
+        .expect("bindIf must be emitted");
+    let upd = bind_if.split("upd=()=>{").nth(1).expect("bindIf upd body");
+    assert!(
+        upd.trim_start().starts_with("rebindComputed();"),
+        "bindIf effect must recompute computed vars first:\n{upd}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `webc dev --host` — the flag decides the bind address, not just the banner
+// ---------------------------------------------------------------------------
+
+#[test]
+fn golden_bind_ip_defaults_to_wildcard() {
+    use crate::cli::serve::resolve_bind_ip;
+    let ip = resolve_bind_ip(None).expect("no --host must resolve");
+    assert!(
+        ip.is_unspecified(),
+        "without --host the dev server keeps listening on every interface: {ip}"
+    );
+}
+
+#[test]
+fn golden_bind_ip_honours_loopback_host() {
+    use crate::cli::serve::resolve_bind_ip;
+    let ip = resolve_bind_ip(Some("127.0.0.1")).expect("loopback must resolve");
+    assert!(
+        ip.is_loopback() && !ip.is_unspecified(),
+        "--host 127.0.0.1 must bind loopback, not the wildcard: {ip}"
+    );
+}
+
+#[test]
+fn golden_bind_ip_rejects_non_ip_host() {
+    use crate::cli::serve::resolve_bind_ip;
+    let err = resolve_bind_ip(Some("localhost")).unwrap_err();
+    assert!(
+        err.contains("--host"),
+        "a non-IP --host must be refused, never silently widened to 0.0.0.0: {err}"
+    );
+    assert!(resolve_bind_ip(Some("999.1.1.1")).is_err());
+    assert!(resolve_bind_ip(Some("")).is_err());
+}
+
+#[test]
+fn golden_bind_ip_accepts_ipv6_and_brackets_it_in_urls() {
+    use crate::cli::serve::{format_host, resolve_bind_ip};
+    let ip = resolve_bind_ip(Some("::1")).expect("IPv6 loopback must resolve");
+    assert!(ip.is_loopback(), "::1 is loopback: {ip}");
+    assert_eq!(
+        format_host(ip),
+        "[::1]",
+        "IPv6 literals need brackets or the port separator is ambiguous"
+    );
+    assert_eq!(
+        format_host(resolve_bind_ip(Some("192.168.1.42")).unwrap()),
+        "192.168.1.42"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// URL ↔ `public/` path — one definition, shared by every pass that needs it
+// ---------------------------------------------------------------------------
+
+#[test]
+fn golden_asset_url_round_trips_public_paths() {
+    use crate::core::asset_url::{public_rel_from_url, url_from_public_rel};
+    assert_eq!(
+        public_rel_from_url("/assets/photos/hero.png"),
+        Some("photos/hero.png")
+    );
+    assert_eq!(public_rel_from_url("/assets/logo.svg"), Some("logo.svg"));
+    // A query string names the same file (`theme.css?v=abc`).
+    assert_eq!(
+        public_rel_from_url("/assets/theme.css?v=9f2c"),
+        Some("theme.css")
+    );
+    assert_eq!(
+        url_from_public_rel("photos/hero.png"),
+        "/assets/photos/hero.png"
+    );
+}
+
+#[test]
+fn golden_asset_url_rejects_non_public_urls() {
+    use crate::core::asset_url::public_rel_from_url;
+    // The un-prefixed form: the file exists in `public/` but nothing is served
+    // at the site root, so this is not a public-asset URL.
+    assert_eq!(public_rel_from_url("/photos/hero.png"), None);
+    assert_eq!(
+        public_rel_from_url("https://cdn.example/assets/x.png"),
+        None
+    );
+    assert_eq!(public_rel_from_url("data:image/png;base64,AAAA"), None);
+    assert_eq!(public_rel_from_url("/assets/"), None);
+}
+
+#[test]
+fn golden_asset_url_rejects_traversal() {
+    use crate::core::asset_url::public_rel_from_url;
+    // These feed `Path::join`, so a parent segment must never survive.
+    assert_eq!(public_rel_from_url("/assets/../../etc/passwd"), None);
+    assert_eq!(public_rel_from_url("/assets/photos/../../../etc"), None);
+    assert_eq!(public_rel_from_url("/assets/./hero.png"), None);
+}
+
+#[test]
+fn golden_asset_url_names_the_working_form() {
+    use crate::core::asset_url::{looks_like_unprefixed_public_url, url_from_public_rel};
+    let rel = looks_like_unprefixed_public_url("/photos/hero.png").expect("legacy shape");
+    assert_eq!(
+        url_from_public_rel(rel),
+        "/assets/photos/hero.png",
+        "the warning must be able to quote the URL that works"
+    );
+    // Already correct, or not a local path at all: nothing to suggest.
+    assert_eq!(looks_like_unprefixed_public_url("/assets/hero.png"), None);
+    assert_eq!(looks_like_unprefixed_public_url("https://x/hero.png"), None);
+    assert_eq!(looks_like_unprefixed_public_url("/../etc/passwd"), None);
+}
+
+// ---------------------------------------------------------------------------
+// `@for` loop-scoped expressions — the compiler and `resolveScoped` must
+// accept exactly the same language
+// ---------------------------------------------------------------------------
+
+#[test]
+fn golden_loop_scope_accepts_only_property_paths() {
+    use crate::codegen::html::is_property_path_on;
+    // What `resolveScoped` can walk.
+    assert!(is_property_path_on("post", "post"));
+    assert!(is_property_path_on("post.title", "post"));
+    assert!(is_property_path_on("post.author.name", "post"));
+    assert!(is_property_path_on("post.tags.length", "post"));
+    // What it cannot: it splits on `.` and looks up each segment as a key, so
+    // anything else becomes a property named after the whole expression.
+    assert!(!is_property_path_on("post.likes + 1", "post"));
+    assert!(!is_property_path_on("post.tags[0]", "post"));
+    assert!(!is_property_path_on("post.title()", "post"));
+    assert!(!is_property_path_on("post.", "post"));
+    assert!(!is_property_path_on("post..title", "post"));
+    // A different name that merely starts with the same letters.
+    assert!(!is_property_path_on("postCount", "post"));
+    assert!(!is_property_path_on("posts.length", "post"));
+}
+
+#[test]
+fn golden_loop_scope_spots_a_loop_var_in_any_expression() {
+    use crate::codegen::html::mentions_identifier;
+    assert!(mentions_identifier("post.likes + 1", "post"));
+    assert!(mentions_identifier("a + post", "post"));
+    assert!(mentions_identifier("fn(post)", "post"));
+    assert!(mentions_identifier("post", "post"));
+    // Not a mention: part of a longer identifier.
+    assert!(!mentions_identifier("postCount + 1", "post"));
+    assert!(!mentions_identifier("myPost.title", "post"));
+    assert!(!mentions_identifier("", "post"));
+}
+
+#[test]
+fn golden_loop_scoped_paths_emit_raw_and_stay_out_of_the_expr_map() {
+    // Regression (ch. 10): a computed expression over a loop variable used to
+    // pass the prefix test, be emitted raw, and render blank — with no error
+    // anywhere. It must not reach the global `_e` map either: a closure over
+    // `post` throws, and an uncaught throw in the binder's `forEach` would take
+    // the rest of the page's bindings with it.
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" {
+    @for post, i in posts {
+        a href={post.url} { h3 "{post.title}" }
+        span "{post.author.name}"
+        em "{i}"
+        p "{post.likes + 1}"
+    }
+}
+"#;
+    let html = compile_to_html(src);
+    for expr in [
+        "post.title",
+        "post.author.name",
+        "i",
+        // emitted raw as well, so the runtime leaves the element alone instead
+        // of writing an empty string over it
+        "post.likes + 1",
+    ] {
+        assert!(
+            html.contains(&format!("data-webcore-interpolation=\"{expr}\"")),
+            "`{expr}` should be emitted raw for fillItem:\n{html}"
+        );
+    }
+    assert!(
+        html.contains("data-webcore-fattr-href=\"post.url\""),
+        "per-item attribute missing:\n{html}"
+    );
+    let js = compile_to_js(src);
+    assert!(
+        js.contains("_e={}") || !js.contains("post"),
+        "no loop expression may be compiled into the global map:\n{js}"
+    );
+}
+
+#[test]
+fn golden_runtime_resolver_refuses_what_it_cannot_walk() {
+    // The runtime half of the same rule: `resolveScoped` must test each path
+    // segment before walking, and return the not-applicable sentinel otherwise,
+    // rather than looking up a property literally named `likes + 1`.
+    let src = r#"
+layout MainLayout { main { slot content } }
+page "home" { @for post in posts { p "{post.title}" } }
+"#;
+    let js = compile_to_js(src);
+    assert!(
+        js.contains("SEG=/^[A-Za-z0-9_$]+$/"),
+        "the path-segment guard is missing from fillItem:\n{js}"
+    );
+    assert!(
+        js.contains("p.every(k=>SEG.test(k))"),
+        "resolveScoped must validate every segment before walking:\n{js}"
+    );
 }

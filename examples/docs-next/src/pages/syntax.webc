@@ -1,0 +1,114 @@
+page "docs/syntax" {
+    h1 { "Syntax reference" }
+    p class="lead" {
+        "A condensed reference of the "
+        code { ".webc" }
+        " language. For the narrative version, start with "
+        link to="/docs/components" { "Components & state" }
+        " and "
+        link to="/docs/templating" { "Templating & directives" }
+        "."
+    }
+
+    h2 { "Top-level declarations" }
+    ul {
+        li { code { "app Name { }" } " — routes, layout and document head." }
+        li { code { "layout Name { }" } " — a shared shell with " code { "slot" } " placeholders." }
+        li { code { "page \"name\" { }" } " — one route (the name is a quoted string)." }
+        li { code { "component Name { }" } " — a reusable, self-contained unit." }
+        li { code { "store { }" } " — global reactive state." }
+        li { code { "import Name from \"path\"" } " — a component or a data file." }
+    }
+    div class="callout note" {
+        span class="ico" { "▸" }
+        div { p {
+            code { "app" } ", " code { "layout" } " and " code { "component" } " take a bare identifier; " code { "page" } " takes a quoted string."
+        } }
+    }
+
+    h2 { "Component blocks" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"component Example {
+    props    { name: String = \"world\" }   // type optional, default optional
+    state    { count: Number = 0 }         // type required
+    computed { doubled = count * 2 }
+    http     { get: \"/api/x\"  into: data }
+    on:mount   { /* JS, runs once */ }
+    on:destroy { /* JS, cleanup   */ }
+    view     { /* elements */ }
+    style    { /* scoped CSS */ }
+}"
+        } }
+    }
+    p { "State types: " code { "Number" } ", " code { "String" } ", " code { "Boolean" } ", " code { "List" } "." }
+
+    h2 { "Control flow" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"@if cond { … } @else if other { … } @else { … }
+
+@for item, i key=item.id in list { … }
+
+@switch value {
+    @case \"a\" { … }
+    @default   { … }
+}
+
+@loading { … }   // while an http block is in flight
+@catch   { … }   // when it errored
+@error \"field\" { … }   // a validation message slot
+@defer   { … }   // render after DOMContentLoaded"
+        } }
+    }
+
+    h2 { "Attributes & directives" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"name=\"literal\"              // string
+count=\{expr}                // expression
+disabled                    // boolean attribute
+\{value}                     // shorthand: value=\{value}
+...props                    // spread an object
+
+on:click=\{count += 1}       // event (modifiers: |stop |prevent |once |self |debounce)
+bind:value=\{text}           // two-way binding
+class:active=\{isOn}         // conditional class
+style:color=\{c}             // reactive inline style
+ref:box=true                // expose refs['box']
+validate:required=\"msg\"     // form validation"
+        } }
+    }
+
+    h2 { "Text & interpolation" }
+    div class="code" data-lang="webc" {
+        div class="code-head" { span class="lang" { "webc" } button class="copy-btn" { "Copy" } }
+        pre { code {
+"p { \"Hello, \{name}!\" }
+p { \"Total: \{a + b}\" }
+p { \"\{t(\"greeting\", name)}\" }"
+        } }
+    }
+    p {
+        "A "
+        code { "\{" }
+        " opens an interpolation only when immediately followed by a non-space character and closed by "
+        code { "}" }
+        " on the same line — otherwise it is a literal brace."
+    }
+
+    h2 { "Other elements" }
+    ul {
+        li { code { "<>…</>" } " — a fragment (no wrapper node)." }
+        li { code { "slot name" } " / " code { "slot name { }" } " — a placeholder, or provided content." }
+        li { code { "markdown \"file.md\"" } " — inline a Markdown file, rendered at build time." }
+    }
+
+    nav class="pager" {
+        link to="/docs/forms" class="prev" { span class="dir" { "Previous" } span class="ttl" { "← Forms & validation" } }
+        link to="/docs/cli" class="next" { span class="dir" { "Next" } span class="ttl" { "CLI →" } }
+    }
+}

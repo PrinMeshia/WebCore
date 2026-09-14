@@ -10,9 +10,8 @@ use serde::Serialize;
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
-    /// Reserved for non-fatal check diagnostics (e.g. unknown props),
-    /// not emitted by `webc check` yet.
-    #[allow(dead_code)]
+    /// Non-fatal check diagnostic (accessibility lints, i18n parity) — only
+    /// fails `webc check` under `--strict`.
     Warning,
 }
 
@@ -39,6 +38,19 @@ impl Diagnostic {
     pub fn project_error(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
+            code,
+            message: message.into(),
+            file: None,
+            line: None,
+            col: None,
+        }
+    }
+
+    /// Project-level warning without a source position (only fails `webc check`
+    /// under `--strict`).
+    pub fn project_warning(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
             code,
             message: message.into(),
             file: None,

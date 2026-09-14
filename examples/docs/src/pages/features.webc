@@ -3,7 +3,88 @@ page "features" {
         span class="page-header-badge" { "▸ WebCore 4.0" }
         h1 { "Features" }
         p class="page-sub" {
-            "Islands · SSG i18n · a11y lints · error codes · CSS source maps · scoped state/CSS · Store · Validation · SSG · WASM · Tree-shaking · CSP · Critical CSS · HMR"
+            "4.1 built-ins · v3.1 · v3.0 · Store · Validation · SSG · i18n · WASM · Tree-shaking · CSP · Critical CSS · HMR"
+        }
+    }
+
+    section class="doc-section doc-section-highlight" {
+        h2 {
+            "4.1 — Built-in functions (math · str · fmt · arr) "
+            span class="version-tag version-tag-new" { "new" }
+        }
+        p {
+            "A namespaced standard library usable anywhere an expression is "
+            "accepted — interpolations, dynamic attributes, event handlers. "
+            "Three guarantees set them apart from a raw JS call:"
+        }
+        div class="callout-tip" {
+            strong { "CSP-safe · tree-shaken · SSG-foldable — " }
+            "each function compiles to a tiny runtime helper (no "
+            code { "eval" }
+            "), only the helpers actually used are emitted, and a deterministic "
+            "call with static arguments (e.g. "
+            code { "math.round(2.4)" }
+            ", "
+            code { "str.slugify(\"Hello, World!\")" }
+            ") is pre-computed at build time and written straight into the HTML."
+        }
+        pre class="code-block" {
+"// math.* and str.* fold at build time when args are static
+p \"Score: \{math.clamp(score, 0, 100)}\"
+p \"Slug:  \{str.slugify(title)}\"
+
+// fmt.* is locale-aware (Intl) → runtime-only
+p \"Price: \{fmt.currency(total, \"EUR\")}\"
+p \"Date:  \{fmt.date(publishedAt)}\"
+
+// arr.* helpers for List state
+p \"Total: \{arr.sum(prices)}\"
+p \"Tags:  \{arr.join(arr.unique(tags), \", \")}\""
+        }
+        div class="table-wrap" {
+            table {
+                thead { tr {
+                    th { "Namespace" }
+                    th { "Functions" }
+                    th { "SSG fold" }
+                } }
+                tbody {
+                    tr {
+                        td { code { "math." } }
+                        td { "round · floor · ceil · clamp · pow · sqrt · sign · hypot" }
+                        td { "yes" }
+                    }
+                    tr {
+                        td { code { "str." } }
+                        td { "upper · lower · capitalize · trim · slugify · truncate · repeat" }
+                        td { "yes" }
+                    }
+                    tr {
+                        td { code { "fmt." } }
+                        td { "number · currency · percent · date" }
+                        td { "no (locale)" }
+                    }
+                    tr {
+                        td { code { "arr." } }
+                        td { "sum · first · last · unique · sort · reverse · join" }
+                        td { "no (runtime)" }
+                    }
+                }
+            }
+        }
+        div class="callout" {
+            "The prefixes "
+            code { "math" }
+            " / "
+            code { "str" }
+            " / "
+            code { "fmt" }
+            " / "
+            code { "arr" }
+            " are reserved. A single registry ("
+            code { "core/builtins.rs" }
+            ") feeds both the expression compiler and the SSG evaluator, so a "
+            "helper stays in sync between its runtime JS and its build-time fold."
         }
     }
 

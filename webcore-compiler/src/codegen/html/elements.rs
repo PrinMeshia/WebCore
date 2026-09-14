@@ -54,6 +54,30 @@ pub(super) fn generate_element(
             ..
         } => generate_component_element(name, attributes, content, ctx, scope_id),
         Element::Interpolation(expr, span) => {
+            // Build variables (`{$build.jsKb}`, …): fully static, resolved by a
+            // post-build pass once output sizes are known. Emit a plain-text
+            // placeholder — no runtime span/closure.
+            if let Some(field) = expr.trim().strip_prefix("$build.") {
+                return Ok((super::build_var_placeholder(field), Vec::new()));
+            }
+            // An expression that reads a loop variable stays out of the global
+            // `_e` map either way: compiled there, it would throw at runtime, and
+            // an uncaught throw inside the binder's `forEach` would take the rest
+            // of the page's bindings down with it. So it is emitted raw and the
+            // author is told at build time instead.
+            if ctx.emits_per_item(expr) {
+                if let Some(var) = ctx.unresolvable_loop_var(expr) {
+                    super::warn_unresolvable_loop_expr(expr.trim(), var, "interpolation");
+                }
+                return Ok((
+                    format!(
+                        "<span {}=\"{}\"></span>",
+                        attr_names::INTERPOLATION,
+                        html_escape(expr.trim())
+                    ),
+                    Vec::new(),
+                ));
+            }
             // SSG: pre-render the initial value so the first paint shows real
             // content; the runtime overwrites it reactively after load.
             let initial = ctx
@@ -115,6 +139,21 @@ pub(super) fn generate_element(
         ),
         Element::Fragment { content, .. } => generate_elements(content, ctx, scope_id),
         Element::Defer { content, .. } => render_defer_element(content, ctx, scope_id),
+        Element::Markdown(path, _span) => {
+            // Read the .md relative to the project root, render to HTML at build
+            // time, and inline it (markdown output is trusted HTML).
+            let base = ctx
+                .project_root
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let full = base.join(path);
+            let source = std::fs::read_to_string(&full).map_err(|e| {
+                CompileError::Custom(format!(
+                    "markdown \"{path}\": cannot read {}: {e}",
+                    full.display()
+                ))
+            })?;
+            Ok((crate::core::markdown::to_html(&source), Vec::new()))
+        }
     }
 }
 
@@ -139,9 +178,9 @@ fn render_for_element(
     let mut open = format!(
         "<template {}=\"{}\" {}=\"{}\"",
         attr_names::FOR,
-        item,
+        html_escape(item),
         attr_names::FOR_IN,
-        iterable
+        html_escape(iterable)
     );
     if is_range {
         write!(
@@ -164,13 +203,26 @@ fn render_for_element(
         write!(open, " {}=\"{}\"", attr_names::SCOPE, sid).expect("write! to String is infallible");
     }
     open.push('>');
-    let (content_html, handlers) = generate_elements(content, ctx, scope_id)?;
+    // Track the loop variables while rendering the body so interpolations and
+    // attributes that read them emit raw, per-item expressions (resolved by
+    // `fillItem`) instead of global closure IDs (which throw in global scope).
+    let mut pushed = 1;
+    ctx.loop_vars.push(item.to_string());
+    if let Some(idx) = index {
+        ctx.loop_vars.push(idx.to_string());
+        pushed += 1;
+    }
+    let content_result = generate_elements(content, ctx, scope_id);
+    for _ in 0..pushed {
+        ctx.loop_vars.pop();
+    }
+    let (content_html, handlers) = content_result?;
     let result = format!(
         "{}\n{}</template>\n<div {}=\"{}\"></div>",
         open,
         content_html,
         attr_names::FOR_CONTAINER,
-        iterable
+        html_escape(iterable)
     );
     Ok((result, handlers))
 }
